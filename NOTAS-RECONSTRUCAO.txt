@@ -1,3 +1,28 @@
+ULTRON Desktop 1.9.5 — repositório próprio, atualização confiável e mock fora do app
+
+MUDANÇA DE REPOSITÓRIO
+- O projeto agora vive em viniciusnpaula-bit/U.L.T.R.O.N.-Desktop (o repositório
+  Projeto-U.L.T.R.O.N. fica só com o app Android antigo).
+- atualizacao.py aponta para o repositório novo por padrão; ULTRON_UPDATE_REPO
+  ainda permite sobrescrever.
+
+ATUALIZAÇÃO MAIS ROBUSTA
+- Fallback: se /releases/latest responder 403/404 (repositório privado), o app
+  lista /releases e usa o estável mais recente.
+- Estado em cache na memória: o painel não relê o disco a cada consulta.
+- Repositório tornado público: a API pública do GitHub não mostra releases de
+  repositório privado sem token.
+
+INTERFACE
+- preview-mock.js só é carregado quando NÃO existe a ponte do Electron (prévia no
+  navegador). No app instalado, o mock não roda.
+- Versão visível em toda a interface: 1.9.5.
+
+PUBLICAÇÃO
+- tools/publicar.py: build -> commit -> push na main -> Release com ZIP e
+  SHA256SUMS.txt. Usa o gh de "C:\Program Files\GitHub CLI" mesmo fora do PATH.
+- O Release é o que alimenta o botão "verificar atualização" do app.
+
 ULTRON Desktop 1.9.4 — atualização pelo GitHub e zoom travado
 
 ATUALIZAÇÃO

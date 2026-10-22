@@ -6,7 +6,7 @@
 <link rel="icon" type="image/png" href="icons/ULTRON-Logo.png"><link rel="stylesheet" href="style.css">
 <script src="zoom-lock.js"></script>
 <meta http-equiv="Content-Security-Policy" content="default-src 'self'; script-src 'self'; style-src 'self' 'unsafe-inline'; img-src 'self' data:; connect-src 'none'; object-src 'none'; base-uri 'none'; form-action 'none'">
-<meta name="ultron-version" content="1.9.4">
+<meta name="ultron-version" content="1.9.5">
 </head>
 <body>
 <canvas id="field" aria-hidden="true"></canvas>
@@ -177,7 +177,7 @@
       <button class="solid" id="updateApply" hidden>Aplicar e reiniciar</button>
       <button class="ghost" id="updateRollback" hidden title="Voltar para a versão anterior">desfazer</button>
     </div>
-    <p class="update-line" id="updateLine" role="status" aria-live="polite">versão <b id="updateVersion">1.9.4</b> · <span id="updateState">não verificado</span></p>
+    <p class="update-line" id="updateLine" role="status" aria-live="polite">versão <b id="updateVersion">1.9.5</b> · <span id="updateState">não verificado</span></p>
     <p class="update-notes" id="updateNotes" hidden></p>
     <span class="update-note">Fechar a janela encerra a API e libera o microfone.</span>
   </footer>
@@ -195,6 +195,15 @@
 </div>
 
 <div class="toast" id="toast" role="status" aria-live="polite"></div>
-<script type="module" src="preview-mock.js"></script>
+<!-- Sem ponte do Electron (aberto direto no navegador), entra um mock só para prévia.
+     Com a ponte real do preload, este script não faz nada. -->
+<script type="module">
+  if (!window.ultron) {
+    const script = document.createElement('script');
+    script.type = 'module';
+    script.src = 'preview-mock.js';
+    document.head.append(script);
+  }
+</script>
 <script type="module" src="app.js"></script>
 </body></html>

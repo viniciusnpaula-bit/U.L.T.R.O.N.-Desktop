@@ -100,7 +100,7 @@ def create_server(runtime, token: str, host: str = "127.0.0.1", port: int = PREF
             path = self._path()
             try:
                 if path == _PREFIX + "health":
-                    self._send(200, {"ok": True, "version": "1.9.4"})
+                    self._send(200, {"ok": True, "version": "1.9.5"})
                 elif path == _PREFIX + "status":
                     self._send(200, runtime.get_snapshot())
                 elif path == _PREFIX + "events":
