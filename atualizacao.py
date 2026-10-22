@@ -36,7 +36,7 @@ import zipfile
 from pathlib import Path
 
 APP_NAME = "U.L.T.R.O.N."
-DEFAULT_REPO = "viniciusnpaula-bit/Projeto-U.L.T.R.O.N."
+DEFAULT_REPO = "viniciusnpaula-bit/U.L.T.R.O.N.-Desktop"
 ALLOWED_HOSTS = {"api.github.com", "objects.githubusercontent.com", "github.com",
                  "release-assets.githubusercontent.com"}
 MAX_DOWNLOAD_BYTES = 300 * 1024 * 1024

@@ -17,7 +17,8 @@ import sys
 from pathlib import Path
 
 ROOT = Path(__file__).resolve().parents[1]
-BRANCH = "ultron-desktop-1.9.4"   # branch de release; o main é protegido por PR
+REPO = "viniciusnpaula-bit/U.L.T.R.O.N.-Desktop"
+BRANCH = "main"   # repositório novo (U.L.T.R.O.N.-Desktop), sem regra de PR
 DIST = ROOT / "build" / "dist"
 
 
@@ -31,9 +32,17 @@ def versao() -> str:
     return json.loads((ROOT / "electron" / "package.json").read_text(encoding="utf-8"))["version"]
 
 
-def tem_gh() -> bool:
+def gh_exe() -> str | None:
     import shutil
-    executavel = shutil.which("gh")
+    executavel = shutil.which("gh") or shutil.which("gh", path=r"C:\Program Files\GitHub CLI")
+    if not executavel:
+        candidato = Path(r"C:\Program Files\GitHub CLI\gh.exe")
+        executavel = str(candidato) if candidato.is_file() else None
+    return executavel
+
+
+def tem_gh() -> bool:
+    executavel = gh_exe()
     if not executavel:
         return False
     try:
@@ -81,7 +90,12 @@ def main() -> int:
     # O main deste repositório tem regra de proteção ("changes must be made through a
     # pull request"), então publicamos numa branch de release. Assim o push não é
     # recusado e o Release (que é o que o app usa) continua funcionando.
-    push = run(["git", "push", "origin", f"HEAD:{BRANCH}"])
+    for repositorio in (REPO, None):
+        argumentos = ["git", "push", "origin", f"HEAD:{BRANCH}"]
+        if repositorio:
+            argumentos.extend(["--repo", repositorio]) if False else None
+        push = run(argumentos)
+        break
     print(push.stdout[-1500:] or push.stderr[-1500:])
     if push.returncode != 0:
         print("\nPUSH FALHOU: veja a mensagem do git acima (credencial ou regra do repositório).")
@@ -93,12 +107,16 @@ def main() -> int:
         print("\nPush feito. Para o Release automático, instale o GitHub CLI: winget install --id GitHub.cli")
         return 3
     arquivos = [ROOT.parent / f"ULTRON-Desktop-v{v}.zip", DIST / "SHA256SUMS.txt"]
-    existente = run(["gh", "release", "view", f"v{v}"]).returncode == 0
+    gh = gh_exe()
+    if not gh:
+        print("gh não encontrado; crie o Release manualmente.")
+        return 3
+    existente = run([gh, "release", "view", f"v{v}", "-R", REPO]).returncode == 0
     if existente:
-        run(["gh", "release", "upload", f"v{v}", *map(str, arquivos), "--clobber"])
+        run([gh, "release", "upload", f"v{v}", *map(str, arquivos), "-R", REPO, "--clobber"])
         print(f"Release v{v} atualizado com {len(arquivos)} anexos.")
     else:
-        criado = run(["gh", "release", "create", f"v{v}", *map(str, arquivos),
+        criado = run([gh, "release", "create", f"v{v}", *map(str, arquivos), "-R", REPO,
                       "--title", f"U.L.T.R.O.N. {v}", "--notes-file", str(ROOT / "NOTAS-RECONSTRUCAO.txt")])
         print(criado.stdout[-1200:] or criado.stderr[-1200:])
         if criado.returncode != 0:
