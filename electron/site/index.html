@@ -6,7 +6,7 @@
 <link rel="icon" type="image/png" href="icons/ULTRON-Logo.png"><link rel="stylesheet" href="style.css">
 <script src="zoom-lock.js"></script>
 <meta http-equiv="Content-Security-Policy" content="default-src 'self'; script-src 'self'; style-src 'self' 'unsafe-inline'; img-src 'self' data:; connect-src 'none'; object-src 'none'; base-uri 'none'; form-action 'none'">
-<meta name="ultron-version" content="1.9.5">
+<meta name="ultron-version" content="1.9.6">
 </head>
 <body>
 <canvas id="field" aria-hidden="true"></canvas>
@@ -120,12 +120,12 @@
   </div>
 </div>
 
-<!-- ── gaveta única de ajustes (substitui 7 páginas) ─────────────────── -->
+<!-- ── caixa lateral de sistema (mesma família do bat-papo; recolhe com o painel) ── -->
 <div class="drawer-backdrop" id="drawerBackdrop" hidden></div>
-<section class="drawer" id="drawer" role="dialog" aria-modal="true" aria-labelledby="drawerTitle" hidden>
+<section class="drawer" id="drawer" role="dialog" aria-labelledby="drawerTitle" hidden>
   <header class="drawer-head">
-    <div><span class="eyebrow">ajustes</span><h2 id="drawerTitle">Sistema</h2></div>
-    <button type="button" class="drawer-close" id="closeDrawer" aria-label="Fechar ajustes" title="Fechar (Esc)">
+    <div><span class="eyebrow">sistema</span><h2 id="drawerTitle">Ajustes</h2></div>
+    <button type="button" class="drawer-close" id="closeDrawer" aria-label="Fechar sistema" title="Fechar (Esc)">
       <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M6 6l12 12M18 6L6 18"/></svg>
       <span>fechar</span>
     </button>
@@ -177,7 +177,7 @@
       <button class="solid" id="updateApply" hidden>Aplicar e reiniciar</button>
       <button class="ghost" id="updateRollback" hidden title="Voltar para a versão anterior">desfazer</button>
     </div>
-    <p class="update-line" id="updateLine" role="status" aria-live="polite">versão <b id="updateVersion">1.9.5</b> · <span id="updateState">não verificado</span></p>
+    <p class="update-line" id="updateLine" role="status" aria-live="polite">versão <b id="updateVersion">1.9.6</b> · <span id="updateState">não verificado</span></p>
     <p class="update-notes" id="updateNotes" hidden></p>
     <span class="update-note">Fechar a janela encerra a API e libera o microfone.</span>
   </footer>
@@ -197,13 +197,10 @@
 <div class="toast" id="toast" role="status" aria-live="polite"></div>
 <!-- Sem ponte do Electron (aberto direto no navegador), entra um mock só para prévia.
      Com a ponte real do preload, este script não faz nada. -->
-<script type="module">
-  if (!window.ultron) {
-    const script = document.createElement('script');
-    script.type = 'module';
-    script.src = 'preview-mock.js';
-    document.head.append(script);
-  }
+<script>
+  // Sem a ponte do Electron (prévia no navegador) o mock de prévia entra primeiro.
+  // No app real, window.ultron já existe e o mock nunca é carregado.
+  document.write('<script type="module" src="' + (window.ultron ? 'about:blank' : 'preview-mock.js') + '"><\/script>');
 </script>
 <script type="module" src="app.js"></script>
 </body></html>

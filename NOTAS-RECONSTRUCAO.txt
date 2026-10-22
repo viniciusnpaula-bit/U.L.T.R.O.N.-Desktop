@@ -1,3 +1,25 @@
+ULTRON Desktop 1.9.6 — sistema como barra lateral e inicialização à prova de falha
+
+SISTEMA (AJUSTES) VIROU BARRA LATERAL
+- Deixou de ser uma gaveta de tela cheia: agora é uma barra encostada à direita,
+  com borda arredondada, na mesma família visual do bat-papo (que fica à esquerda).
+- Não cobre mais a câmara por inteiro e mantém a linha de comando livre.
+- Fecha por três caminhos: seta "fechar", tecla Esc (listener em fase de captura,
+  funciona com o foco em select/botão) e clique fora. Ctrl+, alterna.
+
+ROBUSTEZ DA INTERFACE
+- $() devolve um stub inerte quando um id não existe: a interface não morre mais
+  por causa de um elemento ausente (era o que travava Esc/preview).
+- O mock de prévia (preview-mock.js) é injetado de forma síncrona, só quando a
+  ponte do Electron não existe; no app instalado ele nunca roda.
+- z-index por camada: campo de partículas 0, palco 1, clique-fora 20, barra 21,
+  confirmação 40, toast 50.
+
+ESTÉTICA
+- Campo de partículas mais discreto (opacidade 0.42) e vinheta mais suave: o
+  núcleo continua sendo o único foco da tela.
+- Seta/seta de recolher da barra no mesmo idioma do cabeçalho do bat-papo.
+
 ULTRON Desktop 1.9.5 — repositório próprio, atualização confiável e mock fora do app
 
 MUDANÇA DE REPOSITÓRIO

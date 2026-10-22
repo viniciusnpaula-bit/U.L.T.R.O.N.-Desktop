@@ -2,7 +2,15 @@ import { RealTransport } from './src/real.js';
 import { criarOrbe, criarCampo, estadoDoOrbe } from './src/orb.js';
 
 /* Uma tela só. Nada aqui inventa estado: tudo desenhado vem do núcleo. */
-const $ = id => document.getElementById(id);
+// Elemento ausente devolve um stub inerte: a interface nunca morre por causa de um id.
+const VAZIO = { textContent: '', value: '', hidden: true, dataset: {}, style: {}, className: '',
+  classList: { add() {}, remove() {}, toggle() {}, contains: () => false },
+  setAttribute() {}, removeAttribute() {}, getAttribute: () => null, append() {}, appendChild() {},
+  prepend() {}, replaceChildren() {}, addEventListener() {}, removeEventListener() {},
+  focus() {}, blur() {}, click() {}, querySelector: () => null, querySelectorAll: () => [],
+  getBoundingClientRect: () => ({ top: 0, left: 0, right: 0, bottom: 0, width: 0, height: 0 }),
+  children: [], hidden: true, isConnected: false };
+const $ = id => document.getElementById(id) || VAZIO;
 const hudActions = Object.freeze({
   browser: 'Abra o navegador', spotify: 'Abra o Spotify', media: 'Pause ou retome a música',
   volume: 'Aumente o volume do PC', rocket: 'Abra o Rocket League', game: 'Ative o modo jogo',
@@ -583,14 +591,27 @@ async function desfazerAtualizacao() {
   }
 }
 
-/* ── gaveta ──────────────────────────────────────────────────────────────── */
+/* ── barra lateral de sistema ────────────────────────────────────────────── */
+/* Mesma família do bat-papo: entra pela direita, encostada na câmara, sem
+   cobrir o conteúdo. Fecha pela seta "fechar", pelo Esc ou clicando fora. */
+let gavetaAberta = false;
+
+function posicionarBarra() {
+  // a barra nasce abaixo da faixa superior e acompanha a altura real da câmara
+  const topo = document.querySelector('.topline')?.getBoundingClientRect().bottom ?? 74;
+  document.documentElement.style.setProperty('--stage-top', `${Math.round(topo + 8)}px`);
+}
+
 function drawer(open) {
   const painel = $('drawer');
   const fundo = $('drawerBackdrop');
+  gavetaAberta = Boolean(open);
   painel.hidden = !open;
   fundo.hidden = !open;
   painel.setAttribute('aria-hidden', String(!open));
+  $('openSettings').setAttribute('aria-expanded', String(Boolean(open)));
   if (open) {
+    posicionarBarra();
     refreshMicrophones();
     $('closeDrawer')?.focus();
   } else {
@@ -598,8 +619,9 @@ function drawer(open) {
   }
 }
 
-/* Fecha por qualquer caminho: botão, fundo, Esc e canto superior direito. */
-function fecharGaveta() { if (!$('drawer').hidden) drawer(false); }
+function fecharGaveta() {
+  if (gavetaAberta || !$('drawer').hidden) drawer(false);
+}
 
 /* ── ligação dos controles ───────────────────────────────────────────────── */
 applyTheme((() => { try { return localStorage.getItem('ultron-theme') || 'ultron'; } catch { return 'ultron'; } })());
@@ -639,15 +661,9 @@ $('clearHistory').onclick = () => {
   toast('Sessão limpa.');
 };
 $('openSettings').onclick = () => drawer(true);
-$('closeDrawer').addEventListener('click', fecharGaveta);
-$('drawerBackdrop').addEventListener('click', fecharGaveta);
-$('drawerBackdrop').addEventListener('pointerdown', fecharGaveta);
-/* a faixa .drawer::before cobre o canto: clicar nela fecha */
-$('drawer').addEventListener('click', event => {
-  const r = $('drawer').getBoundingClientRect();
-  const pertoDoCanto = event.clientX > r.right - 96 && event.clientY < r.top + 96;
-  if (pertoDoCanto && !event.target.closest('.drawer-close')) fecharGaveta();
-});
+/* fechar: seta, clique fora (o backdrop cobre o resto da tela) e Esc */
+$('closeDrawer').addEventListener('click', event => { event.preventDefault(); fecharGaveta(); });
+$('drawerBackdrop').addEventListener('pointerdown', event => { event.preventDefault(); fecharGaveta(); });
 /* botões com data-fechar (usados em blocos) também fecham */
 document.querySelectorAll('[data-fechar]').forEach(botao => botao.addEventListener('click', fecharGaveta));
 $('toggleHud').onclick = () => window.ultron.toggleHud();
@@ -666,18 +682,22 @@ $('emergencyStopButton').onclick = async () => {
   catch (error) { toast(`A parada de emergência falhou: ${error.message}`); }
 };
 
-/* atalhos: Ctrl+, ajustes · Ctrl+K foca a linha de comando · Esc fecha */
-document.addEventListener('keydown', event => {
-  if (event.ctrlKey && event.key === ',') { event.preventDefault(); drawer($('drawer').hidden); }
-  if (event.ctrlKey && event.key.toLowerCase() === 'k') { event.preventDefault(); $('commandInput').focus(); }
+/* atalhos: Ctrl+, sistema · Ctrl+K foca a linha de comando · Esc fecha */
+function atalhos(event) {
+  if (event.ctrlKey && event.key === ',') { event.preventDefault(); event.stopPropagation(); drawer($('drawer').hidden); return; }
+  if (event.ctrlKey && event.key.toLowerCase() === 'k') { event.preventDefault(); $('commandInput').focus(); return; }
   if (event.key === 'Escape') {
-    if (!$('drawer').hidden) { event.preventDefault(); fecharGaveta(); }
+    if (!$('drawer').hidden) { event.preventDefault(); event.stopPropagation(); fecharGaveta(); }
   }
-});
+}
+/* captura: funciona mesmo quando o foco está num select/botão dentro da barra */
+window.addEventListener('keydown', atalhos, { capture: true });
+document.addEventListener('keydown', atalhos);
 
 /* ── ciclo de vida ───────────────────────────────────────────────────────── */
 updateClock();
 setInterval(updateClock, 1000);
+window.addEventListener('resize', () => { if (gavetaAberta) posicionarBarra(); });
 document.addEventListener('visibilitychange', () => orbLoop(!document.hidden));
 window.addEventListener('beforeunload', () => { orb.parar(); campo.parar(); transport.disconnect(); });
 

@@ -44,17 +44,16 @@ button { cursor: pointer; border: 0; background: none; }
 .sr-only { position: absolute; width: 1px; height: 1px; padding: 0; margin: -1px; overflow: hidden; clip: rect(0 0 0 0); white-space: nowrap; border: 0; }
 
 /* ── fundo vivo: campo de partículas + vinheta ───────────────────────────── */
-#field { position: fixed; inset: 0; width: 100%; height: 100%; opacity: .5; pointer-events: none; }
+#field { position: fixed; inset: 0; z-index: 0; width: 100%; height: 100%; opacity: .42; pointer-events: none; }
 .vignette {
-  position: fixed; inset: 0; pointer-events: none;
+  position: fixed; inset: 0; z-index: 0; pointer-events: none;
   background:
     radial-gradient(60% 45% at 50% 42%, var(--core-wash), transparent 70%),
     radial-gradient(120% 90% at 50% 120%, #000 20%, transparent 60%);
 }
 
 /* ── palco ───────────────────────────────────────────────────────────────── */
-.stage {
-  position: relative; z-index: 1;
+.stage { position: relative; z-index: 1;
   display: grid; grid-template-rows: auto 1fr;
   height: 100vh; padding: 14px clamp(16px, 3vw, 38px) clamp(14px, 2.4vw, 28px);
 }
@@ -304,20 +303,30 @@ button { cursor: pointer; border: 0; background: none; }
 .tape-foot .ghost { margin-left: auto; }
 
 /* ── gaveta de ajustes ───────────────────────────────────────────────────── */
-.drawer-backdrop { position: fixed; inset: 0; z-index: 8; background: rgba(2, 3, 6, .55); backdrop-filter: blur(2px); }
-.drawer {
-  position: fixed; z-index: 9; top: 0; right: 0; bottom: 0; width: min(420px, 92vw);
-  display: grid; grid-template-rows: auto 1fr auto;
-  background: color-mix(in srgb, var(--ink-2) 96%, black);
-  border-left: 1px solid var(--line); box-shadow: -30px 0 60px -40px #000;
-  animation: drawer-in .32s var(--ease) both;
+/* A caixa de sistema é uma BARRA LATERAL: fica na mesma grade do bat-papo,
+   à direita da câmara, sem cobrir nada. Fecha pela seta, pelo Esc ou clicando fora. */
+.drawer-backdrop {
+  position: fixed; inset: 0; z-index: 20; background: transparent;   /* só captura clique fora */
 }
+.drawer {
+  position: fixed; z-index: 21;
+  top: calc(var(--stage-top, 74px)); right: clamp(10px, 1.4vw, 22px); bottom: clamp(10px, 1.6vh, 20px);
+  width: min(330px, 32vw);
+  display: grid; grid-template-rows: auto minmax(0, 1fr) auto;
+  background: color-mix(in srgb, var(--ink-2) 94%, black);
+  border: 1px solid var(--line); border-radius: 16px;
+  box-shadow: 0 30px 70px -50px #000;
+  animation: rail-in .26s var(--ease) both;
+}
+@keyframes rail-in { from { opacity: 0; transform: translateX(14px); } to { opacity: 1; transform: none; } }
+/* seta para recolher, no mesmo idioma do cabeçalho do bat-papo */
+.drawer::after { content: none; }
 @keyframes drawer-in { from { transform: translateX(24px); opacity: 0; } to { transform: none; opacity: 1; } }
 .drawer-head { display: flex; align-items: center; justify-content: space-between; padding: 20px 20px 14px; border-bottom: 1px solid var(--line); }
 .drawer-head h2 { margin: 2px 0 0; font-size: 19px; font-weight: 600; letter-spacing: -.01em; }
 .drawer-close {
   display: inline-flex; align-items: center; gap: 6px;
-  padding: 8px 12px; border-radius: 10px; border: 1px solid var(--line);
+  padding: 6px 10px; border-radius: 9px; border: 1px solid var(--line);
   color: var(--muted); font-size: 10.5px; letter-spacing: .12em; text-transform: uppercase;
   transition: color .18s var(--ease), border-color .18s var(--ease), background .18s var(--ease);
 }
@@ -325,12 +334,11 @@ button { cursor: pointer; border: 0; background: none; }
 .drawer-close:hover, .drawer-close:focus-visible {
   color: var(--text); border-color: var(--core-line); background: var(--core-wash); outline: none;
 }
-.drawer-head { position: sticky; top: 0; z-index: 2; background: inherit; }
-/* área segura de clique: qualquer canto superior direito fecha */
-.drawer::before {
-  content: ""; position: absolute; top: 0; right: 0; width: 96px; height: 96px; cursor: pointer;
-}
-.drawer-body { overflow-y: auto; padding: 6px 20px 20px; }
+.drawer-head { padding: 16px 16px 10px; border-bottom: 1px solid var(--line); }
+.drawer-head h2 { font-size: 17px; }
+.drawer-body { overflow-y: auto; padding: 4px 16px 16px; }
+.drawer-body::-webkit-scrollbar { width: 3px; }
+.drawer-body::-webkit-scrollbar-thumb { background: var(--line); border-radius: 3px; }
 .block { padding: 16px 0; border-bottom: 1px solid color-mix(in srgb, var(--line) 60%, transparent); }
 .block h3 { margin: 0 0 10px; font-size: 11px; letter-spacing: .2em; text-transform: uppercase; color: var(--muted); font-weight: 600; }
 .muted { color: var(--muted); font-size: 12px; margin: 0 0 10px; }
@@ -352,7 +360,7 @@ button { cursor: pointer; border: 0; background: none; }
 }
 .kv { display: flex; justify-content: space-between; padding: 5px 0; font-size: 12px; }
 .kv span { color: var(--muted-2); letter-spacing: .08em; text-transform: uppercase; font-size: 10px; }
-.drawer-foot { padding: 12px 20px; border-top: 1px solid var(--line); display: grid; gap: 6px; }
+.drawer-foot { padding: 12px 16px 14px; border-top: 1px solid var(--line); display: grid; gap: 6px; }
 .update-row { display: flex; gap: 8px; flex-wrap: wrap; }
 .update-line { margin: 0; font-size: 11px; color: var(--muted); letter-spacing: .02em; }
 .update-line b { color: var(--text); font-variant-numeric: tabular-nums; }
@@ -367,7 +375,7 @@ button { cursor: pointer; border: 0; background: none; }
 .update-note { font-size: 10px; color: var(--muted-2); letter-spacing: .04em; }
 
 /* ── confirmação (segurança) ─────────────────────────────────────────────── */
-.modal-backdrop { position: fixed; inset: 0; z-index: 20; display: grid; place-items: center; background: rgba(2, 3, 6, .72); backdrop-filter: blur(6px); }
+.modal-backdrop { position: fixed; inset: 0; z-index: 40; display: grid; place-items: center; background: rgba(2, 3, 6, .72); backdrop-filter: blur(6px); }
 .modal {
   width: min(440px, 90vw); padding: 26px; border-radius: 18px;
   border: 1px solid var(--core-line); background: var(--ink-2);
@@ -385,7 +393,7 @@ button { cursor: pointer; border: 0; background: none; }
 
 /* ── toast ───────────────────────────────────────────────────────────────── */
 .toast {
-  position: fixed; z-index: 30; left: 50%; bottom: 26px; transform: translate(-50%, 14px);
+  position: fixed; z-index: 50; left: 50%; bottom: 26px; transform: translate(-50%, 14px);
   padding: 10px 16px; border-radius: 10px; border: 1px solid var(--line);
   background: var(--ink-3); font-size: 12px; color: var(--text);
   opacity: 0; pointer-events: none; transition: opacity .25s var(--ease), transform .25s var(--ease);
