@@ -33,6 +33,7 @@ def zip_valido(versao="9.9.9"):
         archive.writestr("dados/ultron.db", b"nao pode entrar")
         archive.writestr(".env", "GEMINI_API_KEY=nao pode entrar")
         archive.writestr("notas.exe", b"MZ")
+        archive.writestr("ULTRON.exe", b"MZnovo")
     return buffer.getvalue()
 
 
@@ -102,15 +103,34 @@ class UpdateManagerTests(unittest.TestCase):
         self.assertEqual(job["status"], "erro")
         self.assertIn("SHA-256", job["message"])
 
-    def test_apply_stages_only_safe_code_and_never_user_data(self):
+    def test_apply_applies_what_it_can_and_never_touches_user_data(self):
         job = self._aplicar(zip_valido())
         self.assertEqual(job["status"], "pronto", job.get("message"))
-        staging = Path(job["script"]).parent  # script fica na pasta de updates
-        self.assertTrue(staging.is_dir())
-        # o .bat gerado nunca copia por cima de dados do usuário
-        script = Path(job["script"]).read_text(encoding="utf-8")
-        self.assertIn("/XD venv node_modules dados logs .git build", script)
-        self.assertIn("tasklist", script)
+        # código novo já está no disco: sem reinício, a próxima execução usa a versão nova
+        self.assertTrue((self.root / "cerebro.py").is_file())
+        self.assertEqual((self.root / "cerebro.py").read_text(encoding="utf-8"), "print('oi')")
+        # dados do usuário nunca são copiados do pacote
+        self.assertFalse((self.root / "dados" / "ultron.db").exists())
+        self.assertFalse((self.root / ".env").exists())
+        self.assertIn("applied", job)
+        if job.get("needs_restart"):
+            # quando sobra arquivo em uso, existe o script que termina o serviço
+            script = Path(job["script"]).read_text(encoding="utf-8")
+            self.assertIn("/XD venv node_modules dados logs .git build", script)
+            self.assertIn("tasklist", script)
+            self.assertIn("start", script)
+
+    def test_restart_is_only_requested_when_a_file_is_locked(self):
+        # ULTRON.exe está em uso (simulado com um erro de permissão): precisa reiniciar
+        def copia_bloqueada(origem, destino, *_a, **_k):
+            if str(destino).endswith("ULTRON.exe"):
+                raise PermissionError("em uso")
+            return None
+        with patch.object(atualizacao.shutil, "copy2", side_effect=copia_bloqueada):
+            job = self._aplicar(zip_valido())
+        self.assertEqual(job["status"], "pronto")
+        self.assertTrue(job["needs_restart"])
+        self.assertTrue(job.get("script"))
 
     def test_release_without_checksums_is_refused(self):
         with patch.object(atualizacao, "_request", return_value=release_fake(com_checksums=False)):

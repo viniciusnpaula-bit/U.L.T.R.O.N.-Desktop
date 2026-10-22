@@ -160,6 +160,28 @@ class DesktopRuntime:
             return {"status": "indisponivel", "message": "Módulo de atualização não carregado."}
         return self._updater.apply(restart_after=restart_after)
 
+    def update_and_restart(self) -> dict:
+        """Passo 2 do botão: aplica o que já foi verificado e, se necessário, reinicia.
+
+        Fluxo: se ainda não há pacote em staging, baixa e verifica; aplica o que dá
+        na hora; se sobrar arquivo em uso, dispara o script de troca e encerra o app.
+        """
+        if self._updater is None:
+            return {"status": "indisponivel", "message": "Módulo de atualização não carregado."}
+        job = self._updater._job or {}
+        if job.get("status") not in {"pronto"}:
+            job = self._updater.apply(restart_after=True)
+            return {"status": "baixando", "job": job}
+        if job.get("needs_restart"):
+            disparado = self._updater.launch_apply()
+            if disparado:
+                self.request_shutdown()
+            return {"status": "reiniciando" if disparado else "erro",
+                    "message": "Aplicando e reiniciando…" if disparado else "Não consegui iniciar a troca de arquivos.",
+                    "job": job}
+        return {"status": "aplicado", "message": job.get("message") or "Atualização aplicada.",
+                "job": job}
+
     def launch_update(self) -> bool:
         return bool(self._updater and self._updater.launch_apply())
 

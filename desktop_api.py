@@ -100,7 +100,7 @@ def create_server(runtime, token: str, host: str = "127.0.0.1", port: int = PREF
             path = self._path()
             try:
                 if path == _PREFIX + "health":
-                    self._send(200, {"ok": True, "version": "1.9.6"})
+                    self._send(200, {"ok": True, "version": "1.9.7"})
                 elif path == _PREFIX + "status":
                     self._send(200, runtime.get_snapshot())
                 elif path == _PREFIX + "events":
@@ -185,7 +185,7 @@ def create_server(runtime, token: str, host: str = "127.0.0.1", port: int = PREF
                     if set(body) - {"restart_after"} or ("restart_after" in body and type(body["restart_after"]) is not bool):
                         self._send(400, {"error": "invalid_update_payload"})
                         return
-                    self._send(202, runtime.apply_update(bool(body.get("restart_after", False))))
+                    self._send(202, runtime.update_and_restart())
                 elif path == _PREFIX + "update/launch":
                     if body:
                         self._send(400, {"error": "empty_payload_required"})

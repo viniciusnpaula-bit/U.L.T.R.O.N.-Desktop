@@ -41,6 +41,7 @@ ALLOWED_HOSTS = {"api.github.com", "objects.githubusercontent.com", "github.com"
                  "release-assets.githubusercontent.com"}
 MAX_DOWNLOAD_BYTES = 300 * 1024 * 1024
 PROTECTED = (".env", "dados", "logs", "venv", ".git", ".ultron-state.json")
+PROTECAO_PASTAS = {"venv", "node_modules", "dados", "logs", ".git", "build"}
 # Nunca sobrescreve nada fora destes tipos: assim um ZIP malicioso não troca código
 # arbitrário do sistema — só arquivos do próprio pacote.
 ALLOWED_SUFFIXES = {".py", ".js", ".mjs", ".cjs", ".json", ".html", ".css", ".svg", ".png",
@@ -152,6 +153,8 @@ class UpdateManager:
             "auto_check": state.get("auto_check", True),
             "last_check": last or None,
             "job": self._job,
+            "needs_restart": bool((self._job or {}).get("needs_restart")),
+            "pending_version": state.get("pending_version"),
         }
 
     # ------------------------------------------------------------- consulta
@@ -246,11 +249,17 @@ class UpdateManager:
         return bool(enabled)
 
     # ------------------------------------------------------------- aplicação
-    def apply(self, *, restart_after: bool = False) -> dict:
-        """Baixa, verifica e aplica. Roda em thread; o progresso fica em self._job."""
-        if self._job and self._job.get("status") in {"baixando", "aplicando"}:
+    def apply(self, *, restart_after: bool = True) -> dict:
+        """Passo 2 do botão: baixa, confere o SHA-256, aplica launcher/setup e deixa o
+        resto escrito no disco.
+
+        O que decide reiniciar é `needs_restart`: verdadeiro quando algum arquivo em
+        uso (ULTRON.exe, ULTRON-Setup.exe, .pyc, a própria interface) foi trocado.
+        Roda em thread; o progresso fica em self._job."""
+        if self._job and self._job.get("status") in {"baixando", "aplicando", "pronto"}:
             return self._job
-        self._job = {"status": "baixando", "percent": 0, "message": "Consultando o GitHub…", "started_at": time.time()}
+        self._job = {"status": "baixando", "percent": 0, "message": "Consultando o GitHub…",
+                     "started_at": time.time(), "needs_restart": False}
         thread = threading.Thread(target=self._apply_worker, args=(restart_after,),
                                   name="ultron-update", daemon=True)
         thread.start()
@@ -327,13 +336,27 @@ class UpdateManager:
                 raise UpdateError("O pacote não parece ser do ULTRON (sem electron/package.json).")
 
             backup = self._backup_root() / f"backup-{self.current_version}-{time.strftime('%Y%m%d-%H%M%S')}"
-            script = self._write_apply_script(staging, backup)
+            self._set_job(percent=75, message="Aplicando os arquivos que não estão em uso…")
+            trocados_agora, pendentes = self._apply_now(staging)
             self._save_state(pending_backup=str(backup), pending_version=str(info.get("latest_version")),
-                             applied_manifest=self._manifest(staging))
-            self._set_job(status="pronto", percent=100,
-                          message=f"Versão {info['latest_version']} verificada. Feche o painel para aplicar.",
-                          script=str(script), backup=str(backup), version=str(info.get("latest_version")))
-            self.log(f"Atualização {info['latest_version']} pronta em {staging}; script {script}")
+                             applied_manifest=self._manifest(staging),
+                             pending_version_files=pendentes)
+
+            if pendentes:
+                # ainda há arquivos em uso: a troca final precisa de um processo livre
+                script = self._write_apply_script(staging, backup)
+                self._set_job(status="pronto", percent=100, needs_restart=True,
+                              message=(f"{info['latest_version']} aplicada. "
+                                       f"Reinicie para concluir {len(pendentes)} arquivo(s)."),
+                              script=str(script), backup=str(backup), version=str(info.get("latest_version")),
+                              applied=len(trocados_agora), pending=len(pendentes))
+            else:
+                self._set_job(status="pronto", percent=100, needs_restart=False,
+                              message=f"{info['latest_version']} aplicada. Já está em uso.",
+                              backup=str(backup), version=str(info.get("latest_version")),
+                              applied=len(trocados_agora), pending=0)
+            self.log(f"Atualização {info['latest_version']}: {len(trocados_agora)} arquivo(s) aplicados, "
+                     f"{len(pendentes)} aguardando reinício.")
             if restart_after is not None:
                 self._save_state(restart_after=bool(restart_after))
         except UpdateError as error:
@@ -342,6 +365,35 @@ class UpdateManager:
         except Exception as error:  # noqa: BLE001 - nunca deixa a thread morrer em silêncio
             self._set_job(status="erro", message=f"Falha inesperada na atualização ({type(error).__name__}).")
             self.log(f"Atualização falhou: {type(error).__name__}")
+
+    # ------------------------------------------------------------- aplicação imediata
+    def _apply_now(self, staging: Path) -> tuple[list[str], list[str]]:
+        """Copia da área de preparo para a instalação.
+
+        Arquivos em uso no Windows (o .exe e a interface carregada) dão PermissionError;
+        esses ficam para o script de reinício. Tudo o mais é aplicado na hora — assim
+        uma atualização que só mexe em Python já vale no próximo comando, sem reiniciar.
+        """
+        aplicados, pendentes = [], []
+        backup = self._backup_root() / f"pre-apply-{time.strftime('%Y%m%d-%H%M%S')}"
+        for arquivo in staging.rglob("*"):
+            if not arquivo.is_file():
+                continue
+            relativo = arquivo.relative_to(staging)
+            if relativo.parts and relativo.parts[0] in PROTECAO_PASTAS:
+                continue
+            destino = self.root / relativo
+            destino.parent.mkdir(parents=True, exist_ok=True)
+            try:
+                if destino.is_file():
+                    alvo_backup = backup / relativo
+                    alvo_backup.parent.mkdir(parents=True, exist_ok=True)
+                    shutil.copy2(destino, alvo_backup)
+                shutil.copy2(arquivo, destino)
+                aplicados.append(relativo.as_posix())
+            except (PermissionError, OSError):
+                pendentes.append(relativo.as_posix())
+        return aplicados, pendentes
 
     # ------------------------------------------------------------- apoio
     def _backup_root(self) -> Path:
@@ -378,7 +430,7 @@ echo Copiando a versão nova...
 robocopy "{staging}" "{self.root}" /E /IS /IT /NFL /NDL /NJH /NJS /NP /XD venv node_modules dados logs .git build >nul
 if errorlevel 8 goto falhou
 echo Atualização aplicada.
-if /I "{os.environ.get("ULTRON_UPDATE_REOPEN", "1")}"=="1" start "" "{reabrir}"
+start "" "{reabrir}"
 exit /b 0
 :falhou
 echo A cópia falhou. Restaurando a versão anterior...

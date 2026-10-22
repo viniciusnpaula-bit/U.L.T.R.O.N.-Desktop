@@ -479,12 +479,31 @@ async function refreshStatus(show = false) {
 }
 
 /* ── atualização pelo GitHub ─────────────────────────────────────────────── */
-const updateUi = { job: null, timer: null, version: '1.9.4' };
+/* Fluxo do botão "atualizar ULTRON":
+     1. verificar se há versão nova no GitHub;
+     2. baixar, conferir o SHA-256 e aplicar;
+     3. se sobrar arquivo em uso, pedir o reinício (ou reiniciar na hora, se o
+        usuário confirmar). O progresso aparece na própria barra.               */
+const updateUi = { job: null, timer: null, version: '1.9.7', busy: false };
 
 function updateLinha(texto, classe = '') {
   const alvo = $('updateState');
   alvo.textContent = texto;
   alvo.className = classe;
+}
+
+function progresso(percent) {
+  const caixa = $('updateProgress');
+  const barra = $('updateProgressBar');
+  const valor = Number.isFinite(percent) ? Math.max(0, Math.min(100, percent)) : null;
+  caixa.hidden = valor === null;
+  barra.style.width = `${valor ?? 0}%`;
+}
+
+function botaoAtualizar(estado) {
+  const botao = $('updateAction');
+  botao.disabled = estado === 'ocupado';
+  botao.textContent = estado === 'ocupado' ? 'atualizando…' : 'atualizar ULTRON';
 }
 
 function mostrarVersao(info) {
@@ -494,90 +513,99 @@ function mostrarVersao(info) {
     $('updateVersion').textContent = info.current_version;
   }
   const check = info.last_check;
-  if (check?.available === false || check?.update_available === false) updateLinha('atualizado ✓', 'ok');
-  else if (check?.update_available) updateLinha(`nova versão ${check.latest_version} disponível`, 'warn');
+  if (check?.status === 'erro') updateLinha(check.message || 'não foi possível verificar', 'err');
   else if (check?.status === 'sem_release') updateLinha('sem release no GitHub');
-  else if (check?.status === 'erro') updateLinha(check.message || 'não foi possível verificar', 'err');
-}
-
-async function verificarAtualizacao(silencioso = false) {
-  const botao = $('updateCheck');
-  botao.disabled = true;
-  if (!silencioso) updateLinha('consultando o GitHub…');
-  try {
-    const info = await window.ultron.updateCheck();
-    mostrarVersao({ ...info, last_check: info });
-    if (info.status === 'sem_release') updateLinha('ainda não há release publicado', 'warn');
-    else if (info.status === 'erro') updateLinha(info.message || 'falha ao consultar', 'err');
-    else if (info.update_available) {
-      updateLinha(`versão ${info.latest_version} disponível (você tem ${info.current_version})`, 'warn');
-      $('updateApply').hidden = false;
-      $('updateApply').textContent = `Aplicar ${info.latest_version} e reiniciar`;
-      if (info.notes) {
-        $('updateNotes').hidden = false;
-        $('updateNotes').textContent = info.notes;
-      }
-      if (!silencioso) toast(`Nova versão: ${info.latest_version}`);
-    } else {
-      updateLinha('você já está na versão mais recente ✓', 'ok');
-      $('updateApply').hidden = true;
-    }
-  } catch (error) {
-    updateLinha(`não foi possível verificar (${error.message})`, 'err');
-  } finally {
-    botao.disabled = false;
+  else if (check?.update_available) updateLinha(`versão ${check.latest_version} disponível`, 'warn');
+  else if (check) updateLinha('atualizado ✓', 'ok');
+  if (info.needs_restart) {
+    $('updateRestart').hidden = false;
+    updateLinha('reinicie para concluir', 'warn');
   }
 }
 
-function acompanharAtualizacao() {
+async function acompanharAtualizacao() {
   clearInterval(updateUi.timer);
   updateUi.timer = setInterval(async () => {
     try {
       const info = await window.ultron.updateInfo();
       const job = info?.job;
-      if (!job || job.status === 'idle') return;
+      if (!job) return;
       updateUi.job = job;
-      const pct = Number.isFinite(job.percent) ? ` ${job.percent}%` : '';
+      progresso(job.percent);
       if (job.status === 'baixando' || job.status === 'aplicando') {
-        updateLinha(`${job.message || 'baixando'}${pct}`, 'warn');
-        $('updateApply').disabled = true;
+        updateLinha(job.message || 'baixando…', 'warn');
       } else if (job.status === 'pronto') {
-        updateLinha(job.message || 'pronto para aplicar', 'ok');
-        $('updateApply').hidden = false;
-        $('updateApply').disabled = false;
-        $('updateApply').textContent = 'Fechar e aplicar agora';
-        $('updateRollback').hidden = false;
         clearInterval(updateUi.timer);
+        progresso(100);
+        botaoAtualizar('livre');
+        if (job.needs_restart) {
+          updateLinha(job.message || 'reinicie para concluir', 'warn');
+          $('updateRestart').hidden = false;
+          $('updateRollback').hidden = false;
+          pedirReinicio(job);
+        } else {
+          updateLinha(job.message || 'atualização aplicada ✓', 'ok');
+        }
       } else if (job.status === 'erro') {
+        clearInterval(updateUi.timer);
+        botaoAtualizar('livre');
+        progresso(null);
         updateLinha(job.message || 'falhou', 'err');
-        $('updateApply').disabled = false;
-        clearInterval(updateUi.timer);
       } else if (job.status === 'atualizado') {
-        updateLinha(job.message || 'já está atualizado', 'ok');
-        $('updateApply').hidden = true;
         clearInterval(updateUi.timer);
+        botaoAtualizar('livre');
+        updateLinha(job.message || 'já está atualizado', 'ok');
       }
-    } catch { /* sem resposta do núcleo: o botão continua disponível */ }
-  }, 1200);
+    } catch { /* núcleo ocupado: tenta de novo no próximo tique */ }
+  }, 900);
 }
 
-async function aplicarAtualizacao() {
-  const botao = $('updateApply');
-  botao.disabled = true;
-  // segunda etapa: o pacote já foi verificado e está em staging
-  if (updateUi.job?.status === 'pronto') {
-    updateLinha('aplicando e reiniciando…', 'warn');
-    try { await window.ultron.updateLaunch(); }
-    catch (error) { updateLinha(`falha ao aplicar: ${error.message}`, 'err'); botao.disabled = false; }
-    return;
+/* Passo 3: perguntar antes de reiniciar (com opção de depois). */
+function pedirReinicio(job) {
+  const versao = job?.version ? ` ${job.version}` : '';
+  if (window.confirm(`Atualização${versao} aplicada.\n\nReiniciar o ULTRON agora para concluir?`)) {
+    reiniciarAgora();
+  } else {
+    updateLinha('reinicie quando quiser para concluir', 'warn');
   }
+}
+
+async function reiniciarAgora() {
+  $('updateRestart').disabled = true;
+  updateLinha('aplicando e reiniciando…', 'warn');
+  try { await window.ultron.updateLaunch(); }
+  catch (error) {
+    updateLinha(`não consegui reiniciar: ${error.message}`, 'err');
+    $('updateRestart').disabled = false;
+  }
+}
+
+/* Passo 1 + 2: um clique faz tudo. */
+async function atualizarUltron() {
+  if (updateUi.busy) return;
+  updateUi.busy = true;
+  botaoAtualizar('ocupado');
+  progresso(4);
+  updateLinha('verificando no GitHub…');
   try {
-    updateLinha('baixando e verificando o pacote…', 'warn');
+    const info = await window.ultron.updateCheck();
+    if (info.status === 'erro') { updateLinha(info.message || 'falha ao consultar', 'err'); return; }
+    if (info.status === 'sem_release') { updateLinha('ainda não há release publicado', 'warn'); progresso(null); return; }
+    if (!info.update_available) {
+      progresso(100);
+      updateLinha(`você já está na versão mais recente (${info.current_version}) ✓`, 'ok');
+      return;
+    }
+    updateLinha(`versão ${info.latest_version} encontrada · baixando…`, 'warn');
+    progresso(12);
     await window.ultron.updateApply(true);
     acompanharAtualizacao();
   } catch (error) {
-    updateLinha(`falha ao baixar: ${error.message}`, 'err');
-    botao.disabled = false;
+    updateLinha(`falha na atualização (${error.message})`, 'err');
+    progresso(null);
+  } finally {
+    updateUi.busy = false;
+    if (!updateUi.timer) botaoAtualizar('livre');
   }
 }
 
@@ -586,8 +614,8 @@ async function desfazerAtualizacao() {
     await window.ultron.updateRollback();
     updateLinha('backup restaurado ✓', 'ok');
     toast('Versão anterior restaurada.');
-  } catch (error) {
-    updateLinha(`não há backup para restaurar`, 'err');
+  } catch {
+    updateLinha('não há backup para restaurar', 'err');
   }
 }
 
@@ -643,8 +671,8 @@ $('voiceStart').onclick = toggleMicrophone;
 $('refreshMicrophones').onclick = () => refreshMicrophones();
 $('saveMicrophone').onclick = saveMicrophone;
 $('testConnection').onclick = () => refreshStatus(true);
-$('updateCheck').onclick = () => verificarAtualizacao(false);
-$('updateApply').onclick = aplicarAtualizacao;
+$('updateAction').onclick = atualizarUltron;
+$('updateRestart').onclick = reiniciarAgora;
 $('updateRollback').onclick = desfazerAtualizacao;
 $('scrollLatest').onclick = () => { const lista = $('commsList'); lista.scrollTop = lista.scrollHeight; };
 $('clearHistory').onclick = () => {
@@ -708,8 +736,7 @@ window.addEventListener('beforeunload', () => { orb.parar(); campo.parar(); tran
   carregarConversa();                       // falas que aconteceram antes do painel abrir
   window.ultron?.updateInfo?.().then(info => {
     mostrarVersao(info);
-    // a verificação automática existia no estado salvo: mantém o comportamento
-    if (info?.auto_check && document.visibilityState === 'visible') verificarAtualizacao(true);
+    if (info?.needs_restart) $('updateRestart').hidden = false;
   }).catch(() => {});
   setInterval(carregarConversa, 20000);     // reconcilia se algum evento se perder
   setInterval(() => refreshStatus(), 5000);

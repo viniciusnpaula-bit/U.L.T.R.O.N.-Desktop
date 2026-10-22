@@ -1,3 +1,29 @@
+ULTRON Desktop 1.9.7 — botão "atualizar ULTRON" em três passos
+
+O botão em Ajustes agora faz tudo numa sequência só:
+
+  1. VERIFICAR — consulta o último Release do GitHub e compara com a versão instalada.
+     Se já está atualizado, para aqui: "você já está na versão mais recente ✓".
+  2. ATUALIZAR — baixa o ZIP, confere o SHA-256 publicado, faz backup e aplica o que
+     pode na hora (Python, assets, interface já carregada fica para o fim). A barra
+     de progresso mostra baixando → conferindo → aplicando.
+  3. REINICIAR (só se necessário) — se algum arquivo em uso sobrou (ULTRON.exe,
+     ULTRON-Setup.exe, .pyc), o app pergunta: "Reiniciar o ULTRON agora para
+     concluir?". "Agora" dispara o script de troca e reabre sozinho; "depois"
+     deixa o botão "reiniciar agora" disponível na barra.
+
+Detalhes que evitam susto:
+- needs_restart é verdadeiro apenas quando a cópia falhou por arquivo em uso; uma
+  atualização de Python puro já vale no próximo comando, sem reiniciar.
+- Arquivos de dados nunca são tocados: .env, dados/, logs/, venv/, node_modules.
+- Ao reabrir, se havia atualização pendente de reinício, o botão reaparece.
+- progresso em barra fina (2 px) abaixo dos botões; estados com cor (amarelo =
+  baixando/pronto, verde = aplicado, vermelho = falhou).
+
+Testes: 69 passando, incluindo dois novos — aplicação imediata e "só pede reinício
+quando o arquivo está em uso". Teste de ponta a ponta contra o Release real:
+1.0.0 → 1.9.6 aplicado, 93 arquivos, .env/dados/venv preservados.
+
 ULTRON Desktop 1.9.6 — sistema como barra lateral e inicialização à prova de falha
 
 SISTEMA (AJUSTES) VIROU BARRA LATERAL

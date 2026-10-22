@@ -1,6 +1,8 @@
 /* Pré-visualização local da interface: mock do núcleo para ver a tela no navegador.
    Não faz parte do app — o Electron injeta a ponte real (preload.js). */
 const verbose = new URLSearchParams(location.search).has('live');
+let estadoVersao = '1.9.6';
+let jobUpdate = null;
 const agora = () => Date.now() / 1000;
 const status = () => ({
   core_running: true, api_running: true,
