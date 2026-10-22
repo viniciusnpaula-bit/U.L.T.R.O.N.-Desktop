@@ -91,6 +91,12 @@ button { cursor: pointer; border: 0; background: none; }
 }
 .ghost:hover, .ghost:focus-visible { border-color: var(--core-line); color: var(--text); background: var(--core-wash); outline: none; }
 .ghost.icon { display: grid; place-items: center; width: 34px; height: 34px; padding: 0; border-radius: 10px; }
+.ghost.icon svg rect { fill: none; }
+.ghost.icon svg { fill: none; stroke: currentColor; stroke-width: 1.6; stroke-linecap: round; stroke-linejoin: round; }
+.rail-toggle[aria-pressed="true"] { color: var(--core); border-color: var(--core-line); background: var(--core-wash); }
+.rail-mini { display: inline-grid; place-items: center; padding: 4px 6px; }
+.rail-mini svg { width: 12px; height: 12px; fill: none; stroke: currentColor; stroke-width: 1.8; stroke-linecap: round; stroke-linejoin: round; }
+.drawer-close svg { stroke-linejoin: round; }
 .ghost.icon svg { width: 17px; height: 17px; fill: none; stroke: currentColor; stroke-width: 1.6; stroke-linecap: round; }
 .ghost.tiny { padding: 3px 7px; font-size: 9.5px; letter-spacing: .1em; border-color: transparent; }
 .ghost.tiny:hover { border-color: var(--line); }
@@ -107,22 +113,35 @@ button { cursor: pointer; border: 0; background: none; }
 .danger:hover { background: color-mix(in srgb, var(--err) 12%, transparent); }
 
 /* ── câmara + fita ───────────────────────────────────────────────────────── */
-/* três colunas: bat-papo (esquerda) · câmara (centro) · eventos (direita).
-   A gaveta de ajustes abre à direita, então o bat-papo fica no canto oposto. */
+/* três colunas: bate-papo (esquerda) · câmara (centro) · eventos (direita).
+   A barra de sistema abre à direita (por cima dos eventos), então o bate-papo
+   fica no canto oposto. Colunas recolhíveis: --chat-w e --tape-w. */
+:root { --chat-w: clamp(250px, 320px, 320px); --tape-w: clamp(210px, 280px, 280px); }
+:root[data-chat="off"] { --chat-w: 0px; }
+:root[data-tape="off"] { --tape-w: 0px; }
+
 .chamber-row {
   display: grid;
-  grid-template-columns: minmax(250px, 320px) minmax(0, 1fr) minmax(210px, 280px);
+  grid-template-columns: var(--chat-w) minmax(0, 1fr) var(--tape-w);
   gap: clamp(14px, 1.8vw, 26px); min-height: 0; padding-top: clamp(8px, 2vh, 22px);
+  transition: grid-template-columns .28s var(--ease);
 }
 
 /* eventos: coluna da direita */
-.side { display: grid; grid-template-rows: minmax(0, 1fr); min-height: 0;
-  border-left: 1px solid var(--line); padding-left: clamp(14px, 1.6vw, 22px); }
+.side { display: grid; grid-template-rows: minmax(0, 1fr); min-height: 0; overflow: hidden;
+  border-left: 1px solid var(--line); padding-left: clamp(14px, 1.6vw, 22px);
+  transition: opacity .22s var(--ease); }
+:root[data-tape="off"] .side { opacity: 0; pointer-events: none; border-left-color: transparent; padding-left: 0; }
 
-/* ── bat-papo de voz (coluna esquerda) ───────────────────────────────────── */
+/* ── bate-papo (coluna esquerda, recolhível) ──────────────────────────────── */
 .comms {
   display: grid; grid-template-rows: auto minmax(0, 1fr) auto; min-height: 0;
   border-right: 1px solid var(--line); padding-right: clamp(14px, 1.6vw, 22px);
+  overflow: hidden;
+  transition: opacity .22s var(--ease);
+}
+:root[data-chat="off"] .comms {
+  opacity: 0; pointer-events: none; border-right-color: transparent; padding-right: 0;
 }
 .comms-head { display: flex; align-items: center; gap: 8px; padding-bottom: 8px; }
 .comms-live {
@@ -308,6 +327,7 @@ button { cursor: pointer; border: 0; background: none; }
 .drawer-backdrop {
   position: fixed; inset: 0; z-index: 20; background: transparent;   /* só captura clique fora */
 }
+.drawer[hidden] { display: none !important; }
 .drawer {
   position: fixed; z-index: 21;
   top: calc(var(--stage-top, 74px)); right: clamp(10px, 1.4vw, 22px); bottom: clamp(10px, 1.6vh, 20px);
@@ -407,8 +427,9 @@ button { cursor: pointer; border: 0; background: none; }
 
 /* ── responsivo (janela estreita: fita vira faixa embaixo) ───────────────── */
 @media (max-width: 1320px) {
-  .chamber-row { grid-template-columns: minmax(230px, 290px) minmax(0, 1fr); }
-  .side { display: none; }              /* eventos voltam pelo botão "eventos" */
+  :root { --chat-w: clamp(230px, 280px, 280px); --tape-w: 0px; }
+  .side { display: none; }              /* eventos recolhidos; ligue pelo botão do topo */
+  :root[data-tape="on"] .side { display: grid; }
 }
 @media (max-width: 1060px) {
   /* câmara em cima; embaixo, bat-papo e eventos lado a lado */

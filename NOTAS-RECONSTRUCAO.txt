@@ -1,3 +1,21 @@
+ULTRON Desktop 1.9.8 — recolher as barras (bate-papo, eventos e sistema)
+
+As três colunas viram barras recolhíveis, cada uma com o seu controle:
+
+  [conversa]  [eventos]  [sistema ⚙]     <- botões no topo, com estado aceso
+   Ctrl+1      Ctrl+2     Ctrl+,
+
+- Bate-papo (esquerda): botão no topo e seta "‹" no cabeçalho da própria barra.
+- Eventos (direita): botão no topo (o antigo "assumir que some em telas médias").
+- Sistema (direita, por cima): abre pelo ⚙, recolhe pela seta "‹ recolher", Esc
+  ou clique fora.
+- A escolha é lembrada (localStorage): reabrir o app mantém o layout como você
+  deixou. Grades animam com transição de 0,28 s.
+- Em telas < 1320 px os eventos começam recolhidos e podem ser ligados no topo.
+
+Correção de layout: `.drawer[hidden]` agora vence o `display: grid` — antes a barra
+de sistema "fechada" continuava ocupando espaço/tempo de layout.
+
 ULTRON Desktop 1.9.7 — botão "atualizar ULTRON" em três passos
 
 O botão em Ajustes agora faz tudo numa sequência só:

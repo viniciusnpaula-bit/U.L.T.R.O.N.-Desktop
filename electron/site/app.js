@@ -484,7 +484,7 @@ async function refreshStatus(show = false) {
      2. baixar, conferir o SHA-256 e aplicar;
      3. se sobrar arquivo em uso, pedir o reinício (ou reiniciar na hora, se o
         usuário confirmar). O progresso aparece na própria barra.               */
-const updateUi = { job: null, timer: null, version: '1.9.7', busy: false };
+const updateUi = { job: null, timer: null, version: '1.9.8', busy: false };
 
 function updateLinha(texto, classe = '') {
   const alvo = $('updateState');
@@ -619,7 +619,50 @@ async function desfazerAtualizacao() {
   }
 }
 
-/* ── barra lateral de sistema ────────────────────────────────────────────── */
+/* ── barras recolhíveis (bate-papo e sistema) ─────────────────────────────── */
+/* Ambas nascem abertas, lembram a escolha e podem ser recolhidas por três
+   caminhos: botão no topo, seta no próprio cabeçalho e atalho (Ctrl+1 / Ctrl+,). */
+const RAILS = {
+  chat: { chave: 'ultron-chat-aberto', attr: 'data-chat', botoes: ['toggleChat', 'collapseChat'] },
+  tape: { chave: 'ultron-eventos-aberto', attr: 'data-tape', botoes: ['toggleTape'] },
+};
+
+function aplicarRail(nome, aberto) {
+  const rail = RAILS[nome];
+  const tag = document.documentElement;
+  tag.setAttribute(rail.attr, aberto ? 'on' : 'off');
+  for (const id of rail.botoes) {
+    const botao = $(id);
+    botao.setAttribute('aria-pressed', String(aberto));
+    botao.setAttribute('aria-expanded', String(aberto));
+    const alvo = nome === 'chat' ? 'conversa de voz' : nome === 'tape' ? 'eventos' : 'sistema';
+    const tecla = nome === 'chat' ? 'Ctrl+1' : nome === 'tape' ? 'Ctrl+2' : 'Ctrl+,';
+    botao.title = `${aberto ? 'Recolher' : 'Abrir'} ${alvo} (${tecla})`;
+  }
+  const painel = nome === 'chat' ? $('drawerChat') : $('side');
+  if (painel) painel.setAttribute('aria-hidden', String(!aberto));
+  try { localStorage.setItem(rail.chave, aberto ? '1' : '0'); } catch {}
+  return aberto;
+}
+
+function railAberto(nome) {
+  const rail = RAILS[nome];
+  return document.documentElement.getAttribute(rail.attr) !== 'off';
+}
+
+function alternarRail(nome) {
+  return aplicarRail(nome, !railAberto(nome));
+}
+
+function restaurarRails() {
+  for (const nome of Object.keys(RAILS)) {
+    let salvo = '1';
+    try { salvo = localStorage.getItem(RAILS[nome].chave) ?? '1'; } catch {}
+    aplicarRail(nome, salvo !== '0');
+  }
+}
+
+
 /* Mesma família do bat-papo: entra pela direita, encostada na câmara, sem
    cobrir o conteúdo. Fecha pela seta "fechar", pelo Esc ou clicando fora. */
 let gavetaAberta = false;
@@ -638,6 +681,7 @@ function drawer(open) {
   fundo.hidden = !open;
   painel.setAttribute('aria-hidden', String(!open));
   $('openSettings').setAttribute('aria-expanded', String(Boolean(open)));
+  $('toggleSystem').setAttribute('aria-pressed', String(Boolean(open)));
   if (open) {
     posicionarBarra();
     refreshMicrophones();
@@ -688,7 +732,10 @@ $('clearHistory').onclick = () => {
   if ($('recentList')) $('recentList').replaceChildren();
   toast('Sessão limpa.');
 };
+$('toggleChat').onclick = () => alternarRail('chat');
+$('collapseChat').onclick = () => alternarRail('chat');
 $('openSettings').onclick = () => drawer(true);
+$('toggleSystem').onclick = () => drawer($('drawer').hidden);
 /* fechar: seta, clique fora (o backdrop cobre o resto da tela) e Esc */
 $('closeDrawer').addEventListener('click', event => { event.preventDefault(); fecharGaveta(); });
 $('drawerBackdrop').addEventListener('pointerdown', event => { event.preventDefault(); fecharGaveta(); });
@@ -710,9 +757,11 @@ $('emergencyStopButton').onclick = async () => {
   catch (error) { toast(`A parada de emergência falhou: ${error.message}`); }
 };
 
-/* atalhos: Ctrl+, sistema · Ctrl+K foca a linha de comando · Esc fecha */
+/* atalhos: Ctrl+1 conversa · Ctrl+2 eventos · Ctrl+, sistema · Ctrl+K comando · Esc */
 function atalhos(event) {
   if (event.ctrlKey && event.key === ',') { event.preventDefault(); event.stopPropagation(); drawer($('drawer').hidden); return; }
+  if (event.ctrlKey && (event.key === '1' || event.key === '!')) { event.preventDefault(); event.stopPropagation(); alternarRail('chat'); return; }
+  if (event.ctrlKey && (event.key === '2' || event.key === '@')) { event.preventDefault(); event.stopPropagation(); alternarRail('tape'); return; }
   if (event.ctrlKey && event.key.toLowerCase() === 'k') { event.preventDefault(); $('commandInput').focus(); return; }
   if (event.key === 'Escape') {
     if (!$('drawer').hidden) { event.preventDefault(); event.stopPropagation(); fecharGaveta(); }
@@ -723,6 +772,7 @@ window.addEventListener('keydown', atalhos, { capture: true });
 document.addEventListener('keydown', atalhos);
 
 /* ── ciclo de vida ───────────────────────────────────────────────────────── */
+restaurarRails();
 updateClock();
 setInterval(updateClock, 1000);
 window.addEventListener('resize', () => { if (gavetaAberta) posicionarBarra(); });

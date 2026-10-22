@@ -118,7 +118,7 @@ class GameActionTests(unittest.TestCase):
             root / "LEIA-ME.txt", root / "electron" / "README.md", root / "NOTAS-RECONSTRUCAO.txt",
         )
         for path in product_files:
-            self.assertIn("1.9.7", path.read_text(encoding="utf-8"), str(path))
+            self.assertIn("1.9.8", path.read_text(encoding="utf-8"), str(path))
         self.assertIn('"version"]', (root / "tools" / "build_setup.py").read_text(encoding="utf-8"))
         self.assertIn("ULTRON-Desktop-v", (root / "tools" / "build_setup.py").read_text(encoding="utf-8"))
 
