@@ -126,13 +126,17 @@ class UpdateManager:
         return _current_version(self.root)
 
     def _state(self) -> dict:
+        if getattr(self, "_state_cache", None) is not None:
+            return dict(self._state_cache)
         try:
-            return json.loads(self._state_path.read_text(encoding="utf-8"))
+            self._state_cache = json.loads(self._state_path.read_text(encoding="utf-8"))
         except (OSError, ValueError):
-            return {}
+            self._state_cache = {}
+        return dict(self._state_cache)
 
     def _save_state(self, **values) -> dict:
         state = {**self._state(), **values, "updated_at": time.time()}
+        self._state_cache = dict(state)
         try:
             self._state_path.write_text(json.dumps(state, indent=2), encoding="utf-8")
         except OSError:
@@ -157,6 +161,10 @@ class UpdateManager:
             try:
                 raw = _request(f"https://api.github.com/repos/{self.repo}/releases/latest", timeout=timeout)
             except urllib.error.HTTPError as error:
+                if error.code in (403, 404):
+                    alternativa = self._check_from_list(timeout)
+                    if alternativa is not None:
+                        return alternativa
                 if error.code == 404:
                     resultado = {"status": "sem_release", "current_version": self.current_version,
                                  "repo": self.repo, "message": "Ainda não há release publicado neste repositório."}
@@ -197,6 +205,41 @@ class UpdateManager:
             self._save_state(last_check={**resultado, "at": time.time()})
             self.log(f"Atualização: instalada {resultado['current_version']} / publicada {resultado['latest_version']}")
             return resultado
+
+    def _check_from_list(self, timeout: float) -> dict | None:
+        """Fallback quando /releases/latest não existe: pega o Release estável mais recente."""
+        try:
+            raw = _request(f"https://api.github.com/repos/{self.repo}/releases", timeout=timeout)
+            releases = json.loads(raw.decode("utf-8"))
+        except Exception:
+            return None
+        if not isinstance(releases, list) or not releases:
+            return None
+        estaveis = [r for r in releases if not r.get("draft") and not r.get("prerelease")]
+        if not estaveis:
+            return None
+        release = max(estaveis, key=lambda r: _version_tuple(str(r.get("tag_name", "")).lstrip("vV")))
+        tag = str(release.get("tag_name") or "")
+        latest = tag.lstrip("vV")
+        assets = release.get("assets") or []
+        zip_asset = next((a for a in assets if str(a.get("name", "")).lower().endswith(".zip")), None)
+        sums_asset = next((a for a in assets if str(a.get("name", "")).lower() == "sha256sums.txt"), None)
+        resultado = {
+            "status": "ok",
+            "current_version": self.current_version,
+            "latest_version": latest or self.current_version,
+            "tag": tag,
+            "repo": self.repo,
+            "update_available": _version_tuple(latest) > _version_tuple(self.current_version),
+            "notes": str(release.get("body") or "")[:4000],
+            "published_at": release.get("published_at"),
+            "html_url": release.get("html_url"),
+            "asset": {"name": zip_asset.get("name"), "size": zip_asset.get("size"),
+                      "url": zip_asset.get("browser_download_url")} if zip_asset else None,
+            "checksums": sums_asset.get("browser_download_url") if sums_asset else None,
+        }
+        self._save_state(last_check={**resultado, "at": time.time()})
+        return resultado
 
     def set_auto_check(self, enabled: bool) -> bool:
         self._save_state(auto_check=bool(enabled))
