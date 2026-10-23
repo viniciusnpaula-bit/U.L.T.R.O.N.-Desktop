@@ -15,11 +15,14 @@ sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
 import atualizacao
 
 
-def release_fake(tag="v9.9.9", nome_zip="ULTRON-Desktop-v9.9.9.zip", com_checksums=True):
+def release_fake(tag="v9.9.9", nome_zip="ULTRON-Desktop-v9.9.9.zip", com_checksums=True, com_assinatura=True):
     assets = [{"name": nome_zip, "size": 1024, "browser_download_url": "https://github.com/x/y/releases/a.zip"}]
     if com_checksums:
         assets.append({"name": "SHA256SUMS.txt", "size": 80,
                        "browser_download_url": "https://github.com/x/y/releases/SHA256SUMS.txt"})
+    if com_assinatura:
+        assets.append({"name": "SHA256SUMS.txt.sig", "size": 64,
+                       "browser_download_url": "https://github.com/x/y/releases/SHA256SUMS.txt.sig"})
     return json.dumps({"tag_name": tag, "body": "novidades", "assets": assets,
                        "html_url": "https://github.com/x/y/releases"}).encode()
 
@@ -35,6 +38,17 @@ def zip_valido(versao="9.9.9"):
         archive.writestr("notas.exe", b"MZ")
         archive.writestr("ULTRON.exe", b"MZnovo")
     return buffer.getvalue()
+
+
+def par_de_chaves():
+    """Par Ed25519 descartável, gerado no próprio teste."""
+    from cryptography.hazmat.primitives import serialization
+    from cryptography.hazmat.primitives.asymmetric.ed25519 import Ed25519PrivateKey
+    chave = Ed25519PrivateKey.generate()
+    publica = chave.public_key().public_bytes(
+        encoding=serialization.Encoding.Raw, format=serialization.PublicFormat.Raw)
+    import base64
+    return chave, base64.b64encode(publica).decode("ascii")
 
 
 class UpdateManagerTests(unittest.TestCase):
@@ -77,7 +91,7 @@ class UpdateManagerTests(unittest.TestCase):
         with self.assertRaises(atualizacao.UpdateError):
             atualizacao._request("http://api.github.com/repos/x/y")   # sem HTTPS
 
-    def _aplicar(self, conteudo, checksums_top="sha256-ok"):
+    def _aplicar(self, conteudo, checksums_top="sha256-ok", assinatura="valida", adulterar_sums=False):
         pacote = zip_valido()
         digest = hashlib.sha256(pacote).hexdigest()
         destino = Path(self.temp.name) / "pacote.zip"
@@ -87,8 +101,30 @@ class UpdateManagerTests(unittest.TestCase):
             alvo.write_bytes(pacote)
             return len(pacote), digest
 
+        privada, publica = par_de_chaves()
         texto = f"{digest if checksums_top == 'sha256-ok' else '0'*64}  ULTRON-Desktop-v9.9.9.zip\n"
-        with patch.object(atualizacao, "_request", side_effect=[release_fake(), texto.encode()]), \
+        assinado = texto.encode()
+        if adulterar_sums:
+            # o SUMS muda depois de assinado (ataque clássico)
+            assinado = assinado + b"0000000000000000000000000000000000000000000000000000000000000000  outro.zip\n"
+        if assinatura == "valida":
+            assinatura_bytes = privada.sign(texto.encode())
+        elif assinatura == "invalida":
+            assinatura_bytes = par_de_chaves()[0].sign(texto.encode())   # outra chave
+        else:
+            assinatura_bytes = b""
+
+        def request(url, **_kwargs):
+            if "sig" in str(url) or str(url).endswith(".sig"):
+                if assinatura == "ausente":
+                    raise atualizacao.UpdateError("sem assinatura")
+                return assinatura_bytes
+            if "releases/latest" in str(url) or str(url).endswith("/releases"):
+                return release_fake(com_assinatura=assinatura != "ausente")
+            return assinado
+
+        with patch.object(atualizacao, "CHAVE_PUBLICA_ATUALIZACAO", publica), \
+             patch.object(atualizacao, "_request", side_effect=request), \
              patch.object(atualizacao, "_download", side_effect=download):
             self.manager.apply()
             for _ in range(100):
@@ -131,6 +167,42 @@ class UpdateManagerTests(unittest.TestCase):
         self.assertEqual(job["status"], "pronto")
         self.assertTrue(job["needs_restart"])
         self.assertTrue(job.get("script"))
+
+    def test_signed_sums_is_required(self):
+        job = self._aplicar(zip_valido(), assinatura="ausente")
+        self.assertEqual(job["status"], "erro")
+        self.assertIn("Assinatura", job["message"])
+
+    def test_wrong_signature_is_refused(self):
+        job = self._aplicar(zip_valido(), assinatura="invalida")
+        self.assertEqual(job["status"], "erro")
+        self.assertIn("Assinatura", job["message"])
+
+    def test_tampered_sums_is_refused(self):
+        job = self._aplicar(zip_valido(), adulterar_sums=True)
+        self.assertEqual(job["status"], "erro")
+        self.assertIn("Assinatura", job["message"])
+
+    def test_app_without_public_key_refuses_everything(self):
+        # sem chave embutida não há como provar autenticidade: recusa antes de tudo
+        def request(url, **_kwargs):
+            if str(url).endswith(".sig"):
+                raise atualizacao.UpdateError("sem assinatura")
+            if "releases" in str(url):
+                return release_fake()
+            return b""
+
+        with patch.object(atualizacao, "CHAVE_PUBLICA_ATUALIZACAO", ""), \
+             patch.object(atualizacao, "_request", side_effect=request), \
+             patch.object(atualizacao, "_download", side_effect=lambda _u, alvo, _h: (alvo.write_bytes(b"x"), (1, "0" * 64))[1]):
+            self.manager.apply()
+            for _ in range(200):
+                if self.manager._job["status"] in {"pronto", "erro", "atualizado"}:
+                    break
+                import time
+                time.sleep(0.02)
+        self.assertEqual(self.manager._job["status"], "erro")
+        self.assertIn("Assinatura", self.manager._job["message"])
 
     def test_release_without_checksums_is_refused(self):
         with patch.object(atualizacao, "_request", return_value=release_fake(com_checksums=False)):

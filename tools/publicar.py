@@ -17,6 +17,7 @@ import sys
 from pathlib import Path
 
 ROOT = Path(__file__).resolve().parents[1]
+sys.path.insert(0, str(ROOT))
 REPO = "viniciusnpaula-bit/U.L.T.R.O.N.-Desktop"
 BRANCH = "main"   # repositório novo (U.L.T.R.O.N.-Desktop), sem regra de PR
 DIST = ROOT / "build" / "dist"
@@ -51,6 +52,21 @@ def tem_gh() -> bool:
         return False
 
 
+def assinar_sums(sums: Path) -> Path | None:
+    """Assina o SHA256SUMS.txt com a chave privada (fora do repositório)."""
+    try:
+        import assinatura
+        privada = assinatura.caminho_privada()
+        if not privada.is_file():
+            return None
+        destino = assinatura.assinar_arquivo(sums)
+        print(f"assinatura: {destino.name} ({destino.stat().st_size} bytes)")
+        return destino
+    except Exception as erro:
+        print(f"não consegui assinar o SUMS ({type(erro).__name__}: {erro})")
+        return None
+
+
 def main() -> int:
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--check-only", action="store_true")
@@ -62,7 +78,8 @@ def main() -> int:
     if args.check_only:
         print(f"versão {v}")
         for arquivo in (ROOT / "ULTRON-Setup.exe", ROOT / "ULTRON.exe",
-                        ROOT.parent / f"ULTRON-Desktop-v{v}.zip", DIST / "SHA256SUMS.txt"):
+                        ROOT.parent / f"ULTRON-Desktop-v{v}.zip", DIST / "SHA256SUMS.txt",
+                        DIST / "SHA256SUMS.txt.sig"):
             print(("  ok  " if arquivo.is_file() else "  --  ") + str(arquivo))
         print("gh disponível:", tem_gh())
         return 0
@@ -106,7 +123,13 @@ def main() -> int:
     if not tem_gh():
         print("\nPush feito. Para o Release automático, instale o GitHub CLI: winget install --id GitHub.cli")
         return 3
-    arquivos = [ROOT.parent / f"ULTRON-Desktop-v{v}.zip", DIST / "SHA256SUMS.txt"]
+    sums = DIST / "SHA256SUMS.txt"
+    assinatura = assinar_sums(sums)
+    if assinatura is None:
+        print("\nSem chave privada de assinatura: o Release não será publicado.")
+        print("Rode: python tools/gerar_chaves.py  (e cole a pública em atualizacao.py)")
+        return 5
+    arquivos = [ROOT.parent / f"ULTRON-Desktop-v{v}.zip", sums, assinatura]
     gh = gh_exe()
     if not gh:
         print("gh não encontrado; crie o Release manualmente.")
@@ -117,7 +140,7 @@ def main() -> int:
         print(f"Release v{v} atualizado com {len(arquivos)} anexos.")
     else:
         criado = run([gh, "release", "create", f"v{v}", *map(str, arquivos), "-R", REPO,
-                      "--title", f"U.L.T.R.O.N. {v}", "--notes-file", str(ROOT / "NOTAS-RECONSTRUCAO.txt")])
+                      "--title", f"U.L.T.R.O.N. {v}", "--notes-file", str(ROOT / "CHANGELOG.md")])
         print(criado.stdout[-1200:] or criado.stderr[-1200:])
         if criado.returncode != 0:
             return 4

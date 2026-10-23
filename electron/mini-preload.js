@@ -9,5 +9,5 @@ contextBridge.exposeInMainWorld('ultron', Object.freeze({
   },
   returnToMain: () => ipcRenderer.invoke('hud:return'),
   runHudAction: actionId => ipcRenderer.invoke('hud:action', actionId),
-  version: '1.9.8',
+  version: '1.11.0',
 }));

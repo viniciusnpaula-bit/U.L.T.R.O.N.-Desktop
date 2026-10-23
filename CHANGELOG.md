@@ -1,3 +1,153 @@
+ULTRON Desktop 1.11.0 — fluxos com etapas, lembretes canceláveis e controles do Windows
+
+FLUXOS NOMEADOS (Fase 4)
+- fluxos.py define sequências fixas no código: "abrir.rocket" (só o jogo),
+  "modo_jogo" (jogo → Spotify → minimizar) e "minimizar".
+- Cada passo usa uma ferramenta registrada pelo portão ferramentas.executar; não há
+  caminho alternativo. Se uma etapa falha (erro, negação de segurança, cancelamento),
+  o fluxo PARA e informa o nome da etapa; as seguintes não rodam.
+- Ferramenta executar_fluxo disponível para a IA e botões "Fluxos rápidos" em Ajustes.
+- Abertura de programa agora tenta confirmar o resultado; quando não consegue
+  verificar, diz "não consegui confirmar que ele iniciou" em vez de afirmar.
+
+LEMBRETES CANCELÁVEIS
+- listar_lembretes mostra número, hora local e texto.
+- Nova ferramenta cancelar_lembrete(numero|trecho): exige número da lista ou trecho
+  com 3+ letras; trecho ambíguo pede o número; sem alvo, não apaga nada.
+- Ajustes › Memória: lista de lembretes com botão "cancelar" (com confirmação).
+
+CONTROLES DO WINDOWS (um por vez)
+- ajustar_brilho (0–100) via WMI; quando o monitor não aceita, informa isso em vez
+  de fingir sucesso.
+- prever_organizacao: mostra a prévia (quantos arquivos por categoria) SEM mover
+  nada; só pastas da allowlist de diretórios são aceitas.
+
+TESTES
+- 12 novos: ordem das etapas, parada na primeira falha nomeando a etapa, negação de
+  segurança interrompendo, fluxo desconhecido sem execução, lembrete por número,
+  por trecho, ambíguo e sem alvo.
+
+ULTRON Desktop 1.10.3 — cofre de chaves de API (lugar seguro)
+
+ONDE COLOCAR AS CHAVES, COM SEGURANÇA
+- Nova seção "Chaves de API" em Ajustes: cola-se a chave e ela é gravada CIFRADA em
+  dados/cofre.json. A tela nunca mostra a chave de volta — só o final (• • • • 7890)
+  e de onde veio (cofre ou .env).
+- Proteção em duas camadas: chave de criptografia AES-256-GCM protegida pelo DPAPI
+  do Windows (CryptProtectData, por usuário/máquina) e o próprio arquivo com
+  permissão restrita. Sem DPAPI (Linux/testes) o app usa chave local e DECLARA isso
+  no status — nunca finge que está protegido.
+- Precedência cofre → .env: quem já tem chave no arquivo antigo continua funcionando
+  sem mudar nada; a chave do cofre, quando existe, vence.
+- Botão "testar" por provedor: faz uma chamada mínima (lista de modelos) e diz se a
+  chave foi aceita — sem gastar tokens e sem mostrar a chave.
+- "remover" apaga do cofre e devolve a vez ao .env, quando houver.
+- cofre.py aplica as chaves na inicialização e registra os valores na redação de
+  logs (seguranca.redigir), então nenhuma chave aparece em log, histórico ou painel.
+- dados/cofre.json e dados/.cofre.chave entram no .gitignore e ficam fora do ZIP.
+
+ROTAS LOCAIS
+  GET /api/v1/cofre · POST /api/v1/cofre {nome, valor} ·
+  POST /api/v1/cofre/remover {nome} · POST /api/v1/cofre/testar {nome}
+
+TESTES
+- 6 novos: gravação cifrada, nada em texto claro no arquivo, status só com o final,
+  remoção, credencial inválida e declaração da proteção em uso.
+
+ULTRON Desktop 1.10.2 — memória consultável e contexto enxuto
+
+MEMÓRIA
+- Ajustes › Memória: lista os fatos guardados, com busca literal (sem curinga),
+  "editar" (corrigir o texto) e "apagar" — sempre com confirmação antes.
+- Rotas locais: GET /api/v1/fatos, POST /api/v1/fatos {id, texto} (corrigir) e
+  {id} (apagar), GET /api/v1/lembretes.
+- memoria.buscar_fatos, corrigir_fato, apagar_fato_por_id e fatos_centrais.
+- Contexto curto: o system prompt recebe no máximo 8 fatos centrais (os mais
+  recentes e mais curtos) em vez de todos. Menos tokens e menos exposição.
+- Lembretes: a interface mostra o próximo com data/hora no fuso local e avisa, em
+  texto, que só são disparados com o ULTRON aberto.
+
+LIMITES
+- O limite de 50 fatos e 300 caracteres por fato continua valendo (config.py).
+- Ainda não há notificação de lembrete com o app fechado — está declarado na tela.
+
+ULTRON Desktop 1.10.1 — voz confiável e personalidade configurável
+
+VOZ
+- Mensagens de erro em português com causa e ação (sem microfone, microfone
+  desconectado, sem internet, fala não entendida, silêncio, áudio travado).
+- escutar_detalhado(): o reconhecimento devolve as interpretações possíveis.
+- Fala incerta: se duas leituras divergem num verbo de consequência (apagar,
+  fechar, desligar) ou o comando contém um desses verbos com mais de uma leitura,
+  o painel mostra as opções e nada é executado sem confirmação. O canal é o mesmo
+  de confirmações (request_id + prazo); sem resposta = recusa.
+- Ajustes › Voz: "testar microfone" (só mede nível local, nada é gravado nem
+  enviado), "testar voz" (avisa que o texto vai ao Edge TTS para gerar o áudio),
+  lista de 15 vozes pt-BR e botão para aplicar. A escolha fica em dados/voz.json e
+  vale após reiniciar. A voz reserva local (pyttsx3) continua indicada na interface.
+
+PERSONALIDADE
+- personalidade.py: perfis ULTRON, JARVIS, VISÃO e EDITH, com tom, tamanho e
+  tratamento configuráveis, gravados em dados/personalidade.json.
+- Ajustes › Personalidade: trocar perfil, definir como o ULTRON te chama, ver a
+  instrução gerada e restaurar o padrão.
+- As regras de segurança do system prompt NÃO mudam com o perfil.
+
+TESTES
+- 11 novos: personalidade (padrão, persistência, arquivo corrompido, restaurar,
+  perfil inválido) e fala incerta (queda de braço entre leituras, verbos de
+  consequência, assunto neutro).
+
+ULTRON Desktop 1.10.0 — IA em streaming e segurar para falar
+
+IA EM STREAMING (voz imediata)
+- cerebro.processar_stream() usa stream=True nos provedores compatíveis com OpenAI
+  (Gemini, Groq, NVIDIA) e entrega FRASES COMPLETAS conforme chegam.
+- voz.falar_partes() sintetiza em paralelo: a 1ª frase toca enquanto o resto ainda
+  está sendo gerado (voz.falar continua igual para quem chama com texto pronto).
+- Ferramentas não fazem streaming: continuam no fluxo normal, com o mesmo portão
+  ferramentas.executar e o mesmo fallback entre provedores.
+- Se o streaming falhar (rede, provedor, resposta vazia), a resposta cai no modo
+  normal automaticamente — nenhum caminho fica sem resposta.
+- Log [tempo] 1º áudio e [tempo] 1ª frase falada para medir a melhora.
+- A interface continua recebendo a resposta completa (bat-papo e câmara iguais).
+
+SEGURAR PARA FALAR
+- HOTKEY_FALAR (padrão ctrl+alt+espaco; vazio desliga) em config.py e .env.example.
+  Não conflita com HOTKEY_PARAR (ctrl+alt+x).
+- Enquanto a combinação está pressionada o núcleo grava; ao soltar, o texto vai para
+  o mesmo fluxo de comando (sem "Ei, Ultron" e sem esperar silêncio).
+- Nunca grava com a escuta pausada. voz.Ouvido.escutar_manual + _gravar(gatilho=...).
+
+TESTES
+- 6 testes novos: 1ª frase antes da última, parada interrompe, frases fechadas,
+  falha do stream cai no modo normal, escutar_manual pausado e com gatilho.
+
+ULTRON Desktop 1.9.9 — limpeza, assinatura das atualizações e legibilidade
+
+LIMPEZA (nada usado ficou para trás)
+- Binários ULTRON.exe / ULTRON-Setup.exe saíram do versionamento (*.exe e build/ no
+  .gitignore). Continuam sendo gerados por tools/build_setup.py e continuam no ZIP.
+- Uma cópia só de cada imagem: o ícone vive em electron/assets/ULTRON.ico; a logo
+  U.L.T.R.O.N.-Logo.png segue na raiz e em electron/site/icons/.
+- Removidos por não terem uso: desktop_ui.py (painel tkinter antigo),
+  tests/test_desktop_ui.py, electron/site/protocol/, ULTRON-icon.svg,
+  tools/sincronizar_local.py e os .bat redundantes (iniciar.bat, iniciar_bandeja.bat,
+  iniciar_texto.bat, instalar_inicio_desktop.bat e os três de electron/).
+  Mantidos: iniciar_desktop.bat (reserva do atalho) e testar_seguranca.bat.
+- NOTAS-RECONSTRUCAO.txt virou CHANGELOG.md (mais recente primeiro).
+- "bat-papo" corrigido para "bate-papo" em interface, README e notas.
+
+ATUALIZAÇÃO ASSINADA
+- SHA256SUMS.txt passa a vir acompanhado de SHA256SUMS.txt.sig (Ed25519). A chave
+  pública é embutida no app; sem assinatura válida a atualização é recusada.
+- tools/gerar_chaves.py cria o par fora do repositório (~/.ultron-signing/).
+- tools/publicar.py assina o SUMS e envia o .sig no Release.
+
+INTERFACE
+- O mock de prévia saiu do app (preview.html só para navegador); o document.write
+  bloqueado pela CSP foi removido.
+
 ULTRON Desktop 1.9.8 — recolher as barras (bate-papo, eventos e sistema)
 
 As três colunas viram barras recolhíveis, cada uma com o seu controle:
@@ -46,7 +196,7 @@ ULTRON Desktop 1.9.6 — sistema como barra lateral e inicialização à prova d
 
 SISTEMA (AJUSTES) VIROU BARRA LATERAL
 - Deixou de ser uma gaveta de tela cheia: agora é uma barra encostada à direita,
-  com borda arredondada, na mesma família visual do bat-papo (que fica à esquerda).
+  com borda arredondada, na mesma família visual do bate-papo (que fica à esquerda).
 - Não cobre mais a câmara por inteiro e mantém a linha de comando livre.
 - Fecha por três caminhos: seta "fechar", tecla Esc (listener em fase de captura,
   funciona com o foco em select/botão) e clique fora. Ctrl+, alterna.
@@ -62,7 +212,7 @@ ROBUSTEZ DA INTERFACE
 ESTÉTICA
 - Campo de partículas mais discreto (opacidade 0.42) e vinheta mais suave: o
   núcleo continua sendo o único foco da tela.
-- Seta/seta de recolher da barra no mesmo idioma do cabeçalho do bat-papo.
+- Seta/seta de recolher da barra no mesmo idioma do cabeçalho do bate-papo.
 
 ULTRON Desktop 1.9.5 — repositório próprio, atualização confiável e mock fora do app
 
@@ -116,9 +266,9 @@ ZOOM
   guardava o último por origem, por isso a interface reabria ampliada).
 - window.ultron.setZoom(true) reativa, caso algum dia se queira acessibilidade.
 
-ULTRON Desktop 1.9.4 — bat-papo de voz no painel
+ULTRON Desktop 1.9.4 — bate-papo de voz no painel
 
-A coluna direita agora tem dois andares: em cima a CONVERSA DE VOZ (bat-papo), embaixo
+A coluna direita agora tem dois andares: em cima a CONVERSA DE VOZ (bate-papo), embaixo
 a fita de eventos.
 
 COMO FUNCIONA
@@ -138,7 +288,7 @@ COMO FUNCIONA
 - Turnos vêm do evento (tempo real) e são reconciliados a cada 20 s por
   /conversation, com chave papel+horário+trecho para não duplicar.
 - Privacidade: o runtime passa cada texto por seguranca.redigir antes de guardar —
-  PIN, chaves e tokens nunca entram no bat-papo. Há teste para isso.
+  PIN, chaves e tokens nunca entram no bate-papo. Há teste para isso.
 
 ULTRON Desktop 1.9.4 — interface 2.0 (câmara do núcleo)
 

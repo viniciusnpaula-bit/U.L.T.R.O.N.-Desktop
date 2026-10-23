@@ -13,3 +13,15 @@ electron/dist*/
 *.spec
 *.log
 .ultron-state.json
+
+# Binários compilados: gerados por tools/build_setup.py (entram no ZIP do Release, não no repositório)
+*.exe
+build/
+
+# Chave privada de assinatura (nunca versionar)
+.ultron-signing/
+*.pem
+
+# Cofre de credenciais (cifrado, mas é dado do usuário)
+dados/cofre.json
+dados/.cofre.chave

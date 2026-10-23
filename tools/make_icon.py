@@ -4,7 +4,7 @@ The shipped icon used the logo on a solid square, which reads as a dark box on t
 Windows taskbar and triggers more heuristic scanner noise. This script crops the
 logo's own artwork, adds transparency and writes a real multi-resolution ICO.
 
-    python tools/make_icon.py            # writes ULTRON.ico in the package root
+    python tools/make_icon.py            # writes electron/assets/ULTRON.ico
     python tools/make_icon.py --check    # only reports what the current icon is
 
 No third-party dependency: PNG decoding is done here, so the build works on a bare
@@ -19,7 +19,7 @@ import zlib
 from pathlib import Path
 
 ROOT = Path(__file__).resolve().parents[1]
-ICON = ROOT / "ULTRON.ico"
+ICON = ROOT / "electron" / "assets" / "ULTRON.ico"   # única cópia do ícone
 SIZES = (16, 24, 32, 48, 64, 128, 256)
 
 BACKGROUND = (28, 27, 33)
@@ -226,7 +226,7 @@ def _write_ico(path: Path, frames: list[tuple[int, bytes]]) -> None:
 
 
 def build() -> None:
-    source = ICON if ICON.exists() else ROOT / "electron" / "assets" / "ULTRON.ico"
+    source = ICON if ICON.exists() else ROOT / "U.L.T.R.O.N.-Logo.png"
     width, height, pixels = _load(source)
     artwork = _crop_and_matte(pixels, width, height)
     art_w = len(artwork[0])
@@ -235,10 +235,11 @@ def build() -> None:
     for size in SIZES:
         scaled = _resize(artwork, art_w, art_h, size)
         frames.append((size, _encode_png(size, size, scaled)))
+    ICON.parent.mkdir(parents=True, exist_ok=True)
     _write_ico(ICON, frames)
-    asset = ROOT / "electron" / "assets" / "ULTRON.ico"
-    if asset.parent.is_dir() and asset.resolve() != ICON.resolve():
-        _write_ico(asset, frames)
+    raiz = ROOT / "ULTRON.ico"
+    if raiz.is_file():
+        raiz.unlink()          # a cópia da raiz deixou de existir
     print(f"ULTRON.ico gerado com {len(frames)} tamanhos "
           f"({', '.join(str(s) for s in SIZES)}); arte {art_w}x{art_h} recortada.")
 

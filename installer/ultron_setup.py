@@ -31,7 +31,7 @@ import urllib.request
 from pathlib import Path
 
 APP_NAME = "U.L.T.R.O.N. Desktop"
-MIN_PYTHON = (3, 10)
+MIN_PYTHON = (3, 12)   # mesma exigência de diagnostico.py
 MIN_NODE = 18
 VENV_MARKER = ".ultron-venv.json"
 DEPS_MARKER = ".ultron-deps.json"
@@ -211,7 +211,7 @@ def find_python(console: Console) -> tuple[Path, str]:
         seen.add(resolved)
         probe = run([resolved, "-c",
                      "import sys,struct;print(sys.version.split()[0]);"
-                     "print(struct.calcsize('P')*8);print(sys.version_info[:2] >= (3,10))"],
+                     "print(struct.calcsize('P')*8);print(sys.version_info[:2] >= (3,12))"],
                     console, timeout=60)
         if probe.returncode != 0:
             continue
@@ -220,7 +220,7 @@ def find_python(console: Console) -> tuple[Path, str]:
             continue
         version, bits, new_enough = lines[0], lines[1], lines[2] == "True"
         if not new_enough:
-            rejected.append(f"{resolved} ({version}) é antigo; precisa 3.10 ou superior")
+            rejected.append(f"{resolved} ({version}) é antigo; precisa 3.12 ou superior")
             continue
         if bits != "64":
             rejected.append(f"{resolved} ({version}) é 32 bits; precisa 64 bits")
@@ -228,7 +228,7 @@ def find_python(console: Console) -> tuple[Path, str]:
         return Path(resolved), version
     detail = ("\n      " + "\n      ".join(rejected)) if rejected else ""
     raise SetupError(
-        "Python 3.10 ou superior (64 bits) não encontrado.\n"
+        "Python 3.12 ou superior (64 bits) não encontrado.\n"
         "      Instale em https://www.python.org/downloads/windows/ marcando\n"
         "      \"Add python.exe to PATH\" e rode o instalador de novo." + detail
     )
@@ -437,7 +437,7 @@ def step_shortcut(root: Path, console: Console, venv_python: Path) -> bool:
     else:
         target = pythonw if pythonw.is_file() else venv_python
         arguments = f'"{root / "desktop.py"}"'
-    icon = root / "ULTRON.ico"
+    icon = root / "electron" / "assets" / "ULTRON.ico"
     link = start_menu / f"{APP_NAME}.lnk"
     script = (
         "$ErrorActionPreference='Stop';"

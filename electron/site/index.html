@@ -6,7 +6,7 @@
 <link rel="icon" type="image/png" href="icons/ULTRON-Logo.png"><link rel="stylesheet" href="style.css">
 <script src="zoom-lock.js"></script>
 <meta http-equiv="Content-Security-Policy" content="default-src 'self'; script-src 'self'; style-src 'self' 'unsafe-inline'; img-src 'self' data:; connect-src 'none'; object-src 'none'; base-uri 'none'; form-action 'none'">
-<meta name="ultron-version" content="1.9.8">
+<meta name="ultron-version" content="1.11.0">
 </head>
 <body>
 <canvas id="field" aria-hidden="true"></canvas>
@@ -51,7 +51,7 @@
   <!-- ── corpo: câmara + fita de eventos ─────────────────────────────── -->
   <div class="chamber-row">
 
-      <!-- bat-papo de voz: o que foi dito e o que o núcleo respondeu -->
+      <!-- bate-papo de voz: o que foi dito e o que o núcleo respondeu -->
       <section class="comms" id="drawerChat" aria-label="Conversa de voz">
         <header class="comms-head">
           <span class="eyebrow">conversa</span>
@@ -135,7 +135,7 @@
   </div>
 </div>
 
-<!-- ── caixa lateral de sistema (mesma família do bat-papo; recolhe com o painel) ── -->
+<!-- ── caixa lateral de sistema (mesma família do bate-papo; recolhe com o painel) ── -->
 <div class="drawer-backdrop" id="drawerBackdrop" hidden></div>
 <section class="drawer" id="drawer" role="dialog" aria-labelledby="drawerTitle" hidden>
   <header class="drawer-head">
@@ -171,6 +171,84 @@
         <button class="ghost" id="voiceStart">pausar escuta</button>
       </div>
       <p class="muted nano" id="voicePageStatus">—</p>
+      <div class="field-row">
+        <button class="ghost" id="testMic">testar microfone</button>
+        <button class="ghost" id="testVoice">testar voz</button>
+      </div>
+      <p class="micro nano" id="testResult" role="status">—</p>
+      <div class="field-row">
+        <label class="sr-only" for="voiceSelect">Voz</label>
+        <select id="voiceSelect"><option value="">voz padrão</option></select>
+        <button class="ghost" id="saveVoice">usar esta voz</button>
+      </div>
+      <p class="muted nano" id="voiceActive">voz ativa: —</p>
+    </section>
+
+    <section class="block">
+      <h3>Chaves de API</h3>
+      <p class="muted">Guardadas <b>cifradas</b> (AES-256 + DPAPI do Windows) em <code id="cofreArquivo">dados/cofre.json</code>. A interface nunca mostra a chave de volta — só o final. O que já está no .env continua valendo.</p>
+      <div id="cofreList" class="cofre-list" aria-live="polite"><span class="micro nano">carregando…</span></div>
+      <div class="field-row">
+        <label class="sr-only" for="cofreNome">Credencial</label>
+        <select id="cofreNome">
+          <option value="gemini">Gemini</option>
+          <option value="groq">Groq</option>
+          <option value="nvidia">NVIDIA Build</option>
+          <option value="telegram_token">Telegram (token do bot)</option>
+          <option value="telegram_uid">Telegram (seu ID)</option>
+        </select>
+        <label class="sr-only" for="cofreValor">Valor da chave</label>
+        <input id="cofreValor" type="password" autocomplete="off" spellcheck="false" placeholder="cole a chave aqui (não aparece na tela)">
+        <button class="solid" id="cofreSalvar">salvar</button>
+      </div>
+      <p class="micro nano" id="cofreNote" role="status">—</p>
+      <p class="muted nano" id="cofreProtecao">—</p>
+    </section>
+
+    <section class="block">
+      <h3>Memória</h3>
+      <p class="muted">Fatos que o ULTRON guardou sobre você. Só os essenciais vão em cada conversa; o resto é buscado quando importa.</p>
+      <div class="field-row">
+        <label class="sr-only" for="factsSearch">Buscar fato</label>
+        <input id="factsSearch" placeholder="buscar fato…">
+        <button class="ghost" id="factsRefresh">buscar</button>
+      </div>
+      <div class="facts-list" id="factsList" aria-live="polite"><span class="micro nano">nenhum fato carregado</span></div>
+      <p class="micro nano" id="factsNote" role="status">—</p>
+      <div id="lembretesList" class="facts-list" aria-live="polite"></div>
+      <p class="muted nano" id="lembretesNote">—</p>
+    </section>
+
+    <section class="block">
+      <h3>Fluxos rápidos</h3>
+      <p class="muted">Sequências com etapas. Se uma etapa falhar, o fluxo para e diz qual falhou.</p>
+      <div class="field-row" id="fluxosList">
+        <button class="ghost" data-fluxo="abrir.rocket">abrir Rocket League</button>
+        <button class="ghost" data-fluxo="modo_jogo">modo jogo (3 etapas)</button>
+        <button class="ghost" data-fluxo="minimizar">minimizar tudo</button>
+      </div>
+      <p class="micro nano" id="fluxoNote" role="status">—</p>
+    </section>
+
+    <section class="block">
+      <h3>Personalidade</h3>
+      <p class="muted"><b>Um perfil por vez.</b> Escolha o tom; as regras de segurança do ULTRON não mudam com ele. A prévia mostra só a frase de abertura.</p>
+      <div class="swatches" id="profileSwatches" role="radiogroup" aria-label="Perfil de personalidade">
+        <button role="radio" class="swatch" data-profile="ultron" aria-label="ULTRON"><i></i><span>ULTRON</span></button>
+        <button role="radio" class="swatch" data-profile="jarvis" aria-label="JARVIS"><i></i><span>JARVIS</span></button>
+        <button role="radio" class="swatch" data-profile="visao" aria-label="VISÃO"><i></i><span>VISÃO</span></button>
+        <button role="radio" class="swatch" data-profile="edith" aria-label="EDITH"><i></i><span>EDITH</span></button>
+      </div>
+      <div class="field-row">
+        <label class="sr-only" for="tratamentoInput">Como o ULTRON deve te chamar</label>
+        <input id="tratamentoInput" maxlength="40" placeholder="como devo te chamar (ex.: senhor, Pedro)">
+      </div>
+      <div class="field-row">
+        <button class="solid" id="savePersonality">aplicar</button>
+        <button class="ghost" id="previewPersonality">ver frase de abertura</button>
+        <button class="ghost" id="resetPersonality">padrão</button>
+      </div>
+      <p class="micro nano" id="profileNote" role="status">—</p>
     </section>
 
     <section class="block">
@@ -193,7 +271,7 @@
       <button class="ghost" id="updateRollback" hidden title="Voltar para a versão anterior">desfazer</button>
     </div>
     <div class="update-progress" id="updateProgress" hidden><i id="updateProgressBar"></i></div>
-    <p class="update-line" id="updateLine" role="status" aria-live="polite">versão <b id="updateVersion">1.9.8</b> · <span id="updateState">não verificado</span></p>
+    <p class="update-line" id="updateLine" role="status" aria-live="polite">versão <b id="updateVersion">1.11.0</b> · <span id="updateState">não verificado</span></p>
     <p class="update-notes" id="updateNotes" hidden></p>
     <span class="update-note">Fechar a janela encerra a API e libera o microfone.</span>
   </footer>
@@ -211,12 +289,5 @@
 </div>
 
 <div class="toast" id="toast" role="status" aria-live="polite"></div>
-<!-- Sem ponte do Electron (aberto direto no navegador), entra um mock só para prévia.
-     Com a ponte real do preload, este script não faz nada. -->
-<script>
-  // Sem a ponte do Electron (prévia no navegador) o mock de prévia entra primeiro.
-  // No app real, window.ultron já existe e o mock nunca é carregado.
-  document.write('<script type="module" src="' + (window.ultron ? 'about:blank' : 'preview-mock.js') + '"><\/script>');
-</script>
 <script type="module" src="app.js"></script>
 </body></html>

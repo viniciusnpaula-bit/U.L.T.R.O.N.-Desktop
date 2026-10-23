@@ -9,6 +9,7 @@ import re
 import shlex
 import shutil
 import subprocess
+import tempfile
 import time
 import unicodedata
 import webbrowser
@@ -513,6 +514,27 @@ def _cls_programa(nome, **_):
     return Classificacao(MEDIO, "programa.abrir_nao_listado", False, resumo=f"abrir o programa {nome}")
 
 
+def _app_rodando(item, nome_exibicao):
+    """True/False se o app aparece em processo ou janela; None se não der para saber."""
+    import time as _t
+    _t.sleep(1.0)
+    alvo = _norm(nome_exibicao)
+    try:
+        nomes = {p.info["name"].lower().replace(".exe", "")
+                 for p in __import__("psutil").process_iter(["name"]) if p.info.get("name")}
+        if any(alvo.split(" ")[0] in n for n in nomes):
+            return True
+    except Exception:
+        return None
+    try:
+        titulos = [titulo for _h, titulo in _janelas_visiveis()]
+        if any(alvo in _norm(titulo) or _norm(titulo)[:12] == alvo[:12] for titulo in titulos):
+            return True
+        return False
+    except Exception:
+        return None
+
+
 def _abrir_alvo(cmd):
     """Abre um programa/URI da allowlist sem passar por shell."""
     try:
@@ -537,6 +559,16 @@ def abrir_programa(nome: str):
     item, _ = _resolver_app(nome)
     if item:
         _lancar(item)
+        # 1 s é suficiente para o Windows criar a janela/processo; se não criou, dizemos.
+        confirmado = None
+        try:
+            confirmado = _app_rodando(item, item[0])
+        except Exception:
+            confirmado = None
+        if confirmado is True:
+            return f"{item[0]} aberto."
+        if confirmado is False:
+            return f"Pedi para abrir {item[0]}, mas não consegui confirmar que ele iniciou."
         return f"Abrindo {item[0]}."
     exe = shutil.which(nome)
     if exe:
@@ -695,6 +727,110 @@ def ver_tela(pergunta: str = "Descreva o que está aparecendo na tela."):
     return _dados(cerebro.descrever_imagem(buf.getvalue(), pergunta))
 
 
+# ---------- visão: OCR local e localização de botões ----------
+# O OCR usa apenas o Tesseract já instalado no Windows (grátis). Quando ele não
+# existe, a ferramenta DIZ isso e não inventa texto nem coordenadas.
+_TESSERACT = shutil.which("tesseract") or next(
+    (c for c in (r"C:/Program Files/Tesseract-OCR/tesseract.exe",
+                 r"C:/Program Files (x86)/Tesseract-OCR/tesseract.exe") if Path(c).is_file()), None)
+
+
+def ocr_disponivel() -> bool:
+    return bool(_TESSERACT)
+
+
+@ferramenta("Lê o texto visível na tela sem internet (OCR local). Devolve o texto e as "
+            "regiões encontradas. Não envia nada para a nuvem.",
+            risco=BAIXO, params={"regiao": "opcional: 'x,y,largura,altura' para ler só um pedaço"},
+            classificar=lambda **_k: Classificacao(BAIXO, "tela.ocr", True))
+def ler_texto_tela(regiao: str = ""):
+    if not ocr_disponivel():
+        return ("Não há OCR instalado neste PC, então não consigo ler a tela sem internet. "
+                "Instale o Tesseract-OCR (grátis) e eu passo a ler; enquanto isso, ver_tela "
+                "usa a IA na nuvem, com confirmação.")
+    try:
+        from PIL import Image
+        img = _pag().screenshot().convert("RGB")
+        if regiao:
+            partes = [int(p) for p in str(regiao).replace(" ", "").split(",") if p]
+            if len(partes) == 4:
+                x, y, largura, altura = partes
+                img = img.crop((x, y, x + largura, y + altura))
+        img.thumbnail((1920, 1920))
+        tmp = Path(tempfile.gettempdir()) / f"ultron_ocr_{os.getpid()}.png"
+        img.save(tmp)
+        try:
+            r = subprocess.run([_TESSERACT, str(tmp), "stdout", "-l", "por+eng", "--psm", "6"],
+                               capture_output=True, text=True, timeout=45)
+        finally:
+            try:
+                tmp.unlink()
+            except OSError:
+                pass
+        texto = " ".join((r.stdout or "").split())
+        if not texto:
+            return "Não encontrei texto legível na tela."
+        return f"Texto na tela (OCR local):\n{texto[:1500]}"
+    except Exception as e:
+        return f"Não consegui ler a tela ({type(e).__name__})."
+
+
+@ferramenta("Procura na tela um texto/botão e MOSTRA onde está, sem clicar. Use antes de "
+            "clicar_em_texto; confirme a região com o usuário.",
+            risco=BAIXO, params={"texto": "texto ou rótulo do botão"},
+            classificar=lambda texto="", **_k: Classificacao(BAIXO, "tela.localizar", True))
+def localizar_na_tela(texto: str):
+    if not ocr_disponivel():
+        return "Sem OCR instalado não consigo localizar elementos na tela."
+    alvo = str(texto or "").strip().lower()
+    if len(alvo) < 2:
+        return "Diga o texto do botão (pelo menos 2 letras)."
+    try:
+        import pytesseract
+    except Exception:
+        return ("Encontrei o OCR, mas falta a biblioteca Python pytesseract "
+                "(pip install pytesseract). Nada foi clicado.")
+    try:
+        from PIL import Image
+        img = _pag().screenshot().convert("RGB")
+        dados = pytesseract.image_to_data(img, lang="por+eng", output_type=pytesseract.Output.DICT)
+        for indice, palavra in enumerate(dados.get("text", [])):
+            if alvo in (palavra or "").lower():
+                x, y = dados["left"][indice], dados["top"][indice]
+                largura, altura = dados["width"][indice], dados["height"][indice]
+                centro = (x + largura // 2, y + altura // 2)
+                return (f"Achei “{palavra}” na região x={x}, y={y}, largura={largura}, altura={altura} "
+                        f"(centro {centro[0]},{centro[1]}). Nada foi clicado: confirme e eu clico.")
+        return f"Não achei “{texto}” na tela."
+    except Exception as e:
+        return f"Não consegui analisar a tela ({type(e).__name__})."
+
+
+@ferramenta("Clica no CENTRO de um botão já localizado. Exige confirmação do usuário antes.",
+            risco=MEDIO, params={"x": "coordenada x do centro", "y": "coordenada y do centro"},
+            classificar=lambda x=0, y=0, **_k: Classificacao(MEDIO, "tela.clicar_localizado", True,
+                                                            resumo=f"clicar em ({x},{y}) na sua tela"))
+def clicar_em_texto(x: int, y: int):
+    return clicar(x, y)
+
+
+# ---------- webcam (opcional, desligada por padrão) ----------
+def camera_disponivel():
+    """True só se houver câmera acessível. Nunca abre a câmera para "ver se existe"."""
+    try:
+        from cv2 import VideoCapture
+    except Exception:
+        return False, "Falta a biblioteca opencv-python (grátis) para usar a webcam."
+    try:
+        captura = VideoCapture(0)
+        ok = bool(captura and captura.isOpened())
+        if ok:
+            captura.release()
+        return ok, "" if ok else "Nenhuma câmera acessível neste PC."
+    except Exception:
+        return False, "Nenhuma câmera acessível neste PC."
+
+
 # ---------- sistema ----------
 _META = re.compile(r"[&|<>^%`;\r\n]")
 
@@ -820,21 +956,115 @@ def cancelar_desligamento():
     return "Cancelado."
 
 
+# ---------- organização de arquivos com prévia ----------
+@ferramenta("Planeja organizar arquivos de uma pasta por tipo, SEM mover nada ainda. "
+            "Use antes de organizar_arquivos_confirmado; devolva a prévia ao usuário.",
+            params={"pasta": "pasta a organizar (precisa estar na allowlist de diretórios)"},
+            classificar=lambda pasta="", **_: Classificacao(MEDIO, "arquivo.organizar", True))
+def prever_organizacao(pasta: str):
+    base = _pasta_permitida(pasta)
+    if base is None:
+        return "AÇÃO NEGADA: pasta fora das permitidas em permissoes.json."
+    plano = {}
+    for item in sorted(base.iterdir()):
+        if not item.is_file():
+            continue
+        destino = _categoria(item.suffix)
+        plano.setdefault(destino, []).append(item.name)
+    if not plano:
+        return f"Nada para organizar em {base.name}."
+    linhas = [f"{destino}: {len(nomes)} arquivo(s)" for destino, nomes in sorted(plano.items())]
+    return "Prévia (nada foi movido):\n" + "\n".join(linhas) + \
+           "\nConfirme com 'sim' para organizar, ou cancele."
+
+
+def _categoria(sufixo):
+    s = (sufixo or "").lower()
+    if s in {".jpg", ".jpeg", ".png", ".gif", ".webp", ".bmp", ".heic"}:
+        return "Imagens"
+    if s in {".mp4", ".mkv", ".avi", ".mov", ".webm"}:
+        return "Vídeos"
+    if s in {".mp3", ".wav", ".flac", ".m4a", ".ogg"}:
+        return "Áudios"
+    if s in {".pdf", ".doc", ".docx", ".txt", ".xls", ".xlsx", ".ppt", ".pptx", ".csv"}:
+        return "Documentos"
+    if s in {".zip", ".rar", ".7z", ".tar", ".gz"}:
+        return "Compactados"
+    if s in {".exe", ".msi", ".bat", ".cmd"}:
+        return "Instaladores"
+    return "Outros"
+
+
+def _pasta_permitida(caminho):
+    """Só aceita pastas que estão na allowlist de diretórios."""
+    try:
+        alvo = Path(str(caminho)).expanduser().resolve()
+    except Exception:
+        return None
+    for base in seguranca.allowlist("diretorios", []):
+        try:
+            raiz = Path(str(base)).expanduser().resolve()
+        except Exception:
+            continue
+        if alvo == raiz or raiz in alvo.parents:
+            return alvo if alvo.is_dir() else None
+    return None
+
+
+# ---------- controles do Windows ----------
+@ferramenta("Ajusta o brilho da tela (0 a 100). Informa quando o hardware não aceita o controle.",
+            params={"nivel": "0 a 100"}, classificar=lambda nivel=50, **_: Classificacao(BAIXO, "tela.brilho", True))
+def ajustar_brilho(nivel: int):
+    try:
+        valor = max(0, min(100, int(nivel)))
+    except (TypeError, ValueError):
+        return "Preciso de um número de 0 a 100."
+    try:
+        import subprocess as _sp
+        cmd = ("(Get-CimInstance -Namespace root/WMI -ClassName WmiMonitorBrightnessMethods)."
+               f"WmiSetBrightness(1,{valor})")
+        r = _sp.run(["powershell", "-NoProfile", "-Command", cmd], capture_output=True, text=True, timeout=15)
+        if r.returncode == 0:
+            return f"Brilho em {valor}%."
+        return "Não consegui ajustar o brilho: a tela não aceita controle por software (monitor externo)."
+    except Exception as e:
+        return f"Não consegui ajustar o brilho ({type(e).__name__})."
+
+
+# ---------- fluxos nomeados ----------
+@ferramenta("Executa um fluxo nomeado (sequência de passos). Para 'modo jogo', prefira esta "
+            "ferramenta em vez de abrir cada programa separadamente.",
+            params={"fluxo": "id do fluxo: abrir.rocket, modo_jogo ou minimizar"},
+            classificar=lambda fluxo="", **_: Classificacao(BAIXO, "fluxo.executar", True))
+def executar_fluxo(fluxo: str):
+    import fluxos as _fluxos
+    resultado = _fluxos.executar(fluxo, executar, None, "fluxo")
+    linhas = [resultado["resumo"]]
+    for etapa in resultado["etapas"]:
+        marca = "ok" if etapa["ok"] else "falhou"
+        linhas.append(f"- {etapa['rotulo']}: {marca}")
+    return "\n".join(linhas)
+
+
 # ---------- memória e lembretes ----------
 @ferramenta("Guarda um fato sobre o usuário para lembrar sempre.", risco=MEDIO, params={"fato": "Fato a lembrar"},
             classificar=lambda fato="", **_: Classificacao(MEDIO, "memoria.lembrar", True,
                                                            resumo=f"guardar este fato para sempre: {str(fato)[:80]}"))
 def lembrar_fato(fato: str):
-    memoria.salvar_fato(fato)
+    try:
+        memoria.salvar_fato(fato)
+    except memoria.MemoriaLimite as erro:
+        return str(erro)
     return "Anotado."
 
 
 @ferramenta("Esquece um fato guardado.", params={"trecho": "Trecho do fato"})
 def esquecer_fato(trecho: str):
-    if len(trecho.strip()) < 3:   # trecho vazio casaria com TODOS os fatos
-        return "Diga um trecho maior do fato a esquecer."
-    memoria.apagar_fato(trecho)
-    return "Esquecido."
+    try:
+        apagados = memoria.apagar_fato(trecho)   # a própria memória recusa trecho curto
+    except memoria.MemoriaLimite as erro:
+        return str(erro)
+    return "Esquecido." if apagados else "Não achei nenhum fato com esse trecho."
 
 
 @ferramenta("Cria um lembrete para daqui a alguns minutos (calcule os minutos a partir da hora atual).",
@@ -844,8 +1074,21 @@ def criar_lembrete(texto: str, minutos: float):
     return f"Lembrete criado para daqui a {float(minutos):g} minutos."
 
 
+@ferramenta("Cancela um lembrete pendente pelo número da lista ou por um trecho do texto.",
+            params={"numero": "Número mostrado em listar_lembretes (opcional)",
+                    "trecho": "Trecho do texto do lembrete (opcional)"})
+def cancelar_lembrete(numero: int | None = None, trecho: str = ""):
+    """Apaga um lembrete. Sem número nem trecho, não faz nada (evita apagar todos)."""
+    return memoria.cancelar_lembrete(numero=numero, trecho=trecho)
+
+
 @ferramenta("Lista os lembretes pendentes.")
 def listar_lembretes():
+    numerados = memoria.lembretes_numerados()
+    if numerados:
+        linhas = [f"{i['numero']}) {i['hora_local']} — {i['texto']}" for i in numerados]
+        return "Lembretes pendentes:\n" + "\n".join(linhas) + \
+               "\nPara cancelar: diga 'cancele o lembrete 2' ou um trecho do texto."
     itens = memoria.lembretes_pendentes()
     if not itens:
         return "Nenhum lembrete pendente."

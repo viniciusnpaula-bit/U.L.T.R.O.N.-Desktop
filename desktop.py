@@ -9,6 +9,15 @@ import threading
 from pathlib import Path
 
 
+def _aviso(onde: str, erro: BaseException) -> None:
+    """Registra rótulo + tipo do erro; nunca o texto (pode conter chave ou caminho)."""
+    try:
+        import seguranca
+        seguranca.log.warning(f"falha em {onde} ({type(erro).__name__})")
+    except Exception:
+        print(f"[aviso] falha em {onde} ({type(erro).__name__})")
+
+
 def _show_error(title: str, message: str, *, info: bool = False) -> None:
     try:
         from tkinter import messagebox
@@ -44,7 +53,8 @@ def _launch_electron(executable: Path, app_dir: Path, api_url: str, token: str) 
 def main() -> int:
     try:
         import config
-    except Exception:
+    except Exception as erro:
+        _aviso("config", erro)
         _show_error("ULTRON Desktop", "Não consegui carregar a configuração. Execute ULTRON-Setup.exe e tente novamente.")
         return 1
 
@@ -58,7 +68,8 @@ def main() -> int:
         import telegram_bot
         from desktop_api import create_server
         from desktop_runtime import DesktopRuntime
-    except Exception:
+    except Exception as erro:
+        _aviso("imports", erro)
         _show_error("ULTRON Desktop", "Faltam dependências do ULTRON. Execute ULTRON-Setup.exe e tente novamente.")
         return 1
 
@@ -83,20 +94,20 @@ def main() -> int:
             if server_started:
                 try:
                     server.shutdown()
-                except Exception:
-                    pass
+                except Exception as erro:
+                    _aviso("api.shutdown", erro)
             try:
                 server.server_close()
-            except Exception:
-                pass
+            except Exception as erro:
+                _aviso("api.server_close", erro)
         if server_thread is not None and server_thread is not threading.current_thread():
             server_thread.join(timeout=3)
         if runtime is not None:
             try:
                 runtime.set_api_running(False)
                 runtime.shutdown()
-            except Exception:
-                pass
+            except Exception as erro:
+                _aviso("runtime.shutdown", erro)
 
     try:
         core_main.preparar_windows()

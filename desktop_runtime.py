@@ -103,6 +103,8 @@ class DesktopRuntime:
                 kwargs["microphone_device_id"] = self._microphone_device_id
             if "conversa" in parameters:
                 kwargs["conversa"] = self._registrar_conversa
+            if "converter_confirmacao" in parameters:
+                kwargs["converter_confirmacao"] = self._confirmar_interpretacao
             try:
                 if "estado_voz" in inspect.signature(self._main.modo_voz).parameters:
                     kwargs["estado_voz"] = self._set_voice_state
@@ -136,12 +138,163 @@ class DesktopRuntime:
             if len(self._turns) > self.MAX_TURNOS:
                 del self._turns[:-self.MAX_TURNOS]
 
+    # ---- voz e personalidade (Fase 2)
+    def voz_info(self) -> dict:
+        try:
+            import voz
+            return {"preferencias": voz.preferencias(), "ativas": voz.voz_ativa(),
+                    "vozes": voz.vozes_disponiveis()}
+        except Exception as erro:
+            self._registrar_falha("voz.info", erro)
+            return {"preferencias": {}, "ativas": {}, "vozes": [], "erro": "Módulo de voz indisponível."}
+
+    def voz_salvar(self, valores: dict) -> dict:
+        import voz
+        return voz.salvar_preferencias(valores or {})
+
+    def voz_restaurar(self) -> dict:
+        import voz
+        return voz.restaurar_preferencias()
+
+    def voz_testar(self, texto: str = "") -> dict:
+        """Fala uma frase curta. Avisa que o áudio sai pelo PC, não para a nuvem."""
+        import voz
+        frase = (texto or "").strip()[:120] or "Ultrason, teste de voz concluído."
+        resultado = voz.testar_voz(frase)
+        resultado["aviso"] = "O texto é enviado ao serviço de voz (Edge TTS) só para gerar o áudio."
+        return resultado
+
+    def microfone_testar(self) -> dict:
+        import voz
+        resultado = voz.testar_microfone(1.2)
+        resultado["aviso"] = "O teste só mede o nível local; nada é gravado nem enviado."
+        return resultado
+
+    # ---- cofre de credenciais
+    def cofre_status(self) -> dict:
+        import cofre
+        return cofre.status()
+
+    def cofre_guardar(self, nome: str, valor: str) -> dict:
+        import cofre
+        cofre.guardar(nome, valor)
+        return cofre.status()
+
+    def cofre_remover(self, nome: str) -> dict:
+        import cofre
+        cofre.remover(nome)
+        return cofre.status()
+
+    def cofre_testar(self, nome: str) -> dict:
+        """Testa a chave fazendo uma chamada mínima ao provedor (sem gastar tokens)."""
+        import cofre, config
+        if nome not in cofre.PROVEDORES:
+            raise ValueError("Só provedores de IA podem ser testados aqui.")
+        chave = cofre.obter(nome) or config.CHAVES.get(nome, "")
+        if not chave:
+            return {"ok": False, "mensagem": f"{nome}: nenhuma chave configurada."}
+        try:
+            from openai import OpenAI
+            cliente = OpenAI(api_key=chave, base_url=config.URLS[nome], timeout=15)
+            modelos = [m.id for m in cliente.models.list().data][:3]
+            return {"ok": True, "mensagem": f"{nome}: chave aceita ({len(modelos)} modelo(s) visíveis)."}
+        except Exception as erro:
+            nome_erro = type(erro).__name__
+            return {"ok": False, "mensagem": f"{nome}: a chave foi recusada ou a rede falhou ({nome_erro})."}
+
+    # ---- memória (Fase 3)
+    def fatos_listar(self, busca: str = "") -> dict:
+        import memoria
+        return {"fatos": memoria.buscar_fatos(busca, 50) if busca else
+                [{"id": i, "texto": texto} for i, texto in
+                 ((row[0], row[1]) for row in memoria._x("SELECT id, texto FROM fatos ORDER BY id", (), True))],
+                "limite": 50}
+
+    def fatos_corrigir(self, id_, texto) -> dict:
+        import memoria
+        memoria.corrigir_fato(id_, texto)
+        return self.fatos_listar()
+
+    def fatos_apagar(self, id_=None, trecho=None) -> dict:
+        import memoria
+        if id_ is not None:
+            memoria.apagar_fato_por_id(id_)
+        elif trecho:
+            memoria.apagar_fato(trecho)
+        return self.fatos_listar()
+
+    def lembretes_listar(self) -> dict:
+        import memoria
+        return {"lembretes": memoria.lembretes_numerados(),
+                "aviso": "Lembretes só são avisados com o ULTRON aberto."}
+
+    def lembrete_cancelar(self, numero=None, trecho=None) -> dict:
+        import memoria
+        mensagem = memoria.cancelar_lembrete(numero=numero, trecho=trecho or "")
+        return {"mensagem": mensagem, **self.lembretes_listar()}
+
+    def fluxos_listar(self) -> dict:
+        import fluxos
+        return {"fluxos": fluxos.listar()}
+
+    def personalidade_info(self) -> dict:
+        import personalidade
+        return {"atual": personalidade.carregar(), "perfis": personalidade.perfis_disponiveis()}
+
+    def personalidade_salvar(self, valores: dict) -> dict:
+        import personalidade
+        return personalidade.salvar(valores or {})
+
+    def personalidade_restaurar(self) -> dict:
+        import personalidade
+        return personalidade.restaurar_padrao()
+
+    def personalidade_previa(self) -> dict:
+        """Mostra a instrução que a IA recebe com o perfil atual (sem chamar provedor)."""
+        import personalidade
+        return {"instrucao": personalidade.frase_do_sistema(), "atual": personalidade.carregar()}
+
+    def _confirmar_interpretacao(self, fala: str, incerteza: dict, timeout: float = 20.0) -> bool:
+        """Pede confirmação ao painel quando o reconhecimento ficou ambíguo.
+
+        Usa o MESMO canal de confirmações (request_id + evento), com prazo. Sem
+        resposta (ou painel fechado) o resultado é recusa: nada é executado.
+        """
+        request_id = uuid.uuid4().hex
+        pendente = {"event": threading.Event(), "approved": False, "expired": False,
+                    "pedido": {"risco": "MEDIO"}, "requires_pin": False, "pin": None}
+        with self._pending_lock:
+            self._pending[request_id] = pendente
+        self._events.put({
+            "type": "speech_confirm",
+            "request_id": request_id,
+            "fala": str(fala)[:300],
+            "alternativas": [str(a)[:300] for a in list(incerteza.get("opcoes") or [])[:3]],
+            "motivo": str(incerteza.get("motivo") or "")[:200],
+        })
+        try:
+            return bool(pendente["event"].wait(timeout) and pendente["approved"])
+        finally:
+            with self._pending_lock:
+                self._pending.pop(request_id, None)
+
     def _log_update(self, mensagem: str) -> None:
         try:
             if self._security:
                 self._security.log.info(str(mensagem)[:300])
             else:
                 print(f"[atualizacao] {mensagem}"[:300])
+        except Exception:
+            pass
+
+    def _registrar_falha(self, onde: str, erro: Exception | None = None) -> None:
+        """Registra só o rótulo interno e o TIPO do erro (nunca texto do usuário)."""
+        tipo = type(erro).__name__ if erro is not None else "?"
+        try:
+            if self._security is not None:
+                self._security.log.warning(f"falha interna em {onde} ({tipo})")
+            else:
+                print(f"[aviso] falha interna em {onde} ({tipo})")
         except Exception:
             pass
 

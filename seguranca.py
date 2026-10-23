@@ -19,13 +19,16 @@ import config
 from config import BASE
 
 # ====================== LOGS (com redação de segredos) ======================
+# Preenchido por cofre.aplicar_na_config(): chaves guardadas cifradas também são mascaradas
+SEGREDOS_COFRE = ()
+
 _SEGREDOS = re.compile(r"(?:gsk_|AIza|sk-|ghp_|xox[bap]-)[A-Za-z0-9_\-]{8,}|\b\d{8,10}:[A-Za-z0-9_\-]{30,}\b")
 
 
 def redigir(texto):
     """Troca por *** qualquer chave de API, token ou PIN que apareça em um texto."""
     t = str(texto)
-    for s in (*config.CHAVES.values(), config.TELEGRAM_TOKEN, config.PIN):
+    for s in (*config.CHAVES.values(), config.TELEGRAM_TOKEN, config.PIN, *SEGREDOS_COFRE):
         if s and len(s) >= 4:
             t = t.replace(s, "***")
     return _SEGREDOS.sub("***", t)

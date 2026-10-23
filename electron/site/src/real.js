@@ -41,6 +41,8 @@ export class RealTransport {
           // bat-papo de voz: fala reconhecida ou resposta do núcleo
           this.onEvent({ event: 'CONVERSATION_TURN', data: { role: event.role, text: event.text,
             source: event.source, at: event.at } });
+        } else if (event.type === 'speech_confirm') {
+          this.onEvent({ event: 'SPEECH_CONFIRM', data: event });
         } else if (event.type === 'confirmation_request') {
           this.onEvent({ event: 'CONFIRMATION_REQUIRED', request_id: event.request_id,
             data: { message: event.message, risk: event.risk, requires_pin: event.requires_pin } });

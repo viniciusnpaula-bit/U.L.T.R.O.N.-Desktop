@@ -99,7 +99,7 @@ class DesktopApiTests(unittest.TestCase):
     def test_health_status_and_events_require_token_and_return_expected_data(self):
         status, health = self.call("/api/v1/health")
         self.assertEqual(status, 200)
-        self.assertEqual(health["version"], "1.9.8")
+        self.assertEqual(health["version"], "1.11.0")
         status, snapshot = self.call("/api/v1/status")
         self.assertEqual(status, 200)
         self.assertFalse(snapshot["microphone_paused"])

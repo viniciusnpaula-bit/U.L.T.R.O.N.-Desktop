@@ -20,7 +20,7 @@ const THEMES = ['ultron', 'jarvis', 'amber', 'emerald'];
 const state = {
   connected: false, paused: false, history: [], commands: new Map(),
   pending: null, status: {}, lastResponse: '', sessionCount: 0,
-  turns: [],          // bat-papo de voz: {role, text, source, at}
+  turns: [],          // bate-papo de voz: {role, text, source, at}
   turnKeys: new Set(),
   writing: 0,         // turnos que vieram do campo de texto nesta sessão
 };
@@ -131,7 +131,7 @@ function responder(text) {
   publishHudSnapshot();
 }
 
-/* ── bat-papo de voz ─────────────────────────────────────────────────────── */
+/* ── bate-papo de voz ─────────────────────────────────────────────────────── */
 
 /* Identidade estável por turno: a API e o evento podem trazer a mesma fala. */
 function chaveTurno(turno) {
@@ -376,6 +376,7 @@ function handleEvent(event) {
     }
   }
   if (event.event === 'CONFIRMATION_REQUIRED') confirmation(event);
+  if (event.event === 'SPEECH_CONFIRM') confirmarFala(event);
   if (event.event === 'COMMAND_RESULT') {
     const command = state.commands.get(event.request_id) || 'comando por voz';
     state.commands.delete(event.request_id);
@@ -475,6 +476,371 @@ async function refreshStatus(show = false) {
   } catch (error) {
     connection(false);
     if (show) toast(error.message);
+  }
+}
+
+
+/* ── voz: testar microfone, testar voz e escolher a voz ──────────────────── */
+let vozCache = null;
+
+function vozNota(texto, classe = '') {
+  const alvo = $('testResult');
+  alvo.textContent = texto;
+  alvo.className = `micro nano ${classe}`;
+}
+
+async function carregarVoz() {
+  try {
+    vozCache = await window.ultron.vozInfo();
+    const select = $('voiceSelect');
+    select.replaceChildren();
+    const padrao = document.createElement('option');
+    padrao.value = '';
+    padrao.textContent = 'voz padrão do ULTRON';
+    select.append(padrao);
+    for (const voz of vozCache.vozes || []) {
+      const opcao = document.createElement('option');
+      opcao.value = voz.id;
+      opcao.textContent = voz.rotulo || voz.id;
+      select.append(opcao);
+    }
+    const atual = vozCache.preferencias?.voz || '';
+    select.value = [...select.options].some(o => o.value === atual) ? atual : '';
+    $('voiceActive').textContent = `voz ativa: ${vozCache.ativas?.id || atual || '—'} · reserva: ${vozCache.ativas?.reserva || 'pyttsx3'}`;
+  } catch (error) {
+    vozNota(`não consegui ler as vozes (${error.message})`, 'err');
+  }
+}
+
+async function testarMicrofone() {
+  vozNota('medindo o nível do microfone (1,2 s)…');
+  try {
+    const r = await window.ultron.microfoneTestar();
+    if (r.ok) vozNota(`microfone ok · nível ${r.nivel} · limiar sugerido ${r.limiar_padrao}`, 'ok');
+    else vozNota(r.erro || 'o microfone não respondeu', 'err');
+  } catch (error) {
+    vozNota(`falha no teste de microfone (${error.message})`, 'err');
+  }
+}
+
+async function testarVoz() {
+  vozNota('gerando o áudio de teste…');
+  try {
+    const r = await window.ultron.vozTestar('Ultrason, teste de voz concluído.');
+    if (r.ok) vozNota(`${r.aviso || ''} voz: ${r.voz?.id || '—'}`, 'ok');
+    else vozNota(r.erro || 'não consegui falar', 'err');
+  } catch (error) {
+    vozNota(`falha no teste de voz (${error.message})`, 'err');
+  }
+}
+
+async function salvarVoz() {
+  const voz = $('voiceSelect').value;
+  if (!voz) { vozNota('escolha uma voz na lista antes de aplicar.'); return; }
+  try {
+    await window.ultron.vozSalvar({ voz });
+    await carregarVoz();
+    vozNota('voz salva. Use "testar voz" para ouvir.', 'ok');
+  } catch (error) {
+    vozNota(`não consegui salvar a voz (${error.message})`, 'err');
+  }
+}
+
+/* ── personalidade: perfil, tratamento, prévia e padrão ──────────────────── */
+let perfilAtual = 'ultron';
+
+function pintarPerfil(perfil) {
+  perfilAtual = perfil;
+  document.querySelectorAll('[data-profile]').forEach(node => {
+    node.setAttribute('aria-checked', String(node.dataset.profile === perfil));
+  });
+}
+
+async function carregarPersonalidade() {
+  try {
+    const info = await window.ultron.personalidadeInfo();
+    const atual = info.atual || {};
+    pintarPerfil(atual.perfil || 'ultron');
+    $('tratamentoInput').value = atual.tratamento || '';
+    $('profileNote').textContent = `perfil ${atual.perfil || 'ultron'} · tom: ${atual.tom || '—'}`;
+    $('profileNote').className = 'micro nano ok';
+  } catch (error) {
+    $('profileNote').textContent = `não consegui ler a personalidade (${error.message})`;
+    $('profileNote').className = 'micro nano err';
+  }
+}
+
+async function salvarPersonalidade() {
+  try {
+    const salvo = await window.ultron.personalidadeSalvar({
+      perfil: perfilAtual,
+      tratamento: $('tratamentoInput').value.trim(),
+    });
+    $('profileNote').textContent = `aplicado: perfil ${salvo.perfil} · tratamento “${salvo.tratamento}”`;
+    $('profileNote').className = 'micro nano ok';
+  } catch (error) {
+    $('profileNote').textContent = `não consegui aplicar (${error.message})`;
+    $('profileNote').className = 'micro nano err';
+  }
+}
+
+async function previaPersonalidade() {
+  try {
+    const r = await window.ultron.personalidadePrevia();
+    $('profileNote').textContent = r.instrucao;
+    $('profileNote').className = 'micro nano';
+  } catch (error) {
+    $('profileNote').textContent = `não consegui montar a prévia (${error.message})`;
+    $('profileNote').className = 'micro nano err';
+  }
+}
+
+async function restaurarPersonalidade() {
+  try {
+    await window.ultron.personalidadeRestaurar();
+    await carregarPersonalidade();
+    $('profileNote').textContent = 'personalidade restaurada ao padrão.';
+  } catch (error) {
+    $('profileNote').textContent = `não consegui restaurar (${error.message})`;
+  }
+}
+
+/* Confirmação de fala incerta: mostramos as interpretações e NADA é executado
+   sem escolha. Cancelar significa não executar. */
+function confirmarFala(event) {
+  const dados = event.data || {};
+  const opcoes = Array.isArray(dados.alternativas) && dados.alternativas.length ? dados.alternativas : [dados.fala];
+  const linha = opcoes.map((opcao, indice) => `${indice + 1}. ${opcao}`).join('\n');
+  const aceito = window.confirm(`Não entendi com certeza. ${dados.motivo || ''}\n\n${linha}\n\nExecutar a primeira interpretação?`);
+  fita('notice', aceito ? `confirmado: ${opcoes[0]}` : `descartado: ${opcoes[0]}`);
+  // responde pelo canal oficial de confirmações (sem PIN: não é ação crítica)
+  if (dados.request_id) {
+    transport.confirm(dados.request_id, aceito).catch(() => {});
+  }
+}
+
+
+
+/* ── cofre de chaves: salvar cifrado, testar e remover ───────────────────── */
+/* A chave NUNCA volta para a tela: o status traz só o final mascarado e a fonte. */
+function notaCofre(texto, classe = '') {
+  const alvo = $('cofreNote');
+  alvo.textContent = texto;
+  alvo.className = `micro nano ${classe}`;
+}
+
+function pintarCofre(status) {
+  const lista = $('cofreList');
+  lista.replaceChildren();
+  for (const item of status.itens || []) {
+    const linha = document.createElement('div');
+    linha.className = 'cofre-item';
+    const nome = document.createElement('span');
+    nome.textContent = item.rotulo;
+    const estado = document.createElement('b');
+    estado.className = item.configurada ? 'ok' : 'nok';
+    estado.textContent = item.configurada
+      ? `${item.fonte === 'cofre' ? 'cofre' : '.env'} · ${item.dica || '••••'}`
+      : 'não configurada';
+    const acoes = document.createElement('div');
+
+    if (item.nome === 'gemini' || item.nome === 'groq' || item.nome === 'nvidia') {
+      const testar = document.createElement('button');
+      testar.type = 'button';
+      testar.textContent = 'testar';
+      testar.disabled = !item.configurada;
+      testar.onclick = async () => {
+        notaCofre('testando a chave com o provedor…');
+        try {
+          const r = await window.ultron.cofreTestar(item.nome);
+          notaCofre(r.mensagem, r.ok ? 'ok' : 'err');
+        } catch (error) { notaCofre(`falha no teste (${error.message})`, 'err'); }
+      };
+      acoes.append(testar);
+    }
+    if (item.fonte === 'cofre') {
+      const remover = document.createElement('button');
+      remover.type = 'button';
+      remover.textContent = 'remover';
+      remover.onclick = async () => {
+        if (!window.confirm(`Remover a credencial ${item.rotulo} do cofre?\n\nSe houver chave no .env, ela volta a ser usada.`)) return;
+        try {
+          const novo = await window.ultron.cofreRemover(item.nome);
+          pintarCofre(novo);
+          notaCofre('credencial removida do cofre.', 'ok');
+        } catch (error) { notaCofre(`não consegui remover (${error.message})`, 'err'); }
+      };
+      acoes.append(remover);
+    }
+    linha.append(nome, estado, acoes);
+    lista.append(linha);
+  }
+  $('cofreProtecao').textContent = `proteção: ${status.protecao} · precedência: ${status.precedencia}`;
+  $('cofreArquivo').textContent = status.arquivo || 'dados/cofre.json';
+}
+
+async function carregarCofre() {
+  try {
+    pintarCofre(await window.ultron.cofreStatus());
+  } catch (error) {
+    notaCofre(`não consegui ler o cofre (${error.message})`, 'err');
+  }
+}
+
+async function salvarNoCofre() {
+  const nome = $('cofreNome').value;
+  const campo = $('cofreValor');
+  const valor = campo.value.trim();
+  if (!valor) { notaCofre('cole a chave antes de salvar.'); return; }
+  notaCofre('salvando cifrado…');
+  try {
+    const status = await window.ultron.cofreGuardar(nome, valor);
+    campo.value = '';                    // o valor não fica na tela
+    pintarCofre(status);
+    notaCofre('credencial guardada cifrada. Use "testar" para confirmar que o provedor aceita.', 'ok');
+    carregarVoz();
+  } catch (error) {
+    notaCofre(`não consegui salvar (${error.message})`, 'err');
+  }
+}
+
+/* ── memória: consultar, corrigir e apagar fatos ─────────────────────────── */
+/* Nada é apagado sem confirmação: cada botão pede "sim" antes de agir. */
+function fatoLinha(fato) {
+  const item = document.createElement('div');
+  item.className = 'fact';
+  item.dataset.id = String(fato.id);
+  const texto = document.createElement('p');
+  texto.textContent = fato.texto;
+  const acoes = document.createElement('div');
+  acoes.className = 'fact-actions';
+
+  const editar = document.createElement('button');
+  editar.type = 'button';
+  editar.textContent = 'editar';
+  editar.title = 'Corrigir este fato';
+  editar.onclick = async () => {
+    const novo = window.prompt('Corrigir o fato:', fato.texto);
+    if (novo === null) return;
+    const limpo = novo.trim();
+    if (!limpo || limpo === fato.texto) return;
+    try {
+      const r = await window.ultron.fatoCorrigir(fato.id, limpo);
+      pintarFatos(r.fatos, 'fato corrigido.');
+    } catch (error) {
+      notaFatos(`não consegui corrigir (${error.message})`, 'err');
+    }
+  };
+
+  const apagar = document.createElement('button');
+  apagar.type = 'button';
+  apagar.textContent = 'apagar';
+  apagar.title = 'Apagar este fato';
+  apagar.onclick = async () => {
+    if (!window.confirm(`Apagar este fato?\n\n“${fato.texto}”`)) return;
+    try {
+      const r = await window.ultron.fatoApagar(fato.id);
+      pintarFatos(r.fatos, 'fato apagado.');
+    } catch (error) {
+      notaFatos(`não consegui apagar (${error.message})`, 'err');
+    }
+  };
+
+  acoes.append(editar, apagar);
+  item.append(texto, acoes);
+  return item;
+}
+
+function notaFatos(texto, classe = '') {
+  const alvo = $('factsNote');
+  alvo.textContent = texto;
+  alvo.className = `micro nano ${classe}`;
+}
+
+function pintarFatos(fatos, aviso = '') {
+  const lista = $('factsList');
+  lista.replaceChildren();
+  if (!fatos || !fatos.length) {
+    const vazio = document.createElement('span');
+    vazio.className = 'micro nano';
+    vazio.textContent = 'nenhum fato guardado';
+    lista.append(vazio);
+  } else {
+    for (const fato of fatos) lista.append(fatoLinha(fato));
+  }
+  if (aviso) notaFatos(`${aviso} (${fatos?.length ?? 0} guardados)`, 'ok');
+}
+
+async function carregarFatos() {
+  try {
+    const r = await window.ultron.fatosListar($('factsSearch').value.trim());
+    pintarFatos(r.fatos, '');
+    notaFatos(`${r.fatos.length} de até ${r.limite} fatos`);
+  } catch (error) {
+    notaFatos(`não consegui ler a memória (${error.message})`, 'err');
+  }
+}
+
+function paginaLembretes(itens, aviso = '') {
+  const lista = $('lembretesList');
+  lista.replaceChildren();
+  if (!itens || !itens.length) {
+    const vazio = document.createElement('span');
+    vazio.className = 'micro nano';
+    vazio.textContent = 'nenhum lembrete pendente';
+    lista.append(vazio);
+  }
+  for (const item of itens || []) {
+    const linha = document.createElement('div');
+    linha.className = 'fact';
+    const texto = document.createElement('p');
+    texto.textContent = `${item.hora_local} — ${item.texto}`;
+    const acoes = document.createElement('div');
+    acoes.className = 'fact-actions';
+    const cancelar = document.createElement('button');
+    cancelar.type = 'button';
+    cancelar.textContent = 'cancelar';
+    cancelar.title = 'Apagar este lembrete';
+    cancelar.onclick = async () => {
+      if (!window.confirm(`Cancelar o lembrete “${item.texto}”?`)) return;
+      try {
+        const r = await window.ultron.lembreteCancelar(item.numero, '');
+        paginaLembretes(r.lembretes, r.mensagem);
+      } catch (error) {
+        $('lembretesNote').textContent = `não consegui cancelar (${error.message})`;
+      }
+    };
+    acoes.append(cancelar);
+    linha.append(texto, acoes);
+    lista.append(linha);
+  }
+  if (aviso) $('lembretesNote').textContent = `${aviso} · ${(itens || []).length} pendente(s)`;
+}
+
+async function carregarLembretes() {
+  try {
+    const r = await window.ultron.lembretesListar();
+    paginaLembretes(r.lembretes, '');
+    $('lembretesNote').textContent = (r.lembretes || []).length
+      ? `${r.lembretes.length} pendente(s) · ${r.aviso}`
+      : r.aviso;
+  } catch {
+    $('lembretesNote').textContent = 'não consegui ler os lembretes';
+  }
+}
+
+/* Fluxos: o núcleo executa etapa por etapa e devolve o resultado de cada uma. */
+async function rodarFluxo(id) {
+  const nota = $('fluxoNote');
+  nota.textContent = 'executando…';
+  nota.className = 'micro nano';
+  try {
+    await send(`Execute o fluxo ${id}`);
+    nota.textContent = `fluxo ${id} enviado ao núcleo — o resultado por etapa aparece na câmara e na conversa.`;
+    nota.className = 'micro nano ok';
+  } catch (error) {
+    nota.textContent = `não consegui iniciar o fluxo (${error.message})`;
+    nota.className = 'micro nano err';
   }
 }
 
@@ -663,7 +1029,7 @@ function restaurarRails() {
 }
 
 
-/* Mesma família do bat-papo: entra pela direita, encostada na câmara, sem
+/* Mesma família do bate-papo: entra pela direita, encostada na câmara, sem
    cobrir o conteúdo. Fecha pela seta "fechar", pelo Esc ou clicando fora. */
 let gavetaAberta = false;
 
@@ -685,6 +1051,11 @@ function drawer(open) {
   if (open) {
     posicionarBarra();
     refreshMicrophones();
+    carregarVoz();
+    carregarPersonalidade();
+    carregarFatos();
+    carregarLembretes();
+    carregarCofre();
     $('closeDrawer')?.focus();
   } else {
     $('openSettings')?.focus();
@@ -715,6 +1086,27 @@ $('voiceStart').onclick = toggleMicrophone;
 $('refreshMicrophones').onclick = () => refreshMicrophones();
 $('saveMicrophone').onclick = saveMicrophone;
 $('testConnection').onclick = () => refreshStatus(true);
+document.querySelectorAll('[data-fluxo]').forEach(botao => botao.onclick = () => rodarFluxo(botao.dataset.fluxo));
+$('cofreSalvar').onclick = salvarNoCofre;
+$('cofreValor').addEventListener('keydown', event => { if (event.key === 'Enter') salvarNoCofre(); });
+$('factsRefresh').onclick = carregarFatos;
+$('factsSearch').addEventListener('keydown', event => { if (event.key === 'Enter') carregarFatos(); });
+$('testMic').onclick = testarMicrofone;
+$('testVoice').onclick = testarVoz;
+$('saveVoice').onclick = salvarVoz;
+document.querySelectorAll('[data-profile]').forEach(node => node.onclick = () => {
+  pintarPerfil(node.dataset.profile);
+  salvarPersonalidade();
+});
+$('savePersonality').onclick = salvarPersonalidade;
+$('saveMicrophone').onclick = salvarMicrophone;
+$('refreshMicrophones').onclick = () => refreshMicrophones();
+$('testMic').onclick = async () => { const n = await window.ultron?.microfoneTestar?.(); $('testResult').textContent = n?.message || n?.mensagem || '—'; };
+$('testVoice').onclick = async () => { const n = await window.ultron?.vozTestar?.('Olá, presente'); $('testResult').textContent = n?.message || n?.mensagem || '—'; };
+$('updateAction').onclick = atualizarUltron;
+$('previewPersonality').onclick = previaPersonalidade;
+$('resetPersonality').onclick = restaurarPersonalidade;
+
 $('updateAction').onclick = atualizarUltron;
 $('updateRestart').onclick = reiniciarAgora;
 $('updateRollback').onclick = desfazerAtualizacao;
@@ -780,8 +1172,17 @@ document.addEventListener('visibilitychange', () => orbLoop(!document.hidden));
 window.addEventListener('beforeunload', () => { orb.parar(); campo.parar(); transport.disconnect(); });
 
 (async () => {
-  try { await transport.connect(); connection(true); }
-  catch (error) { connection(false); toast(error.message); fita('notice', 'API local indisponível. Abra pelo ULTRON.exe.'); }
+  try {
+    await transport.connect();
+    connection(true);
+  } catch (est) {
+    if (est && typeof est.message === 'string') {
+      $('updateLine').textContent = 'Aguardando o núcleo local... (abra pelo atalho ULTRON Desktop)';
+    }
+  }
+  // AO ABRIR: barra de ajustes (sistema) aberta por padrão — usuário pediu
+  drawer(true);
+  // catch protegida pelo bloco externo; não quebra a inicialização
   orbLoop(true);
   carregarConversa();                       // falas que aconteceram antes do painel abrir
   window.ultron?.updateInfo?.().then(info => {

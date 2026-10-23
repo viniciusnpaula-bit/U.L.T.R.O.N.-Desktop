@@ -100,13 +100,63 @@ def create_server(runtime, token: str, host: str = "127.0.0.1", port: int = PREF
             path = self._path()
             try:
                 if path == _PREFIX + "health":
-                    self._send(200, {"ok": True, "version": "1.9.8"})
+                    self._send(200, {"ok": True, "version": "1.11.0"})
                 elif path == _PREFIX + "status":
                     self._send(200, runtime.get_snapshot())
                 elif path == _PREFIX + "events":
                     self._send(200, {"events": runtime.poll_events()})
                 elif path == _PREFIX + "microphones":
                     self._send(200, runtime.list_microphones())
+                elif path == _PREFIX + "voz":
+                    self._send(200, runtime.voz_info())
+                elif path == _PREFIX + "lembretes/cancelar":
+                    if not set(body) <= {"numero", "trecho"} or not body:
+                        self._send(400, {"error": "invalid_lembrete_payload"})
+                        return
+                    numero = body.get("numero")
+                    if numero is not None and not isinstance(numero, int):
+                        self._send(400, {"error": "invalid_lembrete_payload"})
+                        return
+                    self._send(200, runtime.lembrete_cancelar(numero, str(body.get("trecho") or "")))
+                elif path == _PREFIX + "cofre":
+                    self._send(200, runtime.cofre_status())
+                elif path == _PREFIX + "cofre":
+                    if set(body) - {"nome", "valor"} or not isinstance(body.get("nome"), str):
+                        self._send(400, {"error": "invalid_cofre_payload"})
+                        return
+                    try:
+                        self._send(200, runtime.cofre_guardar(body["nome"], str(body.get("valor") or "")))
+                    except ValueError:
+                        self._send(400, {"error": "invalid_credential"})
+                elif path == _PREFIX + "cofre/remover":
+                    if set(body) != {"nome"} or not isinstance(body.get("nome"), str):
+                        self._send(400, {"error": "invalid_cofre_payload"})
+                        return
+                    self._send(200, runtime.cofre_remover(body["nome"]))
+                elif path == _PREFIX + "cofre/testar":
+                    if set(body) != {"nome"} or not isinstance(body.get("nome"), str):
+                        self._send(400, {"error": "invalid_cofre_payload"})
+                        return
+                    self._send(200, runtime.cofre_testar(body["nome"]))
+                elif path == _PREFIX + "fatos":
+                    self._send(200, runtime.fatos_listar())
+                elif path == _PREFIX + "fluxos":
+                    self._send(200, runtime.fluxos_listar())
+                elif path == _PREFIX + "lembretes":
+                    self._send(200, runtime.lembretes_listar())
+                elif path == _PREFIX + "fatos":
+                    permitido = {"id", "texto", "trecho"}
+                    if not set(body) <= permitido or not ({"id"} & set(body)):
+                        self._send(400, {"error": "invalid_fato_payload"})
+                        return
+                    if "texto" in body:
+                        self._send(200, runtime.fatos_corrigir(body["id"], str(body["texto"])[:300]))
+                    else:
+                        self._send(200, runtime.fatos_apagar(body.get("id")))
+                elif path == _PREFIX + "personalidade":
+                    self._send(200, runtime.personalidade_info())
+                elif path == _PREFIX + "personalidade/previa":
+                    self._send(200, runtime.personalidade_previa())
                 elif path == _PREFIX + "update":
                     self._send(200, runtime.update_info())
                 elif path == _PREFIX + "update/check":
@@ -181,6 +231,51 @@ def create_server(runtime, token: str, host: str = "127.0.0.1", port: int = PREF
                     import seguranca
                     seguranca.parar_tudo()
                     self._send(200, {"stopped": True})
+                elif path == _PREFIX + "voz":
+                    if set(body) - {"voz", "pitch", "rate"}:
+                        self._send(400, {"error": "invalid_voz_payload"})
+                        return
+                    self._send(200, runtime.voz_salvar(body))
+                elif path == _PREFIX + "voz/restaurar":
+                    if body:
+                        self._send(400, {"error": "empty_payload_required"})
+                        return
+                    self._send(200, runtime.voz_restaurar())
+                elif path == _PREFIX + "voz/testar":
+                    if set(body) - {"texto"}:
+                        self._send(400, {"error": "invalid_voz_test_payload"})
+                        return
+                    self._send(200, runtime.voz_testar(str(body.get("texto") or "")))
+                elif path == _PREFIX + "microfone/testar":
+                    if body:
+                        self._send(400, {"error": "empty_payload_required"})
+                        return
+                    self._send(200, runtime.microfone_testar())
+                elif path == _PREFIX + "fatos":
+                    self._send(200, runtime.fatos_listar())
+                elif path == _PREFIX + "fluxos":
+                    self._send(200, runtime.fluxos_listar())
+                elif path == _PREFIX + "lembretes":
+                    self._send(200, runtime.lembretes_listar())
+                elif path == _PREFIX + "fatos":
+                    permitido = {"id", "texto", "trecho"}
+                    if not set(body) <= permitido or not ({"id"} & set(body)):
+                        self._send(400, {"error": "invalid_fato_payload"})
+                        return
+                    if "texto" in body:
+                        self._send(200, runtime.fatos_corrigir(body["id"], str(body["texto"])[:300]))
+                    else:
+                        self._send(200, runtime.fatos_apagar(body.get("id")))
+                elif path == _PREFIX + "personalidade":
+                    if set(body) - {"perfil", "ton", "tamanho", "tratamento", "extras"}:
+                        self._send(400, {"error": "invalid_personalidade_payload"})
+                        return
+                    self._send(200, runtime.personalidade_salvar(body))
+                elif path == _PREFIX + "personalidade/restaurar":
+                    if body:
+                        self._send(400, {"error": "empty_payload_required"})
+                        return
+                    self._send(200, runtime.personalidade_restaurar())
                 elif path == _PREFIX + "update/apply":
                     if set(body) - {"restart_after"} or ("restart_after" in body and type(body["restart_after"]) is not bool):
                         self._send(400, {"error": "invalid_update_payload"})

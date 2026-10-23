@@ -49,6 +49,25 @@ def loop_lembretes():
         time.sleep(5)
 
 
+def atalho_falar(evento):
+    """Atalho global de segurar para falar (HOTKEY_FALAR).
+
+    A gravação acontece no laço de voz (que já tem o microfone); aqui só avisamos.
+    Nunca grava com a escuta pausada.
+    """
+    combinacao = getattr(config, "HOTKEY_FALAR", "") or ""
+    if not combinacao:
+        return
+    try:
+        import keyboard
+        # press -> começa a gravar; release -> envia o que foi dito
+        keyboard.add_hotkey(combinacao, lambda: evento.set(), trigger_on_release=False)
+        keyboard.add_hotkey(combinacao, lambda: evento.clear(), trigger_on_release=True)
+        print(f"[segurar para falar] atalho: {combinacao}")
+    except Exception as e:
+        print(f"[aviso] atalho de falar indisponível: {e}")
+
+
 def atalho_parada():
     try:
         import keyboard
@@ -145,13 +164,38 @@ def modo_voz(bandeja=False, entrada_teclado=True, stop_event=None,
              ouvido_pronto: Callable[[object], None] | None = None,
              estado_voz: Callable[[str, str | None], None] | None = None,
              microphone_device_index=None, microphone_device_id=None,
-             conversa: Callable[[str, str, str], None] | None = None):
+             conversa: Callable[[str, str, str], None] | None = None,
+             converter_confirmacao: Callable[[str, dict], bool] | None = None):
     def publicar_estado(estado, erro=None):
         if estado_voz is not None:
             try:
                 estado_voz(estado, erro)
             except Exception:
                 pass
+
+    def responder_com_voz(comando, confirmar, origem):
+        """Responde falando: com streaming, a 1ª frase toca enquanto o resto é gerado.
+
+        Se o streaming não render nada, `finalizar()` cai no fluxo normal e a fala
+        acontece depois — o comportamento anterior fica preservado.
+        """
+        try:
+            partes, finalizar = cerebro.processar_stream(comando, confirmar, origem)
+        except Exception as erro:
+            seguranca.log.warning(f"Streaming indisponível ({type(erro).__name__}); modo normal.")
+            texto = responder(comando, confirmar, origem)
+            voz.falar(texto)
+            return texto
+        t0 = time.perf_counter()
+        falado = voz.falar_partes(partes)
+        if falado:
+            # streaming funcionou: ainda precisamos gravar o histórico
+            finalizar()
+            seguranca.log.info(f"[tempo] 1ª frase falada em {time.perf_counter() - t0:.1f}s")
+            return falado
+        texto = finalizar()
+        voz.falar(texto)
+        return texto
 
     def publicar_conversa(papel, texto):
         """Leva cada fala reconhecida e cada resposta ao painel (bat-papo de voz)."""
@@ -165,10 +209,14 @@ def modo_voz(bandeja=False, entrada_teclado=True, stop_event=None,
     import voz
     ouvido = voz.Ouvido(device_index=microphone_device_index, device_id=microphone_device_id)
     ouvido.pausado = pausado
+    falar_agora = threading.Event()   # ligado enquanto o atalho "segurar para falar" está pressionado
+    ouvido.pedido_manual = falar_agora
     if ouvido_pronto is not None:
         ouvido_pronto(ouvido)
     seguranca.ganchos_parada.append(voz.parar_fala)
     cerebro.NOTIFICADORES.append(lambda t: (print(f"\nUltron: {t}"), voz.falar(t)))
+
+    atalho_falar(falar_agora)
 
     confirmar_voz = confirmacao.criar_confirmador_voz(ouvido, voz)
 
@@ -179,7 +227,7 @@ def modo_voz(bandeja=False, entrada_teclado=True, stop_event=None,
         voz.falar(resposta)
 
     def loop():
-        calibrado, falhas, janela, device_generation = False, 0, 0.0, -1   # janela: 10s sem precisar do nome após uma resposta
+        calibrado, falhas, janela, device_generation = False, 0, 0.0, -1   # janela: JANELA_SEGUIMENTO sem precisar do nome após uma resposta
         pausado_reportado = False
         erro_audio = None
         while stop_event is None or not stop_event.is_set():
@@ -213,10 +261,22 @@ def modo_voz(bandeja=False, entrada_teclado=True, stop_event=None,
                     erro_audio = None
                     voz.falar(f"Ultron online. À sua disposição, {config.NOME}.")
                     print("Diga 'Ei, Ultron' seguido do comando.")
+                if falar_agora.is_set() and not pausado.is_set():
+                    # "segurar para falar": grava só enquanto a tecla está pressionada
+                    publicar_estado("ouvindo")
+                    texto = ouvido.escutar_manual()
+                    if texto:
+                        publicar_conversa("user", texto)
+                        publicar_estado("processando")
+                        resposta = responder_com_voz(texto, confirmar_voz, "voz")
+                        publicar_conversa("assistant", resposta)
+                        janela = time.time() + getattr(config, "JANELA_SEGUIMENTO", 6.0)
+                    continue
                 if erro_audio is None:
                     publicar_estado("ouvindo")
-                texto = ouvido.escutar()
-                erro_reconhecimento = getattr(ouvido, "ultimo_erro", None)
+                detalhe = ouvido.escutar_detalhado() if hasattr(ouvido, "escutar_detalhado") else {"texto": ouvido.escutar(), "alternativas": [], "erro": None}
+                texto = detalhe.get("texto")
+                erro_reconhecimento = detalhe.get("erro") or getattr(ouvido, "ultimo_erro", None)
                 if erro_reconhecimento:
                     erro_audio = str(erro_reconhecimento)[:180]
                     publicar_estado("erro", erro_audio)
@@ -249,18 +309,24 @@ def modo_voz(bandeja=False, entrada_teclado=True, stop_event=None,
                 cmd = texto
             else:
                 continue
+            incerteza = cerebro.interpretacao_incerta(cmd, detalhe.get("alternativas") or [])
+            if incerteza.get("confirmar") and converter_confirmacao:
+                publicar_conversa("user", cmd)
+                if not converter_confirmacao(cmd, incerteza):
+                    publicar_conversa("assistant", "Deixei de executar porque a fala estava ambígua.")
+                    janela = time.time() + getattr(config, "JANELA_SEGUIMENTO", 6.0)
+                    continue
             try:
                 publicar_conversa("user", cmd)
                 publicar_estado("processando")
                 t_ia = time.perf_counter()
-                resposta = responder(cmd, confirmar_voz, "voz")
+                resposta = responder_com_voz(cmd, confirmar_voz, "voz")
                 seguranca.log.info(f"[tempo] IA {time.perf_counter() - t_ia:.1f}s")
                 publicar_conversa("assistant", resposta)
-                voz.falar(resposta)
             except Exception as e:
                 seguranca.log.error(f"Erro ao responder: {e}")
             publicar_estado("ouvindo")
-            janela = time.time() + 10
+            janela = time.time() + getattr(config, 'JANELA_SEGUIMENTO', 6.0)
         publicar_estado("encerrado")
 
     if not bandeja:

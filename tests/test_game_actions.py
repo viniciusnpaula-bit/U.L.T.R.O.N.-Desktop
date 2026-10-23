@@ -115,10 +115,10 @@ class GameActionTests(unittest.TestCase):
             root / "electron" / "package.json", root / "electron" / "package-lock.json",
             root / "electron" / "preload.js", root / "electron" / "mini-preload.js",
             root / "desktop_api.py", root / "electron" / "site" / "index.html",
-            root / "LEIA-ME.txt", root / "electron" / "README.md", root / "NOTAS-RECONSTRUCAO.txt",
+            root / "LEIA-ME.txt", root / "electron" / "README.md", root / "CHANGELOG.md",
         )
         for path in product_files:
-            self.assertIn("1.9.8", path.read_text(encoding="utf-8"), str(path))
+            self.assertIn("1.11.0", path.read_text(encoding="utf-8"), str(path))
         self.assertIn('"version"]', (root / "tools" / "build_setup.py").read_text(encoding="utf-8"))
         self.assertIn("ULTRON-Desktop-v", (root / "tools" / "build_setup.py").read_text(encoding="utf-8"))
 

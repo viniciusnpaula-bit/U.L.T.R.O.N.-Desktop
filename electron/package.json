@@ -1,7 +1,7 @@
 {
   "name": "ultron-desktop",
-  "version": "1.9.8",
-  "description": "U.L.T.R.O.N. Desktop para Windows — interface nativa baseada na camada web do ULTRON",
+  "version": "1.11.2",
+  "description": "U.L.T.R.O.N. Desktop para Windows \u2014 interface nativa baseada na camada web do ULTRON",
   "main": "main.js",
   "author": "U.L.T.R.O.N.",
   "license": "UNLICENSED",
@@ -39,7 +39,6 @@
       "site/src/real.js",
       "package.json",
       "site/src/orb.js",
-      "site/preview-mock.js",
       "site/zoom-lock.js"
     ],
     "win": {

@@ -1,6 +1,6 @@
 U.L.T.R.O.N. DESKTOP — INSTALAÇÃO (3 passos)
 
-1. Instale Python 3.10+ (64 bits) e Node.js LTS. Ambos marcam "adicionar ao PATH" por padrão.
+1. Instale Python 3.12+ (64 bits) e Node.js LTS. Ambos marcam "adicionar ao PATH" por padrão.
    Python: https://www.python.org/downloads/windows/
    Node.js: https://nodejs.org
 
@@ -19,7 +19,7 @@ PRIMEIRO USO
 O QUE MUDOU NO INSTALADOR (por que não é mais um .bat)
 - setup.bat foi removido. Um .bat que chama python, pip e npm é o padrão que mais
   antivírus marca como suspeito, e ele não tinha ícone, versão nem assinatura.
-- Agora existe um único programa: ULTRON-Setup.exe (ícone oficial, versão 1.9.8,
+- Agora existe um único programa: ULTRON-Setup.exe (ícone oficial, versão 1.11.0,
   descrição, log em logs\setup.log). Ele não usa %TEMP%, não pede elevação,
   não escreve no registro e não baixa nada além das dependências listadas.
 - Reexecutar o instalador conserta (repair) e atualiza sem refazer tudo.
@@ -30,7 +30,8 @@ INTERFACE E VOZ
 - O Desktop inicia o núcleo ULTRON e a API local (só em 127.0.0.1, com token por sessão).
 - O núcleo tenta Gemini, Groq e NVIDIA Build na ordem de PROVEDORES no .env.
 - O microfone é um botão: pausa/retoma a escuta contínua do núcleo.
-- Diga "Ei, Ultron" seguido do comando.
+- Diga "Ei, Ultron" seguido do comando — ou segure Ctrl+Alt+Espaço (HOTKEY_FALAR),
+fale e solte: o comando é enviado sem precisar da palavra de ativação.
 - Ações rápidas na tela inicial: navegador, Spotify, música, volume, Rocket League, modo jogo.
 - Fechar o painel encerra a API e o núcleo.
 

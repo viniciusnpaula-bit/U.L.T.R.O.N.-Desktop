@@ -64,30 +64,41 @@ test('health failure stays offline and never enables a mock transport', async ()
   assert.equal(transport.mode, 'real');
 });
 
-test('desktop UI keeps PIN masked and removes manual credentials and microphone subprocesses', async () => {
+test('a interface nunca expõe o PIN e não cria captura própria', async () => {
   const site = new URL('../', import.meta.url);
   const app = await readFile(fileURLToPath(new URL('app.js', site)), 'utf8');
   const html = await readFile(fileURLToPath(new URL('index.html', site)), 'utf8');
   const css = await readFile(fileURLToPath(new URL('style.css', site)), 'utf8');
+  // campo de PIN é password e só existe quando o núcleo pede
   assert.match(app, /pin\.type\s*=\s*'password'/);
   assert.match(app, /data\.requires_pin/);
+  assert.match(app, /transport\.confirm\(/);
+  // a parada de emergência vai pelo canal do núcleo
   assert.match(app, /transport\.emergencyStop\(\)/);
+  // nenhuma captura de áudio, credencial na tela ou transporte falso no app
   assert.doesNotMatch(app, /voiceListen|voiceSpeak|sessionStorage|MockTransport/);
   assert.doesNotMatch(html, /apiTokenInput|apiUrlInput|corePathInput/);
-  assert.match(css, /--red:\s*#f3293f/i);
+  assert.doesNotMatch(html, /preview-mock\.js/);   // o mock saiu do app
+  // a paleta viva do núcleo continua existindo (tema controla --core)
+  assert.match(css, /--core:\s*#ff3446/i);
 });
 
-test('theme changes red accents without recoloring the ULTRON logo', async () => {
+test('trocar de tema muda a cor viva sem recolorir a logo', async () => {
   const site = new URL('../', import.meta.url);
   const css = await readFile(fileURLToPath(new URL('style.css', site)), 'utf8');
   const html = await readFile(fileURLToPath(new URL('index.html', site)), 'utf8');
-  assert.match(html, /<img class="brand-icon" src="icons\/ULTRON-Logo\.png"/);
-  assert.match(css, /\.brand-icon\s*\{[^}]*object-fit:\s*cover/s);
-  assert.doesNotMatch(css, /:root\[data-theme=.*?\.brand-icon/s);
-  assert.match(css, /--red-bright:\s*color-mix\(in srgb, var\(--red\)/);
-  assert.match(css, /\.header-clock b\s*\{[^}]*color:\s*var\(--red-bright\)/s);
-  assert.match(css, /\.side-mic-toggle\s*\{[^}]*var\(--red-border\)/s);
-  assert.match(css, /\.text-btn\s*\{[^}]*color:\s*var\(--red-bright\)/s);
-  assert.match(css, /\.command-dock\s*>\s*div:first-child\s*\{[^}]*color:\s*var\(--red-bright\)/s);
-  assert.match(css, /\.metric-card \.meter i\s*\{[^}]*var\(--red-soft\)/s);
+  const app = await readFile(fileURLToPath(new URL('app.js', site)), 'utf8');
+  // a logo aparece na interface e no favicon, uma cópia só no projeto
+  assert.match(html, /href="icons\/ULTRON-Logo\.png"/);
+  // cada tema redefine --core (a cor viva), sem tocar em imagens
+  for (const tema of ['jarvis', 'amber', 'emerald']) {
+    assert.match(css, new RegExp(`:root\\[data-theme="${tema}"\\]\\s*\\{[^}]*--core:`), tema);
+  }
+  assert.doesNotMatch(css, /:root\[data-theme=[^}]*?img/s);
+  // o app aplica o tema no documento e guarda a escolha
+  assert.match(app, /documentElement\.dataset\.theme/);
+  assert.match(app, /localStorage\.setItem\('ultron-theme'/);
+  // o núcleo lê a cor viva do tema (não um valor fixo)
+  const orb = await readFile(fileURLToPath(new URL('src/orb.js', site)), 'utf8');
+  assert.match(orb, /getPropertyValue\('--core'\)/);
 });

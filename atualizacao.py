@@ -36,6 +36,11 @@ import zipfile
 from pathlib import Path
 
 APP_NAME = "U.L.T.R.O.N."
+
+# Chave pública Ed25519 que assina o SHA256SUMS.txt de cada Release.
+# Gerada por tools/gerar_chaves.py; a privada fica fora do repositório.
+# Enquanto estiver vazia, o app recusa atualizações (não há como provar autenticidade).
+CHAVE_PUBLICA_ATUALIZACAO = os.environ.get("ULTRON_UPDATE_PUBKEY", "NCth8nDKGIOqL0hkMMTrNoySPmgXJYbmPMkgowaK4RE=").strip()
 DEFAULT_REPO = "viniciusnpaula-bit/U.L.T.R.O.N.-Desktop"
 ALLOWED_HOSTS = {"api.github.com", "objects.githubusercontent.com", "github.com",
                  "release-assets.githubusercontent.com"}
@@ -191,6 +196,7 @@ class UpdateManager:
             assets = release.get("assets") or []
             zip_asset = next((a for a in assets if str(a.get("name", "")).lower().endswith(".zip")), None)
             sums_asset = next((a for a in assets if str(a.get("name", "")).lower() == "sha256sums.txt"), None)
+            sig_asset = next((a for a in assets if str(a.get("name", "")).lower() == "sha256sums.txt.sig"), None)
             resultado = {
                 "status": "ok",
                 "current_version": self.current_version,
@@ -204,6 +210,7 @@ class UpdateManager:
                 "asset": {"name": zip_asset.get("name"), "size": zip_asset.get("size"),
                           "url": zip_asset.get("browser_download_url")} if zip_asset else None,
                 "checksums": sums_asset.get("browser_download_url") if sums_asset else None,
+                "assinatura": sig_asset.get("browser_download_url") if sig_asset else None,
             }
             self._save_state(last_check={**resultado, "at": time.time()})
             self.log(f"Atualização: instalada {resultado['current_version']} / publicada {resultado['latest_version']}")
@@ -227,6 +234,7 @@ class UpdateManager:
         assets = release.get("assets") or []
         zip_asset = next((a for a in assets if str(a.get("name", "")).lower().endswith(".zip")), None)
         sums_asset = next((a for a in assets if str(a.get("name", "")).lower() == "sha256sums.txt"), None)
+        sig_asset = next((a for a in assets if str(a.get("name", "")).lower() == "sha256sums.txt.sig"), None)
         resultado = {
             "status": "ok",
             "current_version": self.current_version,
@@ -240,6 +248,7 @@ class UpdateManager:
             "asset": {"name": zip_asset.get("name"), "size": zip_asset.get("size"),
                       "url": zip_asset.get("browser_download_url")} if zip_asset else None,
             "checksums": sums_asset.get("browser_download_url") if sums_asset else None,
+            "assinatura": sig_asset.get("browser_download_url") if sig_asset else None,
         }
         self._save_state(last_check={**resultado, "at": time.time()})
         return resultado
@@ -292,8 +301,24 @@ class UpdateManager:
             allowed = set(ALLOWED_HOSTS)
             _, digest = _download(str(asset["url"]), destino, allowed)
 
-            self._set_job(percent=45, message="Conferindo a assinatura do pacote (SHA-256)…")
-            brutos = _request(str(info["checksums"]), accept="text/plain", limit=512 * 1024).decode("utf-8", "replace")
+            self._set_job(percent=40, message="Conferindo a assinatura do pacote (Ed25519)…")
+            try:
+                sums_bytes = _request(str(info["checksums"]), accept="text/plain", limit=512 * 1024)
+            except (urllib.error.URLError, OSError, UpdateError):
+                shutil.rmtree(work, ignore_errors=True)
+                self._set_job(status="erro", message="Não consegui baixar o SHA256SUMS.txt do Release.")
+                return
+            if not self._assinatura_confere(info, sums_bytes):
+                shutil.rmtree(work, ignore_errors=True)
+                self.log("Atualização recusada: assinatura do SHA256SUMS.txt inválida ou ausente.")
+                self._set_job(status="erro", needs_restart=False,
+                              message=("Assinatura da atualização inválida ou ausente. "
+                                       "Por segurança o pacote foi descartado. "
+                                       "Baixe o Release manualmente em " + str(info.get("html_url") or "github.com")))
+                return
+
+            self._set_job(percent=45, message="Conferindo o SHA-256 do pacote…")
+            brutos = sums_bytes.decode("utf-8", "replace")
             esperado = ""
             for linha in brutos.splitlines():
                 partes = linha.split()
@@ -365,6 +390,33 @@ class UpdateManager:
         except Exception as error:  # noqa: BLE001 - nunca deixa a thread morrer em silêncio
             self._set_job(status="erro", message=f"Falha inesperada na atualização ({type(error).__name__}).")
             self.log(f"Atualização falhou: {type(error).__name__}")
+
+    def _assinatura_confere(self, info: dict, sums_bytes: bytes) -> bool:
+        """Confere SHA256SUMS.txt.sig (Ed25519) com a chave pública embutida.
+
+        Regra dura: sem assinatura válida, nada é aplicado. O SHA-256 sozinho só
+        provaria que o arquivo não corrompeu no download, não que veio de nós.
+        """
+        assinatura_url = info.get("assinatura")
+        if not assinatura_url:
+            self.log("Release sem SHA256SUMS.txt.sig.")
+            return False
+        if not CHAVE_PUBLICA_ATUALIZACAO:
+            self.log("App sem chave pública embutida: atualização recusada por padrão.")
+            return False
+        try:
+            assinatura_bytes = _request(str(assinatura_url), accept="application/octet-stream",
+                                        limit=4096)
+        except (urllib.error.URLError, OSError, UpdateError) as erro:
+            self.log(f"Falha ao baixar a assinatura ({type(erro).__name__}).")
+            return False
+        try:
+            import assinatura
+            publica = assinatura.carregar_publica_base64(CHAVE_PUBLICA_ATUALIZACAO)
+            return assinatura.verificar(sums_bytes, assinatura_bytes, publica)
+        except Exception as erro:  # chave malformada, base64 inválido, etc.
+            self.log(f"Assinatura não pôde ser verificada ({type(erro).__name__}).")
+            return False
 
     # ------------------------------------------------------------- aplicação imediata
     def _apply_now(self, staging: Path) -> tuple[list[str], list[str]]:

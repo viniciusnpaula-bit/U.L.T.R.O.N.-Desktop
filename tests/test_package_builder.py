@@ -13,12 +13,12 @@ spec.loader.exec_module(builder)
 
 REQUIRED_IN_ZIP = (
     "desktop.py", "desktop_api.py", "desktop_runtime.py", "microphone_devices.py", "cerebro.py",
-    "launcher.py", "ULTRON.exe", "ULTRON-Setup.exe", "ULTRON.ico", "requirements.txt",
-    "permissoes.json", "iniciar_desktop.bat", "LEIA-ME.txt", "NOTAS-RECONSTRUCAO.txt",
+    "launcher.py", "ULTRON.exe", "ULTRON-Setup.exe", "requirements.txt",
+    "permissoes.json", "iniciar_desktop.bat", "LEIA-ME.txt", "CHANGELOG.md",
     "electron/main.js", "electron/preload.js", "electron/api.js", "electron/package.json",
     "electron/site/index.html", "electron/site/app.js", "electron/site/src/real.js",
     "electron/assets/ULTRON.ico", "tools/make_icon.py", "tools/build_setup.py",
-    "installer/ultron_setup.py", "tests/test_desktop_ui.py",
+    "installer/ultron_setup.py", "tests/test_update.py",
 )
 # ".env.example" é documentação e deve estar no pacote; ".env" com chaves reais, não.
 FORBIDDEN_IN_ZIP = (".env", "venv/", "node_modules/", "dados/", "logs/", "__pycache__/",
@@ -54,9 +54,9 @@ class PackageBuilderTests(unittest.TestCase):
                     env_file.unlink(missing_ok=True)
 
     def test_icon_has_the_sizes_windows_asks_for(self):
-        self.assertEqual(builder.ROOT.joinpath("ULTRON.ico").is_file(), True)
+        self.assertEqual(builder.ROOT.joinpath("electron", "assets", "ULTRON.ico").is_file(), True)
         import struct
-        payload = (PACKAGE / "ULTRON.ico").read_bytes()
+        payload = (PACKAGE / "electron" / "assets" / "ULTRON.ico").read_bytes()
         reserved, kind, count = struct.unpack("<HHH", payload[:6])
         self.assertEqual((reserved, kind), (0, 1))
         offset = 6

@@ -92,11 +92,16 @@ class VoiceBridgeTests(unittest.TestCase):
         voz_falsa.falar = lambda *_args, **_kwargs: None
         voz_falsa.parar_fala = lambda *_args, **_kwargs: None
         voz_falsa.falando = threading.Event()
+        # streaming: "não falou nada" faz cair no modo normal, que o teste controla
+        voz_falsa.falar_partes = lambda *_args, **_kwargs: ""
 
         with patch.dict(sys.modules, {"voz": voz_falsa}):
             import main
             with patch.object(main, "responder", return_value="Tudo certo, senhor."), \
+                 patch.object(main.cerebro, "processar_stream",
+                              side_effect=lambda *_a, **_k: (iter([]), lambda: "Tudo certo, senhor.")), \
                  patch.object(main, "atalho_parada", create=True), \
+                 patch.object(main, "atalho_falar", create=True), \
                  patch.object(main.confirmacao, "criar_confirmador_voz", return_value=lambda *_a, **_k: True):
                 parar = threading.Event()
 
