@@ -10,6 +10,10 @@ import seguranca
 
 _lock = threading.Lock()
 _pendentes = {}                      # id do pedido -> {"evento", "resp", "expira"}
+# O PIN chega em outra thread (handler do Telegram) enquanto o cérebro espera.
+# `_pin_lock` protege a troca de estado: sem ele, duas mensagens simultâneas
+# podiam consumir/sobrescrever o mesmo PIN (o `concurrent_updates` é ligado).
+_pin_lock = threading.Lock()
 _pin_espera = {"evento": None, "valor": None}
 
 
@@ -45,7 +49,13 @@ class Confirmador:
             _pendentes[cid] = {"evento": ev, "resp": None, "expira": pedido["expira"]}
         try:
             restante = max(1, int(pedido["expira"] - time.time()))
-            self.enviar(f"⚠️ {msg}\n(risco {pedido['risco']} · expira em {restante}s)", cid)
+            try:
+                self.enviar(f"⚠️ {msg}\n(risco {pedido['risco']} · expira em {restante}s)", cid)
+            except Exception as erro:
+                # Celular sem rede/Telegram fora do ar: nega em vez de esperar o timeout inteiro.
+                seguranca.log_seg("telegram", pedido["acao"], pedido["risco"], "DENY",
+                                  f"confirmacao_nao_enviada {type(erro).__name__}")
+                return False
             if not ev.wait(max(1, pedido["expira"] - time.time())):
                 return None
             with _lock:
@@ -56,7 +66,12 @@ class Confirmador:
         if resp != "s":
             return False
         if pedido["exige_pin"]:
-            pin = self.pedir_pin("Esta ação exige o seu PIN. Envie o PIN agora (a mensagem será apagada).") if self.pedir_pin else None
+            try:
+                pin = self.pedir_pin("Esta ação exige o seu PIN. Envie o PIN agora (a mensagem será apagada).") if self.pedir_pin else None
+            except Exception as erro:
+                seguranca.log_seg("telegram", pedido["acao"], pedido["risco"], "DENY",
+                                  f"pin_nao_recebido {type(erro).__name__}")
+                pin = None
             if pin is None or not seguranca.pin_valido(pin):
                 seguranca.log_seg("telegram", pedido["acao"], pedido["risco"], "DENY", "pin_invalid_or_missing")
                 return False
@@ -101,9 +116,14 @@ async def _parar(update, ctx):
 
 async def _botao(update, ctx):
     q = update.callback_query
+    if q is None or q.from_user is None:
+        return
     try:
         _, cid, resp = q.data.split(":")
-    except ValueError:
+    except (AttributeError, ValueError):
+        await q.answer()
+        return
+    if resp not in ("s", "n"):
         await q.answer()
         return
     estado = resolver(q.from_user.id, cid, resp)
@@ -124,12 +144,19 @@ async def _mensagem(update, ctx):
     if not update.effective_user or not autorizado(update.effective_user.id):
         seguranca.log_seg("telegram", "mensagem", "-", "DENY", "unauthorized_user")
         return                                            # ignora estranhos em silêncio
+    if update.message is None:
+        return
     texto = (update.message.text or "").strip()
     loop = asyncio.get_running_loop()
 
-    if _pin_espera["evento"] and not _pin_espera["evento"].is_set():      # esta mensagem é o PIN
-        _pin_espera["valor"] = texto
-        _pin_espera["evento"].set()
+    # Só a primeira mensagem enquanto o PIN é esperado pode consumi-lo.
+    with _pin_lock:
+        evento_pin = _pin_espera["evento"]
+        aguardando_pin = evento_pin is not None and not evento_pin.is_set()
+        if aguardando_pin:
+            _pin_espera["valor"] = texto
+    if aguardando_pin:                                     # esta mensagem é o PIN
+        evento_pin.set()
         try:
             await update.message.delete()
         except Exception:
@@ -146,10 +173,22 @@ async def _mensagem(update, ctx):
         asyncio.run_coroutine_threadsafe(update.message.reply_text(txt, reply_markup=botoes), loop).result(15)
 
     def pedir_pin(txt):
-        _pin_espera.update(evento=threading.Event(), valor=None)
-        asyncio.run_coroutine_threadsafe(update.message.reply_text(txt), loop).result(15)
-        _pin_espera["evento"].wait(45)
-        return _pin_espera["valor"]
+        evento = threading.Event()
+        with _pin_lock:
+            _pin_espera["evento"] = evento
+            _pin_espera["valor"] = None
+        try:
+            asyncio.run_coroutine_threadsafe(update.message.reply_text(txt), loop).result(15)
+            evento.wait(45)
+        except Exception:
+            pass                                           # Telegram indisponível: PIN fica ausente
+        finally:
+            with _pin_lock:
+                valor = _pin_espera["valor"]
+                _pin_espera["evento"] = None
+                _pin_espera["valor"] = None
+        return valor
 
     resposta = await asyncio.to_thread(cerebro.processar, texto, Confirmador(enviar, pedir_pin), "telegram")
-    await update.message.reply_text(resposta)
+    if resposta:
+        await update.message.reply_text(resposta)

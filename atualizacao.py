@@ -39,14 +39,16 @@ APP_NAME = "U.L.T.R.O.N."
 
 # Chave pública Ed25519 que assina o SHA256SUMS.txt de cada Release.
 # Gerada por tools/gerar_chaves.py; a privada fica fora do repositório.
+# É IMUTÁVEL de propósito: aceitar override por variável de ambiente permitiria que
+# qualquer processo (ou um .env adulterado) trocasse a chave e assinasse um pacote falso.
 # Enquanto estiver vazia, o app recusa atualizações (não há como provar autenticidade).
-CHAVE_PUBLICA_ATUALIZACAO = os.environ.get("ULTRON_UPDATE_PUBKEY", "NCth8nDKGIOqL0hkMMTrNoySPmgXJYbmPMkgowaK4RE=").strip()
+CHAVE_PUBLICA_ATUALIZACAO = "NCth8nDKGIOqL0hkMMTrNoySPmgXJYbmPMkgowaK4RE="
 DEFAULT_REPO = "viniciusnpaula-bit/U.L.T.R.O.N.-Desktop"
 ALLOWED_HOSTS = {"api.github.com", "objects.githubusercontent.com", "github.com",
                  "release-assets.githubusercontent.com"}
 MAX_DOWNLOAD_BYTES = 300 * 1024 * 1024
 PROTECTED = (".env", "dados", "logs", "venv", ".git", ".ultron-state.json")
-PROTECAO_PASTAS = {"venv", "node_modules", "dados", "logs", ".git", "build"}
+PROTECAO_PASTAS = {"venv", ".venv", "node_modules", "dados", "logs", ".git", "build", "__pycache__"}
 # Nunca sobrescreve nada fora destes tipos: assim um ZIP malicioso não troca código
 # arbitrário do sistema — só arquivos do próprio pacote.
 ALLOWED_SUFFIXES = {".py", ".js", ".mjs", ".cjs", ".json", ".html", ".css", ".svg", ".png",
@@ -64,6 +66,25 @@ def _version_tuple(value: str) -> tuple[int, ...]:
     return tuple(int(part) for part in parts[:4]) or (0,)
 
 
+def _caminho_bat(caminho) -> str:
+    """Caminho seguro para interpolar em um .bat.
+
+    O cmd expande `%VAR%` mesmo dentro de aspas, então `%` vira `%%`. Quando
+    possível usa o caminho curto 8.3, que elimina acentos/espaços (o .bat é lido
+    pelo cmd antes de o `chcp` valer para as linhas seguintes).
+    """
+    texto = str(caminho)
+    try:
+        import ctypes
+
+        buffer = ctypes.create_unicode_buffer(32768)
+        if ctypes.windll.kernel32.GetShortPathNameW(texto, buffer, len(buffer)):
+            texto = buffer.value
+    except Exception:
+        pass
+    return texto.replace("%", "%%").replace('"', "'")
+
+
 def _current_version(root: Path) -> str:
     try:
         package = json.loads((root / "electron" / "package.json").read_text(encoding="utf-8"))
@@ -72,17 +93,60 @@ def _current_version(root: Path) -> str:
         return "0.0.0"
 
 
-def _request(url: str, *, timeout: float = 15.0, accept: str = "application/vnd.github+json",
-             limit: int = 2 * 1024 * 1024) -> bytes:
-    parsed = urllib.parse.urlsplit(url)
+def _url_permitida(url: str, allowed_hosts: set[str]) -> str:
+    """Valida esquema e host de uma URL de atualização.
+
+    Também rejeita credenciais embutidas (`https://api.github.com@evil.com`), que
+    passariam por uma checagem ingênua de `hostname`.
+    """
+    try:
+        parsed = urllib.parse.urlsplit(url)
+    except ValueError as error:
+        raise UpdateError("Endereço de atualização inválido.") from error
     if parsed.scheme not in {"https", "http"}:
         raise UpdateError("Endereço de atualização inválido.")
-    if os.environ.get("ULTRON_UPDATE_ALLOW_HTTP") != "1" and parsed.scheme != "https":
+    if parsed.scheme != "https" and os.environ.get("ULTRON_UPDATE_ALLOW_HTTP") != "1":
         raise UpdateError("A atualização exige HTTPS.")
-    if parsed.hostname not in ALLOWED_HOSTS:
+    if parsed.username or parsed.password:
+        raise UpdateError("Endereço de atualização inválido.")
+    if (parsed.hostname or "").lower() not in {h.lower() for h in allowed_hosts}:
         raise UpdateError("O host de atualização não é permitido.")
+    return url
+
+
+class _RedirectSeguro(urllib.request.HTTPRedirectHandler):
+    """Confere o host de CADA redirecionamento antes de segui-lo.
+
+    `urlopen` segue redirects sozinho; sem isto, uma URL do GitHub poderia
+    redirecionar para um servidor arbitrário e o `sha256sums`/`zip` viriam de lá.
+    """
+
+    def __init__(self, allowed_hosts: set[str]) -> None:
+        super().__init__()
+        self._allowed_hosts = set(allowed_hosts)
+
+    def redirect_request(self, req, fp, code, msg, headers, newurl):
+        _url_permitida(newurl, self._allowed_hosts)
+        return super().redirect_request(req, fp, code, msg, headers, newurl)
+
+
+def _abrir(request: urllib.request.Request, allowed_hosts: set[str], timeout: float):
+    """Abre a URL validando a origem inicial, cada redirect e a URL final."""
+    _url_permitida(request.full_url, allowed_hosts)
+    opener = urllib.request.build_opener(_RedirectSeguro(allowed_hosts))
+    response = opener.open(request, timeout=timeout)
+    try:
+        _url_permitida(response.geturl(), allowed_hosts)
+    except UpdateError:
+        response.close()
+        raise
+    return response
+
+
+def _request(url: str, *, timeout: float = 15.0, accept: str = "application/vnd.github+json",
+             limit: int = 2 * 1024 * 1024) -> bytes:
     request = urllib.request.Request(url, headers={"Accept": accept, "User-Agent": "ULTRON-Desktop"})
-    with urllib.request.urlopen(request, timeout=timeout) as response:
+    with _abrir(request, ALLOWED_HOSTS, timeout) as response:
         chunks, total = [], 0
         while True:
             chunk = response.read(64 * 1024)
@@ -96,15 +160,10 @@ def _request(url: str, *, timeout: float = 15.0, accept: str = "application/vnd.
 
 
 def _download(url: str, destino: Path, allowed_hosts: set[str]) -> tuple[int, str]:
-    parsed = urllib.parse.urlsplit(url)
-    if parsed.scheme != "https" and os.environ.get("ULTRON_UPDATE_ALLOW_HTTP") != "1":
-        raise UpdateError("A atualização exige HTTPS.")
-    if parsed.hostname not in allowed_hosts:
-        raise UpdateError("Origem do download não permitida.")
+    request = urllib.request.Request(url, headers={"User-Agent": "ULTRON-Desktop"})
     digest = hashlib.sha256()
     total = 0
-    request = urllib.request.Request(url, headers={"User-Agent": "ULTRON-Desktop"})
-    with urllib.request.urlopen(request, timeout=60) as response, destino.open("wb") as handle:
+    with _abrir(request, allowed_hosts, 60) as response, destino.open("wb") as handle:
         while True:
             chunk = response.read(256 * 1024)
             if not chunk:
@@ -348,7 +407,7 @@ class UpdateManager:
                     partes = Path(nome).parts
                     if any(parte in {"..", ""} for parte in partes) or Path(nome).is_absolute():
                         raise UpdateError("O ZIP contém caminho inseguro.")
-                    if partes[0] in PROTECTED:
+                    if partes[0] in PROTECTED or any(parte in PROTECAO_PASTAS for parte in partes):
                         continue
                     if Path(nome).suffix.lower() not in ALLOWED_SUFFIXES:
                         continue
@@ -362,8 +421,12 @@ class UpdateManager:
 
             backup = self._backup_root() / f"backup-{self.current_version}-{time.strftime('%Y%m%d-%H%M%S')}"
             self._set_job(percent=75, message="Aplicando os arquivos que não estão em uso…")
-            trocados_agora, pendentes = self._apply_now(staging)
-            self._save_state(pending_backup=str(backup), pending_version=str(info.get("latest_version")),
+            trocados_agora, pendentes, backup_pre = self._apply_now(staging)
+            # `pending_backup` aponta para o backup PRE-APPLY (só os arquivos
+            # sobrescritos) — é o que o rollback precisa. `last_backup` é a cópia
+            # completa feita pelo .bat, usada só se a troca final falhar.
+            self._save_state(pending_backup=str(backup_pre), last_backup=str(backup),
+                             pending_version=str(info.get("latest_version")),
                              applied_manifest=self._manifest(staging),
                              pending_version_files=pendentes)
 
@@ -419,12 +482,15 @@ class UpdateManager:
             return False
 
     # ------------------------------------------------------------- aplicação imediata
-    def _apply_now(self, staging: Path) -> tuple[list[str], list[str]]:
+    def _apply_now(self, staging: Path) -> tuple[list[str], list[str], Path]:
         """Copia da área de preparo para a instalação.
 
         Arquivos em uso no Windows (o .exe e a interface carregada) dão PermissionError;
         esses ficam para o script de reinício. Tudo o mais é aplicado na hora — assim
         uma atualização que só mexe em Python já vale no próximo comando, sem reiniciar.
+
+        Devolve (aplicados, pendentes, backup_pre): o backup contém exatamente os
+        arquivos que existiam antes e foram sobrescritos, para rollback confiável.
         """
         aplicados, pendentes = [], []
         backup = self._backup_root() / f"pre-apply-{time.strftime('%Y%m%d-%H%M%S')}"
@@ -432,7 +498,7 @@ class UpdateManager:
             if not arquivo.is_file():
                 continue
             relativo = arquivo.relative_to(staging)
-            if relativo.parts and relativo.parts[0] in PROTECAO_PASTAS:
+            if any(parte in PROTECAO_PASTAS for parte in relativo.parts):
                 continue
             destino = self.root / relativo
             destino.parent.mkdir(parents=True, exist_ok=True)
@@ -445,7 +511,7 @@ class UpdateManager:
                 aplicados.append(relativo.as_posix())
             except (PermissionError, OSError):
                 pendentes.append(relativo.as_posix())
-        return aplicados, pendentes
+        return aplicados, pendentes, backup
 
     # ------------------------------------------------------------- apoio
     def _backup_root(self) -> Path:
@@ -469,6 +535,10 @@ class UpdateManager:
         """
         destino = self._backup_root() / f"aplicar-{int(time.time())}.bat"
         reabrir = self.root / "ULTRON.exe"
+        raiz_bat = _caminho_bat(self.root)
+        staging_bat = _caminho_bat(staging)
+        backup_bat = _caminho_bat(backup)
+        reabrir_bat = _caminho_bat(reabrir)
         script = f"""@echo off
 chcp 65001 >nul
 title Aplicando atualização do U.L.T.R.O.N.
@@ -476,18 +546,18 @@ echo Aguardando o ULTRON fechar...
 :espera
 tasklist /FI "IMAGENAME eq ULTRON.exe" | find /I "ULTRON.exe" >nul && (timeout /t 1 /nobreak >nul & goto espera)
 tasklist /FI "IMAGENAME eq electron.exe" | find /I "electron.exe" >nul && (timeout /t 1 /nobreak >nul & goto espera)
-echo Backup em "{backup}"...
-robocopy "{self.root}" "{backup}" /E /NFL /NDL /NJH /NJS /NP /XD venv node_modules dados logs .git build /XF *.log >nul
+echo Backup em "{backup_bat}"...
+robocopy "{raiz_bat}" "{backup_bat}" /E /NFL /NDL /NJH /NJS /NP /XD venv .venv node_modules __pycache__ dados logs .git build /XF *.log >nul
 echo Copiando a versão nova...
-robocopy "{staging}" "{self.root}" /E /IS /IT /NFL /NDL /NJH /NJS /NP /XD venv node_modules dados logs .git build >nul
+robocopy "{staging_bat}" "{raiz_bat}" /E /IS /IT /NFL /NDL /NJH /NJS /NP /XD venv .venv node_modules __pycache__ dados logs .git build >nul
 if errorlevel 8 goto falhou
 echo Atualização aplicada.
-start "" "{reabrir}"
+start "" "{reabrir_bat}"
 exit /b 0
 :falhou
 echo A cópia falhou. Restaurando a versão anterior...
-robocopy "{backup}" "{self.root}" /E /IS /IT /NFL /NDL /NJH /NJS /NP /XD venv node_modules dados logs .git build >nul
-start "" "{reabrir}"
+robocopy "{backup_bat}" "{raiz_bat}" /E /IS /IT /NFL /NDL /NJH /NJS /NP /XD venv .venv node_modules __pycache__ dados logs .git build >nul
+start "" "{reabrir_bat}"
 exit /b 1
 """
         destino.write_text(script, encoding="utf-8", newline="\r\n")
@@ -519,7 +589,7 @@ exit /b 1
                 continue
             relativo = arquivo.relative_to(origem)
             destino = self.root / relativo
-            if relativo.parts and relativo.parts[0] in PROTECTED:
+            if relativo.parts[0] in PROTECTED or any(parte in PROTECAO_PASTAS for parte in relativo.parts):
                 continue
             destino.parent.mkdir(parents=True, exist_ok=True)
             shutil.copy2(arquivo, destino)

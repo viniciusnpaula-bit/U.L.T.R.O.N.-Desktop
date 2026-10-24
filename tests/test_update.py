@@ -90,6 +90,45 @@ class UpdateManagerTests(unittest.TestCase):
             atualizacao._request("https://exemplo-malicioso.com/release.json")
         with self.assertRaises(atualizacao.UpdateError):
             atualizacao._request("http://api.github.com/repos/x/y")   # sem HTTPS
+        with self.assertRaises(atualizacao.UpdateError):
+            atualizacao._download("https://exemplo-malicioso.com/pacote.zip",
+                                  Path(self.temp.name) / "x.zip", atualizacao.ALLOWED_HOSTS)
+
+    def test_url_with_embedded_credentials_is_refused(self):
+        with self.assertRaises(atualizacao.UpdateError):
+            atualizacao._url_permitida("https://api.github.com@evil.example/x", atualizacao.ALLOWED_HOSTS)
+        with self.assertRaises(atualizacao.UpdateError):
+            atualizacao._url_permitida("https://evil.example/x", atualizacao.ALLOWED_HOSTS)
+
+    def test_redirect_to_foreign_host_is_refused(self):
+        handler = atualizacao._RedirectSeguro(atualizacao.ALLOWED_HOSTS)
+        with self.assertRaises(atualizacao.UpdateError):
+            handler.redirect_request(None, None, 302, "Found", {}, "https://evil.example/payload.zip")
+
+    def test_public_key_cannot_be_overridden_by_environment(self):
+        import inspect
+        self.assertNotIn("ULTRON_UPDATE_PUBKEY", inspect.getsource(atualizacao))
+        with patch.dict(os.environ, {"ULTRON_UPDATE_PUBKEY": "AAAA"}):
+            self.assertNotEqual(atualizacao.CHAVE_PUBLICA_ATUALIZACAO, "AAAA")
+
+    def test_pre_apply_backup_allows_rollback_and_skips_protected_dirs(self):
+        (self.root / "cerebro.py").write_text("antigo", encoding="utf-8")
+        staging = Path(self.temp.name) / "staging"
+        (staging / ".venv" / "Lib").mkdir(parents=True)
+        (staging / ".venv" / "Lib" / "evil.py").write_text("x", encoding="utf-8")
+        (staging / "cerebro.py").write_text("novo", encoding="utf-8")
+
+        aplicados, pendentes, backup = self.manager._apply_now(staging)
+
+        self.assertIn("cerebro.py", aplicados)
+        self.assertEqual(pendentes, [])
+        self.assertEqual((self.root / "cerebro.py").read_text(encoding="utf-8"), "novo")
+        self.assertFalse((self.root / ".venv").exists())
+        self.assertEqual((backup / "cerebro.py").read_text(encoding="utf-8"), "antigo")
+
+        self.manager._save_state(pending_backup=str(backup))
+        self.assertTrue(self.manager.rollback())
+        self.assertEqual((self.root / "cerebro.py").read_text(encoding="utf-8"), "antigo")
 
     def _aplicar(self, conteudo, checksums_top="sha256-ok", assinatura="valida", adulterar_sums=False):
         pacote = zip_valido()
@@ -152,9 +191,10 @@ class UpdateManagerTests(unittest.TestCase):
         if job.get("needs_restart"):
             # quando sobra arquivo em uso, existe o script que termina o serviço
             script = Path(job["script"]).read_text(encoding="utf-8")
-            self.assertIn("/XD venv node_modules dados logs .git build", script)
             self.assertIn("tasklist", script)
             self.assertIn("start", script)
+            for pasta in ("venv", ".venv", "node_modules", "__pycache__", "dados", "logs", ".git", "build"):
+                self.assertIn(pasta, script)
 
     def test_restart_is_only_requested_when_a_file_is_locked(self):
         # ULTRON.exe está em uso (simulado com um erro de permissão): precisa reiniciar
