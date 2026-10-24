@@ -62,19 +62,21 @@ def build_exe(name: str = "ULTRON-Setup", entry: str = "installer/ultron_setup.p
     version_file = BUILD / f"version_info_{name}.txt"
     product_version = json.loads((ROOT / "electron" / "package.json").read_text(encoding="utf-8"))["version"]
     major, minor, patch = (product_version.split(".") + ["0", "0"])[:3]
+    versao_num = f"{major}, {minor}, {patch}, 0"
+    versao_txt = f"{major}.{minor}.{patch}"
     version_file.write_text(
         f"""VSVersionInfo(
-  ffi=FixedFileInfo(filevers=(1, 9, 4, 0), prodvers=(1, 9, 4, 0), mask=0x3f, flags=0x0,
+  ffi=FixedFileInfo(filevers=({versao_num}), prodvers=({versao_num}), mask=0x3f, flags=0x0,
                     OS=0x40004, fileType=0x1, subtype=0x0, date=(0, 0)),
   kids=[
     StringFileInfo([StringTable('040904B0', [
         StringStruct('CompanyName', 'ULTRON'),
         StringStruct('FileDescription', '{description}'),
-        StringStruct('FileVersion', '1.9.4.0'),
+        StringStruct('FileVersion', '{versao_txt}.0'),
         StringStruct('InternalName', '{name}'),
         StringStruct('OriginalFilename', '{name}.exe'),
         StringStruct('ProductName', 'U.L.T.R.O.N. Desktop'),
-        StringStruct('ProductVersion', '1.9.4')])]),
+        StringStruct('ProductVersion', '{versao_txt}')])]),
     VarFileInfo([VarStruct('Translation', [1033, 1200])])
   ]
 )

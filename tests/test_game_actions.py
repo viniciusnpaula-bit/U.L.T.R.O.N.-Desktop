@@ -124,6 +124,7 @@ class GameActionTests(unittest.TestCase):
         build_setup = (root / "tools" / "build_setup.py").read_text(encoding="utf-8")
         self.assertIn('"version"]', build_setup)
         self.assertIn("ULTRON-Desktop-v", build_setup)
+        self.assertNotIn("1.9.4", build_setup, "metadados do .exe não podem ser fixos no código")
 
 
 if __name__ == "__main__":
