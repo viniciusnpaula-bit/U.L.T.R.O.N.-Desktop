@@ -25,3 +25,38 @@ build/
 # Cofre de credenciais (cifrado, mas é dado do usuário)
 dados/cofre.json
 dados/.cofre.chave
+
+# --- Segredos e ambiente adicionais ---
+.env.local
+.env.production
+secrets/
+*.key
+
+# --- Sistema Windows ---
+Thumbs.db
+ehthumbs.db
+Desktop.ini
+$RECYCLE.BIN/
+
+# --- IDEs e editores ---
+.vscode/
+.idea/
+*.swp
+*.swo
+*~
+
+# --- Builds e instaladores (não versionar binários) ---
+*.msi
+*.dmg
+installer/output/
+installer/build/
+
+# --- Testes e cobertura ---
+htmlcov/
+.coverage
+.coverage.*
+
+# --- Outros temporários ---
+*.tmp
+*.temp
+.DS_Store
