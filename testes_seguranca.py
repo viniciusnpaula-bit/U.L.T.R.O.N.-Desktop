@@ -96,12 +96,11 @@ class T01_a_03_BaixoRisco(Base):
         self.assertTrue(self.executou("abrir_programa"))
         self.assertEqual(c.pedidos, [])
 
-    def test03a_fechar_aplicativo_exige_confirmacao(self):
-        c = Conf(False)
+    def test03a_fechar_aplicativo_nao_exige_confirmacao(self):
+        c = Conf(None)
         self.rodar("fechar_aplicativo", {"nome": "Chrome"}, c)
-        self.assertEqual(len(c.pedidos), 1)
-        self.assertEqual(c.pedidos[0]["risco"], "ALTO")
-        self.assertFalse(self.executou("fechar_aplicativo"))
+        self.assertEqual(c.pedidos, [], "fechar app é ação banal: BAIXO não confirma")
+        self.assertTrue(self.executou("fechar_aplicativo"))
 
     def test03aa_correspondencia_de_app_usa_titulo_ou_nome_do_processo(self):
         self.assertTrue(ferramentas._corresponde_janela("Chrome", "Nova guia", "chrome.exe"))
@@ -445,10 +444,10 @@ class T16_Correcoes_1_5_1(Base):
             self.assertTrue(self.executou(nome), nome)
 
     def test16d_operacao_liberada_no_permissoes_json_nao_pergunta(self):
-        escrever_config(allowlist__operacoes=["tela.ver"])
+        escrever_config(allowlist__operacoes=["pasta.criar"])
         c = Conf(None)
-        self.rodar("ver_tela", {}, c)
-        self.assertTrue(self.executou("ver_tela"))
+        self.rodar("criar_pasta", {"caminho": str(PERMITIDO / "nova_pasta")}, c)
+        self.assertTrue(self.executou("criar_pasta"))
         self.assertEqual(c.pedidos, [])
 
     def test16e_esquecer_fato_vazio_nao_apaga_tudo(self):

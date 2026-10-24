@@ -481,7 +481,7 @@ def minimizar_janelas():
 
 @ferramenta("Fecha a janela do aplicativo indicado sem mudar o foco. Se houver mais de uma correspondência, "
             "informe as opções e peça um título mais específico. Use esta ferramenta em vez de Alt+F4 para "
-            "fechar um aplicativo pelo nome.", risco=ALTO,
+            "fechar um aplicativo pelo nome.", risco=BAIXO,
             params={"nome": "Nome do aplicativo ou trecho único do título da janela"})
 def fechar_aplicativo(nome: str):
     if not _norm(nome):
@@ -714,8 +714,8 @@ def clicar(x: int, y: int):
 # ---------- visão ----------
 @ferramenta("Tira um print da tela do PC e analisa o que aparece (erros, textos, janelas, jogos). "
             "Use quando o usuário perguntar sobre o que está na tela.",
-            risco=MEDIO, params={"pergunta": "O que o usuário quer saber sobre a tela"},
-            classificar=lambda **_: Classificacao(MEDIO, "tela.ver", True,
+            risco=ALTO, params={"pergunta": "O que o usuário quer saber sobre a tela"},
+            classificar=lambda **_: Classificacao(ALTO, "tela.ver", True,
                                                   resumo="tirar um print da sua tela e enviar para a IA na nuvem"))
 def ver_tela(pergunta: str = "Descreva o que está aparecendo na tela."):
     import io

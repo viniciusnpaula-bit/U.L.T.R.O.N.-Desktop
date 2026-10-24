@@ -9,7 +9,7 @@
   },
 
   "timeouts": {
-    "confirmacao_voz": 6,
+    "confirmacao_voz": 12,
     "confirmacao_teclado": 20,
     "confirmacao_telegram": 60
   },
