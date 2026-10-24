@@ -164,25 +164,37 @@ export function criarOrbe(canvas) {
 // Campo de partículas: poeira vermelha em órbita do núcleo.
 // Três profundidades orbitais + uma camada ambiente bem discreta. A energia do
 // estado real (respondendo/pensando) acelera a deriva e aumenta o brilho.
+// O ponteiro inclina o campo (parallax por profundidade) e as partículas mais
+// rápidas deixam um rastro curto — a poeira parece ter massa, não ser um print.
 export function criarCampo(canvas) {
   const c = canvas.getContext('2d');
   const reduzir = window.matchMedia?.('(prefers-reduced-motion: reduce)').matches;
   const CAMADAS = [
-    { fracao: 0.52, dist: [0.30, 0.78], tam: [0.50, 0.95], alfa: [0.12, 0.28], giro: [0.004, 0.012], deriva: [0.002, 0.006] },
-    { fracao: 0.30, dist: [0.52, 1.02], tam: [0.60, 1.25], alfa: [0.18, 0.42], giro: [0.006, 0.018], deriva: [0.004, 0.012] },
-    { fracao: 0.18, dist: [0.72, 1.28], tam: [1.00, 2.10], alfa: [0.30, 0.68], giro: [0.010, 0.030], deriva: [0.006, 0.020] },
+    // prof = profundidade aparente: 0 longe (quase não reage), 1 perto (reage mais)
+    { fracao: 0.52, dist: [0.30, 0.78], tam: [0.50, 0.95], alfa: [0.16, 0.34], giro: [0.004, 0.012], deriva: [0.002, 0.006], prof: [0.30, 0.55] },
+    { fracao: 0.30, dist: [0.52, 1.02], tam: [0.60, 1.25], alfa: [0.24, 0.50], giro: [0.006, 0.018], deriva: [0.004, 0.012], prof: [0.55, 0.80] },
+    { fracao: 0.18, dist: [0.72, 1.28], tam: [1.00, 2.10], alfa: [0.36, 0.74], giro: [0.010, 0.030], deriva: [0.006, 0.020], prof: [0.80, 1.00] },
   ];
   const sorte = (a, b) => a + Math.random() * (b - a);
   let w = 0, h = 0, dpr = 1, raf = 0, ultimo = performance.now();
   let orbitais = [], ambiente = [], centro = { x: 0, y: 0 }, raio = 300;
   let cor = '#ff2f42', lido = 0, energia = 0;
+  // ponteiro normalizado (-1..1) e a versão amortecida que o campo segue
+  let alvoX = 0, alvoY = 0, px = 0, py = 0;
+
+  function aoMover(evento) {
+    if (reduzir) return;
+    alvoX = (evento.clientX / Math.max(1, w) - 0.5) * 2;
+    alvoY = (evento.clientY / Math.max(1, h) - 0.5) * 2;
+  }
+  function aoSair() { alvoX = 0; alvoY = 0; }
 
   function medir() {
     dpr = Math.min(2, window.devicePixelRatio || 1);
     w = window.innerWidth; h = window.innerHeight;
     canvas.width = Math.round(w * dpr); canvas.height = Math.round(h * dpr);
 
-    const total = Math.round(Math.min(190, Math.max(90, (w * h) / 10500)));
+    const total = Math.round(Math.min(230, Math.max(120, (w * h) / 7600)));
     orbitais = [];
     for (const camada of CAMADAS) {
       const n = Math.round(total * camada.fracao);
@@ -194,15 +206,17 @@ export function criarCampo(canvas) {
           a: sorte(camada.alfa[0], camada.alfa[1]),
           giro: sorte(camada.giro[0], camada.giro[1]) * (Math.random() < 0.5 ? -1 : 1),
           deriva: sorte(camada.deriva[0], camada.deriva[1]),
+          prof: sorte(camada.prof[0], camada.prof[1]),
           fase: Math.random() * Math.PI * 2,
           tw: sorte(0.35, 1.30),
         });
       }
     }
-    ambiente = Array.from({ length: Math.round(Math.min(46, w / 26)) }, () => ({
+    ambiente = Array.from({ length: Math.round(Math.min(56, w / 22)) }, () => ({
       x: Math.random() * w, y: Math.random() * h,
-      r: sorte(0.3, 0.9), a: sorte(0.05, 0.14),
-      v: sorte(0.4, 1.4), fase: Math.random() * Math.PI * 2, tw: sorte(0.2, 0.8),
+      r: sorte(0.3, 0.9), a: sorte(0.07, 0.17),
+      v: sorte(0.4, 1.4), prof: sorte(0.10, 0.30),
+      fase: Math.random() * Math.PI * 2, tw: sorte(0.2, 0.8),
     }));
     medirCentro(true);
   }
@@ -230,10 +244,16 @@ export function criarCampo(canvas) {
     const dt = Math.min(0.05, (t - ultimo) / 1000 || 0.016);
     ultimo = t;
     medirCentro(false);
+    // o campo segue o ponteiro com atraso: inclinação, não tremida
+    const amortece = 1 - Math.exp(-dt * 3.4);
+    px += (alvoX - px) * amortece;
+    py += (alvoY - py) * amortece;
     c.setTransform(1, 0, 0, 1, 0, 0);
     c.clearRect(0, 0, canvas.width, canvas.height);
     c.scale(dpr, dpr);
     c.fillStyle = cor;
+    c.strokeStyle = cor;
+    c.lineCap = 'round';
     const vel = reduzir ? 0 : 1;
 
     // camada ambiente: poeira solta, quase invisível
@@ -242,9 +262,10 @@ export function criarCampo(canvas) {
         p.y -= p.v * 7 * dt;
         if (p.y < -6) { p.y = h + 6; p.x = Math.random() * w; }
       }
+      const ox = -px * 6 * p.prof, oy = -py * 5 * p.prof;
       const cintila = reduzir ? 0.8 : 0.55 + 0.45 * Math.sin((t / 1000) * p.tw + p.fase);
       c.globalAlpha = p.a * cintila;
-      c.beginPath(); c.arc(p.x, p.y, p.r, 0, Math.PI * 2); c.fill();
+      c.beginPath(); c.arc(p.x + ox, p.y + oy, p.r, 0, Math.PI * 2); c.fill();
     }
 
     // camadas orbitais: densas perto do núcleo, abrindo para fora
@@ -254,11 +275,29 @@ export function criarCampo(canvas) {
         p.dist += p.deriva * dt * (1 + energia * 2.2);
         if (p.dist > 1.38) { p.dist = sorte(0.28, 0.52); p.ang = Math.random() * Math.PI * 2; }
       }
-      const x = centro.x + Math.cos(p.ang) * p.dist * raio;
-      const y = centro.y + Math.sin(p.ang) * p.dist * raio * 0.94;
+      // parallax: quanto mais perto, mais a poeira desliza contra o ponteiro
+      const ox = -px * 16 * p.prof, oy = -py * 12 * p.prof;
+      const x = centro.x + Math.cos(p.ang) * p.dist * raio + ox;
+      const y = centro.y + Math.sin(p.ang) * p.dist * raio * 0.94 + oy;
       if (x < -24 || x > w + 24 || y < -24 || y > h + 24) continue;
       const cintila = reduzir ? 0.8 : 0.60 + 0.40 * Math.sin((t / 1000) * p.tw + p.fase);
-      c.globalAlpha = Math.min(0.90, p.a * cintila * (1 + energia * 0.45));
+      const alfa = Math.min(0.90, p.a * cintila * (1 + energia * 0.45));
+
+      // rastro: o arco percorrido num instante, proporcional à velocidade real
+      const arco = Math.abs(p.giro) * (1 + energia * 1.4) * p.dist * raio;
+      const cauda = reduzir ? 0 : Math.min(9, arco * 0.075) * p.prof;
+      if (cauda > 0.7) {
+        const sinal = p.giro < 0 ? -1 : 1;
+        const tx = -Math.sin(p.ang) * sinal, ty = Math.cos(p.ang) * sinal * 0.94;
+        c.globalAlpha = alfa * 0.42;
+        c.lineWidth = Math.max(0.5, p.r * 1.15);
+        c.beginPath();
+        c.moveTo(x - tx * cauda, y - ty * cauda);
+        c.lineTo(x, y);
+        c.stroke();
+      }
+
+      c.globalAlpha = alfa;
       c.beginPath(); c.arc(x, y, p.r, 0, Math.PI * 2); c.fill();
       if (p.r > 1.55) {                      // brasa: halo curto, sem shadowBlur
         c.globalAlpha *= 0.16;
@@ -270,6 +309,9 @@ export function criarCampo(canvas) {
     raf = requestAnimationFrame(quadro);
   }
 
+  window.addEventListener('pointermove', aoMover, { passive: true });
+  window.addEventListener('pointerleave', aoSair);
+  window.addEventListener('blur', aoSair);
   window.addEventListener('resize', medir);
   return {
     iniciar() { medir(); ultimo = performance.now(); raf = requestAnimationFrame(quadro); },

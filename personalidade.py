@@ -52,7 +52,20 @@ def _caminho() -> Path:
 
 def _padrao() -> dict:
     base = dict(PERFIS[PADRAO])
-    return {"perfil": PADRAO, **base, "tratamento": base["tratamento"], "extras": ""}
+    tratamentos = {chave: perfil["tratamento"] for chave, perfil in PERFIS.items()}
+    return {
+        "perfil": PADRAO,
+        **base,
+        "tratamento": base["tratamento"],
+        # cada perfil guarda o próprio tratamento: trocar de perfil não
+        # sobrescreve o jeito de tratar que você escolheu para outro
+        "tratamentos": tratamentos,
+        "extras": "",
+    }
+
+
+def _texto(valor) -> str:
+    return valor.strip()[:300] if isinstance(valor, str) else ""
 
 
 def carregar() -> dict:
@@ -65,28 +78,50 @@ def carregar() -> dict:
         return _padrao()
     atual = _padrao()
     perfil = str(dados.get("perfil") or PADRAO)
-    if perfil in PERFIS:
-        atual.update(PERFIS[perfil])
-        atual["perfil"] = perfil
-    for chave in ("ton", "tamanho", "tratamento", "extras"):
-        valor = dados.get(chave)
-        if isinstance(valor, str) and valor.strip():
-            atual[chave] = valor.strip()[:300]
+    if perfil not in PERFIS:
+        perfil = PADRAO
+    atual.update(PERFIS[perfil])
+    atual["perfil"] = perfil
+
+    guardados = dados.get("tratamentos")
+    if isinstance(guardados, dict):
+        for chave, valor in guardados.items():
+            if chave in PERFIS and _texto(valor):
+                atual["tratamentos"][chave] = _texto(valor)
+    # arquivo antigo tinha um único tratamento: ele pertence ao perfil ativo
+    legado = _texto(dados.get("tratamento"))
+    if legado and not (isinstance(guardados, dict) and _texto(guardados.get(perfil))):
+        atual["tratamentos"][perfil] = legado
+    atual["tratamento"] = atual["tratamentos"][perfil]
+
+    for chave in ("ton", "tamanho", "extras"):
+        valor = _texto(dados.get(chave))
+        if valor:
+            atual[chave] = valor
     return atual
 
 
 def salvar(configuracao: dict) -> dict:
     """Grava só o que o usuário escolheu; devolve o estado final (já saneado)."""
     with _trava:
-        atual = _padrao()
+        atual = carregar()
         perfil = str(configuracao.get("perfil") or PADRAO)
         if perfil in PERFIS:
             atual.update(PERFIS[perfil])
             atual["perfil"] = perfil
-        for chave in ("ton", "tamanho", "tratamento", "extras"):
-            valor = configuracao.get(chave)
-            if isinstance(valor, str) and valor.strip():
-                atual[chave] = valor.strip()[:300]
+        recebidos = configuracao.get("tratamentos")
+        if isinstance(recebidos, dict):
+            for chave, valor in recebidos.items():
+                if chave in PERFIS and _texto(valor):
+                    atual["tratamentos"][chave] = _texto(valor)
+        tratamento = _texto(configuracao.get("tratamento"))
+        if tratamento:
+            atual["tratamentos"][atual["perfil"]] = tratamento
+        atual["tratamento"] = atual["tratamentos"][atual["perfil"]]
+        for chave in ("ton", "tamanho", "extras"):
+            valor = _texto(configuracao.get(chave))
+            if valor:
+                atual[chave] = valor
         atual["atualizado_em"] = time.time()
         _caminho().write_text(json.dumps(atual, ensure_ascii=False, indent=2), encoding="utf-8")
         return atual
@@ -102,7 +137,13 @@ def restaurar_padrao() -> dict:
 
 
 def perfis_disponiveis() -> list[dict]:
-    return [{"id": chave, **valor} for chave, valor in PERFIS.items()]
+    """Cada perfil com o tratamento que ele guarda (não o do perfil ativo)."""
+    atual = carregar()
+    tratamentos = atual.get("tratamentos") or {}
+    return [
+        {"id": chave, **valor, "tratamento": tratamentos.get(chave, valor["tratamento"])}
+        for chave, valor in PERFIS.items()
+    ]
 
 
 def frase_do_sistema() -> str:

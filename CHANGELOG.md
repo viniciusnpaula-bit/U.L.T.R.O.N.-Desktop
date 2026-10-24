@@ -1,3 +1,22 @@
+ULTRON Desktop 1.14.0 — a interface vira instrumento
+
+- Redesenho da superfície: fundo quase preto, fios de 1px no lugar de caixas,
+  três níveis de texto e um único acento vivo. Os controles são texto; a
+  moldura só aparece no hover e no foco.
+- O campo de partículas ganhou profundidade: o ponteiro inclina a poeira em
+  parallax e as partículas mais rápidas deixam um rastro curto. Os pontos
+  vermelhos continuam orbitando o núcleo.
+- A gaveta de ajustes entra e sai pela direita, com transição curta e
+  interrompível: reabrir durante a saída devolve o painel de onde ele estava.
+  Ela abre na hora, sem esperar a conexão com o núcleo.
+- Ajustes começam pelo topo, não rolam na horizontal e usam uma seta desenhada
+  nos selects, no lugar do controle nativo.
+- O tratamento agora é único por perfil: ULTRON, JARVIS, VISÃO e EDITH guardam
+  cada um o seu ("senhor", "meu senhor", ...). Trocar de perfil não sobrescreve
+  o tratamento do outro; arquivos antigos migram o valor para o perfil ativo.
+- Contraste revisado: texto secundário em 5,08:1 e anel de foco sólido de 2px.
+  Com "menos movimento", o que desliza para de deslizar e a leitura continua.
+
 ULTRON Desktop 1.13.0 — uma interface só, sem painel duplicado
 
 - Interface redesenhada: fundo quase preto, linhas finas, tipografia mono e um

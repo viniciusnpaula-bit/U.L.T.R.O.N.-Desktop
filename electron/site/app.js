@@ -519,21 +519,29 @@ async function salvarVoz() {
 
 /* ── personalidade: perfil, tratamento, prévia e padrão ──────────────────── */
 let perfilAtual = 'ultron';
+// tratamento guardado por perfil: trocar de perfil não herda o do anterior
+let tratamentosPorPerfil = {};
 
 function pintarPerfil(perfil) {
   perfilAtual = perfil;
   document.querySelectorAll('[data-profile]').forEach(node => {
     node.setAttribute('aria-checked', String(node.dataset.profile === perfil));
   });
+  const salvo = tratamentosPorPerfil[perfil];
+  if (typeof salvo === 'string') $('tratamentoInput').value = salvo;
 }
 
 async function carregarPersonalidade() {
   try {
     const info = await window.ultron.personalidadeInfo();
     const atual = info.atual || {};
+    tratamentosPorPerfil = { ...(atual.tratamentos || {}) };
+    for (const p of info.perfis || []) {
+      if (typeof p.tratamento === 'string') tratamentosPorPerfil[p.id] = p.tratamento;
+    }
     pintarPerfil(atual.perfil || 'ultron');
-    $('tratamentoInput').value = atual.tratamento || '';
-    $('profileNote').textContent = `perfil ${atual.perfil || 'ultron'} · tom: ${atual.tom || '—'}`;
+    $('tratamentoInput').value = atual.tratamento || tratamentosPorPerfil[atual.perfil] || '';
+    $('profileNote').textContent = `perfil ${atual.perfil || 'ultron'} · tratamento “${atual.tratamento || '—'}”`;
     $('profileNote').className = 'micro nano ok';
   } catch (error) {
     $('profileNote').textContent = `não consegui ler a personalidade (${error.message})`;
@@ -547,6 +555,10 @@ async function salvarPersonalidade() {
       perfil: perfilAtual,
       tratamento: $('tratamentoInput').value.trim(),
     });
+    tratamentosPorPerfil = { ...tratamentosPorPerfil, ...(salvo.tratamentos || {}) };
+    tratamentosPorPerfil[salvo.perfil] = salvo.tratamento;
+    pintarPerfil(salvo.perfil);
+    $('tratamentoInput').value = salvo.tratamento || '';
     $('profileNote').textContent = `aplicado: perfil ${salvo.perfil} · tratamento “${salvo.tratamento}”`;
     $('profileNote').className = 'micro nano ok';
   } catch (error) {
@@ -1014,6 +1026,7 @@ function restaurarRails() {
 /* Mesma família do bate-papo: entra pela direita, encostada na câmara, sem
    cobrir o conteúdo. Fecha pela seta "fechar", pelo Esc ou clicando fora. */
 let gavetaAberta = false;
+let gavetaSaindo = 0;
 
 function posicionarBarra() {
   // a barra nasce abaixo da faixa superior e acompanha a altura real da câmara
@@ -1021,17 +1034,31 @@ function posicionarBarra() {
   document.documentElement.style.setProperty('--stage-top', `${Math.round(topo + 8)}px`);
 }
 
-function drawer(open) {
+function drawer(open, { focar = true } = {}) {
   const painel = $('drawer');
   const fundo = $('drawerBackdrop');
   gavetaAberta = Boolean(open);
   document.documentElement.dataset.drawer = open ? 'on' : 'off';
-  painel.hidden = !open;
-  fundo.hidden = !open;
   painel.setAttribute('aria-hidden', String(!open));
   $('openSettings').setAttribute('aria-expanded', String(Boolean(open)));
   $('openSettings').setAttribute('aria-pressed', String(Boolean(open)));
+
+  // reabrir cancela uma saída em curso: o painel volta de onde está
+  clearTimeout(gavetaSaindo);
+  gavetaSaindo = 0;
+  painel.classList.remove('closing');
+
   if (open) {
+    painel.hidden = false;
+    fundo.hidden = false;
+    // um quadro no estado inicial antes de aplicar .open: é isso que faz a
+    // transição existir (sem depender de @starting-style)
+    void painel.offsetWidth;
+    painel.classList.add('open');
+    // abrir ajustes começa pelo topo: o painel é longo e a primeira coisa
+    // que se procura é o tema, não o fim da lista
+    const corpo = painel.querySelector('.drawer-body');
+    if (corpo) corpo.scrollTop = 0;
     posicionarBarra();
     refreshMicrophones();
     carregarVoz();
@@ -1039,10 +1066,28 @@ function drawer(open) {
     carregarFatos();
     carregarLembretes();
     carregarCofre();
-    $('closeDrawer')?.focus();
-  } else {
-    $('openSettings')?.focus();
+    // ao abrir sozinha no carregamento não há interação: focar aqui desenharia
+    // um anel de foco que ninguém pediu
+    if (focar) $('closeDrawer')?.focus();
+    return;
   }
+
+  const esconder = () => {
+    painel.hidden = true;
+    painel.classList.remove('open', 'closing');
+    fundo.hidden = true;
+  };
+  const semMovimento = window.matchMedia?.('(prefers-reduced-motion: reduce)').matches;
+  if (painel.hidden || semMovimento) {
+    esconder();
+  } else {
+    // sai pelo mesmo lado que entrou, mais rápido do que veio
+    painel.classList.remove('open');
+    painel.classList.add('closing');
+    fundo.hidden = true;
+    gavetaSaindo = setTimeout(esconder, 170);
+  }
+  $('openSettings')?.focus();
 }
 
 function fecharGaveta() {
@@ -1097,7 +1142,7 @@ $('clearHistory').onclick = () => {
 };
 $('toggleChat')?.addEventListener('click', () => alternarRail('chat'));
 $('collapseChat').onclick = () => alternarRail('chat');
-$('openSettings').onclick = () => drawer($('drawer').hidden);
+$('openSettings').onclick = () => drawer(!gavetaAberta);
 /* fechar: seta, clique fora (o backdrop cobre o resto da tela) e Esc */
 $('closeDrawer').addEventListener('click', event => { event.preventDefault(); fecharGaveta(); });
 $('drawerBackdrop').addEventListener('pointerdown', event => { event.preventDefault(); fecharGaveta(); });
@@ -1121,7 +1166,7 @@ $('emergencyStopButton').onclick = async () => {
 
 /* atalhos: Ctrl+1 conversa · Ctrl+2 eventos · Ctrl+, sistema · Ctrl+K comando · Esc */
 function atalhos(event) {
-  if (event.ctrlKey && event.key === ',') { event.preventDefault(); event.stopPropagation(); drawer($('drawer').hidden); return; }
+  if (event.ctrlKey && event.key === ',') { event.preventDefault(); event.stopPropagation(); drawer(!gavetaAberta); return; }
   if (event.ctrlKey && (event.key === '1' || event.key === '!')) { event.preventDefault(); event.stopPropagation(); alternarRail('chat'); return; }
   if (event.ctrlKey && event.key.toLowerCase() === 'k') { event.preventDefault(); $('commandInput').focus(); return; }
   if (event.key === 'Escape') {
@@ -1141,6 +1186,9 @@ document.addEventListener('visibilitychange', () => orbLoop(!document.hidden));
 window.addEventListener('beforeunload', () => { orb.parar(); campo.parar(); transport.disconnect(); });
 
 (async () => {
+  // AO ABRIR: a gaveta de sistema já está aberta por padrão — a conexão com o
+  // núcleo chega depois e não deve segurar a interface vazia por 12s
+  drawer(true, { focar: false });
   try {
     await transport.connect();
     connection(true);
@@ -1149,8 +1197,6 @@ window.addEventListener('beforeunload', () => { orb.parar(); campo.parar(); tran
       $('updateLine').textContent = 'Aguardando o núcleo local... (abra pelo atalho ULTRON Desktop)';
     }
   }
-  // AO ABRIR: barra de ajustes (sistema) aberta por padrão — usuário pediu
-  drawer(true);
   // catch protegida pelo bloco externo; não quebra a inicialização
   orbLoop(true);
   carregarConversa();                       // falas que aconteceram antes do painel abrir

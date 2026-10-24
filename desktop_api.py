@@ -100,7 +100,7 @@ def create_server(runtime, token: str, host: str = "127.0.0.1", port: int = PREF
             path = self._path()
             try:
                 if path == _PREFIX + "health":
-                    self._send(200, {"ok": True, "version": "1.13.0"})
+                    self._send(200, {"ok": True, "version": "1.14.0"})
                 elif path == _PREFIX + "status":
                     self._send(200, runtime.get_snapshot())
                 elif path == _PREFIX + "events":
@@ -267,7 +267,7 @@ def create_server(runtime, token: str, host: str = "127.0.0.1", port: int = PREF
                     else:
                         self._send(200, runtime.fatos_apagar(body.get("id")))
                 elif path == _PREFIX + "personalidade":
-                    if set(body) - {"perfil", "ton", "tamanho", "tratamento", "extras"}:
+                    if set(body) - {"perfil", "ton", "tamanho", "tratamento", "tratamentos", "extras"}:
                         self._send(400, {"error": "invalid_personalidade_payload"})
                         return
                     self._send(200, runtime.personalidade_salvar(body))

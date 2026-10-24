@@ -1,4 +1,5 @@
 import sys
+import json
 import tempfile
 import unittest
 from pathlib import Path
@@ -49,6 +50,33 @@ class PersonalidadeTests(unittest.TestCase):
     def test_perfil_invalido_nao_quebra(self):
         salvo = personalidade.salvar({"perfil": "inexistente"})
         self.assertEqual(salvo["perfil"], "ultron")
+
+    def test_cada_perfil_guarda_o_proprio_tratamento(self):
+        personalidade.salvar({"perfil": "ultron", "tratamento": "senhor"})
+        personalidade.salvar({"perfil": "jarvis", "tratamento": "meu senhor"})
+        atual = personalidade.carregar()
+        self.assertEqual(atual["perfil"], "jarvis")
+        self.assertEqual(atual["tratamento"], "meu senhor")
+        self.assertEqual(atual["tratamentos"]["ultron"], "senhor")
+        # voltar ao ULTRON devolve o tratamento dele, não o do JARVIS
+        voltou = personalidade.salvar({"perfil": "ultron"})
+        self.assertEqual(voltou["tratamento"], "senhor")
+        self.assertEqual(voltou["tratamentos"]["jarvis"], "meu senhor")
+
+    def test_arquivo_antigo_migra_o_tratamento_para_o_perfil_ativo(self):
+        self.arquivo.write_text(
+            json.dumps({"perfil": "edith", "tratamento": "comandante"}), encoding="utf-8")
+        atual = personalidade.carregar()
+        self.assertEqual(atual["perfil"], "edith")
+        self.assertEqual(atual["tratamento"], "comandante")
+        self.assertEqual(atual["tratamentos"]["edith"], "comandante")
+        self.assertEqual(atual["tratamentos"]["ultron"], "senhor")
+
+    def test_perfis_disponiveis_trazem_o_tratamento_de_cada_um(self):
+        personalidade.salvar({"perfil": "visao", "tratamento": "doutor"})
+        perfis = {p["id"]: p["tratamento"] for p in personalidade.perfis_disponiveis()}
+        self.assertEqual(perfis["visao"], "doutor")
+        self.assertEqual(perfis["ultron"], "senhor")
 
 
 if __name__ == "__main__":

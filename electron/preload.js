@@ -51,5 +51,5 @@ contextBridge.exposeInMainWorld('ultron', Object.freeze({
     return () => ipcRenderer.removeListener('hud:run-action', listener);
   },
   hudActionResult: (requestId, accepted) => ipcRenderer.send('hud:action-result', requestId, accepted === true),
-  version: '1.13.0',
+  version: '1.14.0',
 }));
