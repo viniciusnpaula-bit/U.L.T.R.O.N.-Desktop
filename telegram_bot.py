@@ -110,6 +110,10 @@ async def _parar(update, ctx):
         for p in _pendentes.values():
             p["resp"] = "n"
             p["evento"].set()
+    with _pin_lock:
+        if _pin_espera["evento"] is not None:
+            _pin_espera["valor"] = None
+            _pin_espera["evento"].set()
     seguranca.parar_tudo()
     await update.message.reply_text("Tudo parado.")
 
