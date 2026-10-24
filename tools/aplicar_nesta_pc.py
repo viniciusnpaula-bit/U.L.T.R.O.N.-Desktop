@@ -32,7 +32,7 @@ from pathlib import Path
 
 RAIZ = Path(__file__).resolve().parents[1]
 PADRAO = Path(r"C:/U.L.T.R.O.N/U.L.T.R.O.N._Desktop_All_Versions")
-PROTEGIDAS = {"venv", "node_modules", "dados", "logs", ".git", "build", "__pycache__",
+PROTEGIDAS = {"venv", ".venv", "node_modules", "dados", "logs", ".git", "build", "__pycache__",
               ".pytest_cache", "dist"}
 SUFIXOS = {".py", ".js", ".mjs", ".cjs", ".json", ".html", ".css", ".svg", ".png", ".ico",
            ".md", ".txt", ".bat", ".ps1", ".exe", ".toml", ".cfg", ".yml", ".yaml"}
