@@ -1,3 +1,18 @@
+ULTRON Desktop 1.13.0 — uma interface só, sem painel duplicado
+
+- Interface redesenhada: fundo quase preto, linhas finas, tipografia mono e um
+  único acento vermelho. O núcleo mantém os pontos vermelhos orbitando.
+- O antigo chat de sessão foi removido. Agora existe uma só conversa: o que é
+  dito por voz e o que é escrito aparece no mesmo lugar, e "limpar" fica no
+  cabeçalho da conversa.
+- Ajustes abrem por padrão ao iniciar. O botão do topo alterna o painel e o
+  conteúdo da câmara cede espaço, em vez de ficar coberto.
+- Cada perfil de personalidade tem a sua cor própria (ULTRON vermelho, JARVIS
+  ciano, VISÃO âmbar, EDITH verde), sem herdar a cor do tema ativo.
+- Avisos do núcleo aparecem como aviso rápido e não poluem mais a conversa.
+- Atalhos: Ctrl+1 recolhe a conversa, Ctrl+, abre Ajustes, Ctrl+K foca o campo
+  de comando, Esc fecha Ajustes.
+
 ULTRON Desktop 1.12.1 — a interface volta a conectar ao núcleo
 
 - Corrigido: um nome de função errado em `app.js` (`salvarMicrophone`) lançava

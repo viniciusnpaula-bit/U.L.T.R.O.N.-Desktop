@@ -19,7 +19,7 @@ const hudActions = Object.freeze({
 const THEMES = ['ultron', 'jarvis', 'amber', 'emerald'];
 const state = {
   connected: false, paused: false, history: [], commands: new Map(),
-  pending: null, status: {}, lastResponse: '', sessionCount: 0,
+  pending: null, status: {}, lastResponse: '',
   turns: [],          // bate-papo de voz: {role, text, source, at}
   turnKeys: new Set(),
   writing: 0,         // turnos que vieram do campo de texto nesta sessão
@@ -57,7 +57,7 @@ function applyTheme(theme) {
   const selected = THEMES.includes(theme) ? theme : 'ultron';
   document.documentElement.dataset.theme = selected;
   try { localStorage.setItem('ultron-theme', selected); } catch {}
-  document.querySelectorAll('.swatch').forEach(node => node.setAttribute('aria-checked', String(node.dataset.theme === selected)));
+  document.querySelectorAll('#themeSwatches .swatch').forEach(node => node.setAttribute('aria-checked', String(node.dataset.theme === selected)));
   publishHudSnapshot();
 }
 
@@ -82,10 +82,6 @@ function toast(message) {
   toast.timer = setTimeout(() => node.classList.remove('show'), 3200);
 }
 
-function hora() {
-  return new Date().toLocaleTimeString('pt-BR', { hour: '2-digit', minute: '2-digit' });
-}
-
 function setLed(id, status) {
   const node = $(id);
   if (!node) return;
@@ -98,25 +94,7 @@ function setMetric(name, value) {
   if (node) node.textContent = value;
 }
 
-/* Fita de eventos: cada item tem horário, tipo e texto. Sem ícones decorativos. */
-function fita(kind, text) {
-  const list = $('tapeList');
-  list.querySelector('.tape-empty')?.remove();
-  const item = document.createElement('div');
-  item.className = `tape-item ${kind}`;
-  const time = document.createElement('time');
-  time.textContent = hora();
-  const body = document.createElement('p');
-  body.textContent = String(text || '').slice(0, 400);
-  item.append(time, body);
-  list.append(item);
-  while (list.children.length > 60) list.firstElementChild.remove();
-  list.scrollTop = list.scrollHeight;
-  state.sessionCount += 1;
-  setMetric('sessionCount', String(state.sessionCount));
-}
-
-/* A resposta grande fica na câmara; a mesma frase entra na fita. */
+/* A resposta grande fica na câmara; a conversa guarda o mesmo texto. */
 function responder(text) {
   const node = $('responseText');
   const clean = String(text || '').trim();
@@ -240,8 +218,7 @@ function updateStatus(data) {
     : 'indisponível';
   setMetric('micVal', mic);
   setMetric('coreVal', typeof data.core_running === 'boolean' ? (data.core_running ? 'Online' : 'Parado') : 'Indisponível');
-  setMetric('apiVal', typeof data.api_running === 'boolean' ? (data.api_running ? 'Conectada' : 'Parada') : 'Indisponível');
-  setMetric('apiServiceVal', $('apiVal').textContent);
+  setMetric('apiServiceVal', typeof data.api_running === 'boolean' ? (data.api_running ? 'Conectada' : 'Parada') : 'Indisponível');
   setMetric('systemMicVal', mic);
   setMetric('coreState', data.core_running === true ? 'OPERACIONAL' : data.core_running === false ? 'NÚCLEO PARADO' : 'DESCONHECIDO');
   setMetric('signalCoreText', $('coreVal').textContent);
@@ -251,7 +228,6 @@ function updateStatus(data) {
 
   setLed('headerLed', state.connected ? 'online' : data.api_running === false ? 'error' : 'warn');
   setLed('coreLed', data.core_running === true ? 'online' : data.core_running === false ? 'error' : 'warn');
-  setLed('apiLed', data.api_running === true ? 'online' : data.api_running === false ? 'error' : 'warn');
   setLed('voiceLed', data.microphone_error ? 'error' : state.paused ? 'warn' : data.microphone_capturing ? 'online' : 'warn');
 
   /* nível do microfone vira uma linha fina sob a linha de comando */
@@ -367,13 +343,11 @@ function handleEvent(event) {
   if (event.event === 'NOTIFICATION') {
     const message = event.data.message || 'Notificação do núcleo.';
     if ($('activityText')) $('activityText').textContent = message;
-    fita('notice', message);
+    toast(message);
   }
   if (event.event === 'CONVERSATION_TURN') {
     const turno = event.data || {};
-    if (adicionarTurno({ role: turno.role, text: turno.text, source: turno.source || 'voz', at: turno.at || Date.now() / 1000 })) {
-      fita(turno.role === 'user' ? 'user' : 'core', turno.text);
-    }
+    adicionarTurno({ role: turno.role, text: turno.text, source: turno.source || 'voz', at: turno.at || Date.now() / 1000 });
   }
   if (event.event === 'CONFIRMATION_REQUIRED') confirmation(event);
   if (event.event === 'SPEECH_CONFIRM') confirmarFala(event);
@@ -383,7 +357,6 @@ function handleEvent(event) {
     const value = event.data?.response;
     const text = typeof value === 'string' && value ? value : 'O núcleo recebeu o comando.';
     responder(text);
-    fita('core', text);
     const escrito = state.writing > 0;
     if (escrito) state.writing -= 1;
     if (escrito) adicionarTurno({ role: 'assistant', text, source: 'texto', at: Date.now() / 1000 });
@@ -394,8 +367,7 @@ function handleEvent(event) {
 async function send(text) {
   text = String(text || '').trim();
   if (!text) return false;
-  if (!state.connected) { toast('O núcleo está desconectado.'); fita('notice', 'Núcleo desconectado — comando não enviado.'); return false; }
-  fita('user', text);
+  if (!state.connected) { toast('O núcleo está desconectado.'); return false; }
   state.writing += 1;
   adicionarTurno({ role: 'user', text, source: 'texto', at: Date.now() / 1000 });
   responder('Enviado. Aguardando o núcleo…');
@@ -407,7 +379,6 @@ async function send(text) {
     return true;
   } catch (error) {
     responder(error.message);
-    fita('notice', error.message);
     toast(error.message);
     aplicarEstado(state.status);
     return false;
@@ -419,7 +390,7 @@ async function toggleMicrophone() {
     const result = await transport.setMicrophonePaused(!state.paused);
     state.paused = result.paused;
     updateStatus({ core_running: true, microphone_paused: state.paused, microphone_state: state.paused ? 'pausado' : 'ativo' });
-    fita('notice', state.paused ? 'Escuta pausada.' : 'Escuta retomada. Diga “Ei, Ultron”.');
+    toast(state.paused ? 'Escuta pausada.' : 'Escuta retomada. Diga “Ei, Ultron”.');
   } catch (error) { toast(`Não foi possível alterar o microfone: ${error.message}`); }
 }
 
@@ -612,7 +583,7 @@ function confirmarFala(event) {
   const opcoes = Array.isArray(dados.alternativas) && dados.alternativas.length ? dados.alternativas : [dados.fala];
   const linha = opcoes.map((opcao, indice) => `${indice + 1}. ${opcao}`).join('\n');
   const aceito = window.confirm(`Não entendi com certeza. ${dados.motivo || ''}\n\n${linha}\n\nExecutar a primeira interpretação?`);
-  fita('notice', aceito ? `confirmado: ${opcoes[0]}` : `descartado: ${opcoes[0]}`);
+  toast(aceito ? `confirmado: ${opcoes[0]}` : `descartado: ${opcoes[0]}`);
   // responde pelo canal oficial de confirmações (sem PIN: não é ação crítica)
   if (dados.request_id) {
     transport.confirm(dados.request_id, aceito).catch(() => {});
@@ -998,12 +969,11 @@ async function desfazerAtualizacao() {
   }
 }
 
-/* ── barras recolhíveis (bate-papo e sistema) ─────────────────────────────── */
-/* Ambas nascem abertas, lembram a escolha e podem ser recolhidas por três
-   caminhos: botão no topo, seta no próprio cabeçalho e atalho (Ctrl+1 / Ctrl+,). */
+/* ── barra recolhível (bate-papo) ─────────────────────────────────────────── */
+/* Nasce aberta, lembra a escolha e pode ser recolhida por três caminhos:
+   botão no topo, seta no próprio cabeçalho e atalho (Ctrl+1). */
 const RAILS = {
-  chat: { chave: 'ultron-chat-aberto', attr: 'data-chat', botoes: ['toggleChat', 'collapseChat'] },
-  tape: { chave: 'ultron-eventos-aberto', attr: 'data-tape', botoes: ['toggleTape'] },
+  chat: { chave: 'ultron-chat-aberto', attr: 'data-chat', botoes: ['collapseChat'] },
 };
 
 function aplicarRail(nome, aberto) {
@@ -1012,13 +982,12 @@ function aplicarRail(nome, aberto) {
   tag.setAttribute(rail.attr, aberto ? 'on' : 'off');
   for (const id of rail.botoes) {
     const botao = $(id);
+    if (!botao) continue;
     botao.setAttribute('aria-pressed', String(aberto));
     botao.setAttribute('aria-expanded', String(aberto));
-    const alvo = nome === 'chat' ? 'conversa de voz' : nome === 'tape' ? 'eventos' : 'sistema';
-    const tecla = nome === 'chat' ? 'Ctrl+1' : nome === 'tape' ? 'Ctrl+2' : 'Ctrl+,';
-    botao.title = `${aberto ? 'Recolher' : 'Abrir'} ${alvo} (${tecla})`;
+    botao.title = `${aberto ? 'Recolher' : 'Abrir'} conversa de voz (Ctrl+1)`;
   }
-  const painel = nome === 'chat' ? $('drawerChat') : $('side');
+  const painel = $('drawerChat');
   if (painel) painel.setAttribute('aria-hidden', String(!aberto));
   try { localStorage.setItem(rail.chave, aberto ? '1' : '0'); } catch {}
   return aberto;
@@ -1056,11 +1025,12 @@ function drawer(open) {
   const painel = $('drawer');
   const fundo = $('drawerBackdrop');
   gavetaAberta = Boolean(open);
+  document.documentElement.dataset.drawer = open ? 'on' : 'off';
   painel.hidden = !open;
   fundo.hidden = !open;
   painel.setAttribute('aria-hidden', String(!open));
   $('openSettings').setAttribute('aria-expanded', String(Boolean(open)));
-  $('toggleSystem').setAttribute('aria-pressed', String(Boolean(open)));
+  $('openSettings').setAttribute('aria-pressed', String(Boolean(open)));
   if (open) {
     posicionarBarra();
     refreshMicrophones();
@@ -1081,7 +1051,7 @@ function fecharGaveta() {
 
 /* ── ligação dos controles ───────────────────────────────────────────────── */
 applyTheme((() => { try { return localStorage.getItem('ultron-theme') || 'ultron'; } catch { return 'ultron'; } })());
-document.querySelectorAll('.swatch').forEach(node => node.onclick = () => applyTheme(node.dataset.theme));
+document.querySelectorAll('#themeSwatches .swatch').forEach(node => node.onclick = () => applyTheme(node.dataset.theme));
 document.querySelectorAll('[data-command]').forEach(button => button.onclick = () => send(button.dataset.command));
 
 $('consoleForm').addEventListener('submit', event => {
@@ -1120,21 +1090,14 @@ $('updateRollback').onclick = desfazerAtualizacao;
 $('scrollLatest').onclick = () => { const lista = $('commsList'); lista.scrollTop = lista.scrollHeight; };
 $('clearHistory').onclick = () => {
   state.history = [];
-  state.sessionCount = 0;
   renderTurnos([]);
-  setMetric('sessionCount', '0');
-  $('tapeList').replaceChildren(Object.assign(document.createElement('div'), {
-    className: 'tape-empty',
-    innerHTML: 'Nada ainda nesta sessão.<br><span>O que você disser aparece aqui.</span>',
-  }));
   if ($('memoryList')) $('memoryList').replaceChildren();
   if ($('recentList')) $('recentList').replaceChildren();
   toast('Sessão limpa.');
 };
-$('toggleChat').onclick = () => alternarRail('chat');
+$('toggleChat')?.addEventListener('click', () => alternarRail('chat'));
 $('collapseChat').onclick = () => alternarRail('chat');
-$('openSettings').onclick = () => drawer(true);
-$('toggleSystem').onclick = () => drawer($('drawer').hidden);
+$('openSettings').onclick = () => drawer($('drawer').hidden);
 /* fechar: seta, clique fora (o backdrop cobre o resto da tela) e Esc */
 $('closeDrawer').addEventListener('click', event => { event.preventDefault(); fecharGaveta(); });
 $('drawerBackdrop').addEventListener('pointerdown', event => { event.preventDefault(); fecharGaveta(); });
@@ -1152,7 +1115,7 @@ window.ultron.onHudAction(async request => {
 });
 $('emergencyStopButton').onclick = async () => {
   if (!window.confirm('Acionar a parada de emergência do ULTRON?')) return;
-  try { await transport.emergencyStop(); toast('Parada de emergência enviada ao núcleo.'); fita('notice', 'Parada de emergência acionada.'); }
+  try { await transport.emergencyStop(); toast('Parada de emergência enviada ao núcleo.'); }
   catch (error) { toast(`A parada de emergência falhou: ${error.message}`); }
 };
 
@@ -1160,7 +1123,6 @@ $('emergencyStopButton').onclick = async () => {
 function atalhos(event) {
   if (event.ctrlKey && event.key === ',') { event.preventDefault(); event.stopPropagation(); drawer($('drawer').hidden); return; }
   if (event.ctrlKey && (event.key === '1' || event.key === '!')) { event.preventDefault(); event.stopPropagation(); alternarRail('chat'); return; }
-  if (event.ctrlKey && (event.key === '2' || event.key === '@')) { event.preventDefault(); event.stopPropagation(); alternarRail('tape'); return; }
   if (event.ctrlKey && event.key.toLowerCase() === 'k') { event.preventDefault(); $('commandInput').focus(); return; }
   if (event.key === 'Escape') {
     if (!$('drawer').hidden) { event.preventDefault(); event.stopPropagation(); fecharGaveta(); }

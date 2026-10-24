@@ -38,7 +38,7 @@ function hexParaHsl(hex) {
 export function criarOrbe(canvas) {
   const c = canvas.getContext('2d');
   const reduzir = window.matchMedia?.('(prefers-reduced-motion: reduce)').matches;
-  const FILAMENTOS = 5;
+  const FILAMENTOS = 4;
   const SEGMENTOS = 320;
   const filamentos = Array.from({ length: FILAMENTOS }, (_, f) => ({
     raio: 0.34 + f * 0.052,
@@ -130,6 +130,16 @@ export function criarOrbe(canvas) {
     c.stroke();
     c.restore();
 
+    // 3b) arco de instrumento: um segmento fino que gira devagar
+    c.save();
+    c.rotate(giro * 0.35);
+    c.beginPath();
+    c.arc(0, 0, R * 0.66, -0.52, 0.52);
+    c.lineWidth = 1;
+    c.strokeStyle = `hsla(${cor.h}, ${sat}%, ${luz + 18}%, ${0.42 * brilho})`;
+    c.stroke();
+    c.restore();
+
     // 4) pupila: luz concentrada, respira com a energia
     const pulso = 1 + 0.05 * Math.sin(fase * 1.6) + 0.12 * energia;
     const pupila = c.createRadialGradient(0, 0, 0, 0, 0, R * 0.22 * pulso);
@@ -151,45 +161,118 @@ export function criarOrbe(canvas) {
   };
 }
 
-// Campo de partículas do fundo: poeira lenta que reage à energia do núcleo.
+// Campo de partículas: poeira vermelha em órbita do núcleo.
+// Três profundidades orbitais + uma camada ambiente bem discreta. A energia do
+// estado real (respondendo/pensando) acelera a deriva e aumenta o brilho.
 export function criarCampo(canvas) {
   const c = canvas.getContext('2d');
   const reduzir = window.matchMedia?.('(prefers-reduced-motion: reduce)').matches;
-  let w = 0, h = 0, dpr = 1, pontos = [], raf = 0, t0 = performance.now(), ultimo = performance.now();
+  const CAMADAS = [
+    { fracao: 0.52, dist: [0.30, 0.78], tam: [0.50, 0.95], alfa: [0.12, 0.28], giro: [0.004, 0.012], deriva: [0.002, 0.006] },
+    { fracao: 0.30, dist: [0.52, 1.02], tam: [0.60, 1.25], alfa: [0.18, 0.42], giro: [0.006, 0.018], deriva: [0.004, 0.012] },
+    { fracao: 0.18, dist: [0.72, 1.28], tam: [1.00, 2.10], alfa: [0.30, 0.68], giro: [0.010, 0.030], deriva: [0.006, 0.020] },
+  ];
+  const sorte = (a, b) => a + Math.random() * (b - a);
+  let w = 0, h = 0, dpr = 1, raf = 0, ultimo = performance.now();
+  let orbitais = [], ambiente = [], centro = { x: 0, y: 0 }, raio = 300;
+  let cor = '#ff2f42', lido = 0, energia = 0;
+
   function medir() {
     dpr = Math.min(2, window.devicePixelRatio || 1);
     w = window.innerWidth; h = window.innerHeight;
     canvas.width = Math.round(w * dpr); canvas.height = Math.round(h * dpr);
-    const total = Math.round(Math.min(150, (w * h) / 16000));
-    pontos = Array.from({ length: total }, () => ({
+
+    const total = Math.round(Math.min(190, Math.max(90, (w * h) / 10500)));
+    orbitais = [];
+    for (const camada of CAMADAS) {
+      const n = Math.round(total * camada.fracao);
+      for (let i = 0; i < n; i++) {
+        orbitais.push({
+          ang: Math.random() * Math.PI * 2,
+          dist: sorte(camada.dist[0], camada.dist[1]),
+          r: sorte(camada.tam[0], camada.tam[1]),
+          a: sorte(camada.alfa[0], camada.alfa[1]),
+          giro: sorte(camada.giro[0], camada.giro[1]) * (Math.random() < 0.5 ? -1 : 1),
+          deriva: sorte(camada.deriva[0], camada.deriva[1]),
+          fase: Math.random() * Math.PI * 2,
+          tw: sorte(0.35, 1.30),
+        });
+      }
+    }
+    ambiente = Array.from({ length: Math.round(Math.min(46, w / 26)) }, () => ({
       x: Math.random() * w, y: Math.random() * h,
-      r: 0.4 + Math.random() * 1.1, v: 0.02 + Math.random() * 0.08,
-      p: Math.random() * Math.PI * 2,
+      r: sorte(0.3, 0.9), a: sorte(0.05, 0.14),
+      v: sorte(0.4, 1.4), fase: Math.random() * Math.PI * 2, tw: sorte(0.2, 0.8),
     }));
+    medirCentro(true);
   }
-  window.addEventListener('resize', medir);
+
+  function medirCentro(forcar) {
+    const agora = performance.now();
+    if (!forcar && agora - lido < 700) return;
+    lido = agora;
+    const alvo = document.getElementById('core');
+    const r = alvo?.getBoundingClientRect();
+    if (r && r.width > 40) {
+      centro = { x: r.left + r.width / 2, y: r.top + r.height / 2 };
+      raio = Math.max(150, Math.min(r.width, r.height) * 0.62);
+    } else {
+      centro = { x: w / 2, y: h * 0.45 };
+      raio = Math.min(w, h) * 0.34;
+    }
+    const estado = document.getElementById('chamber')?.dataset.state || '';
+    const alvoEnergia = /respondendo|ouvindo/.test(estado) ? 1 : /pensando/.test(estado) ? 0.55 : 0;
+    energia += (alvoEnergia - energia) * 0.5;
+    cor = getComputedStyle(document.documentElement).getPropertyValue('--core').trim() || '#ff2f42';
+  }
+
   function quadro(t) {
     const dt = Math.min(0.05, (t - ultimo) / 1000 || 0.016);
     ultimo = t;
+    medirCentro(false);
     c.setTransform(1, 0, 0, 1, 0, 0);
     c.clearRect(0, 0, canvas.width, canvas.height);
     c.scale(dpr, dpr);
-    const cor = getComputedStyle(document.documentElement).getPropertyValue('--core').trim() || '#ff3446';
-    for (const p of pontos) {
-      if (!reduzir) {
-        p.y -= p.v * 22 * dt;
-        p.x += Math.sin((t / 1000) * 0.2 + p.p) * 0.06;
-        if (p.y < -4) { p.y = h + 4; p.x = Math.random() * w; }
+    c.fillStyle = cor;
+    const vel = reduzir ? 0 : 1;
+
+    // camada ambiente: poeira solta, quase invisível
+    for (const p of ambiente) {
+      if (vel) {
+        p.y -= p.v * 7 * dt;
+        if (p.y < -6) { p.y = h + 6; p.x = Math.random() * w; }
       }
-      c.globalAlpha = 0.16 + 0.3 * (0.5 + 0.5 * Math.sin((t / 1000) * 0.6 + p.p));
-      c.fillStyle = cor;
+      const cintila = reduzir ? 0.8 : 0.55 + 0.45 * Math.sin((t / 1000) * p.tw + p.fase);
+      c.globalAlpha = p.a * cintila;
       c.beginPath(); c.arc(p.x, p.y, p.r, 0, Math.PI * 2); c.fill();
     }
+
+    // camadas orbitais: densas perto do núcleo, abrindo para fora
+    for (const p of orbitais) {
+      if (vel) {
+        p.ang += p.giro * dt * (1 + energia * 1.4);
+        p.dist += p.deriva * dt * (1 + energia * 2.2);
+        if (p.dist > 1.38) { p.dist = sorte(0.28, 0.52); p.ang = Math.random() * Math.PI * 2; }
+      }
+      const x = centro.x + Math.cos(p.ang) * p.dist * raio;
+      const y = centro.y + Math.sin(p.ang) * p.dist * raio * 0.94;
+      if (x < -24 || x > w + 24 || y < -24 || y > h + 24) continue;
+      const cintila = reduzir ? 0.8 : 0.60 + 0.40 * Math.sin((t / 1000) * p.tw + p.fase);
+      c.globalAlpha = Math.min(0.90, p.a * cintila * (1 + energia * 0.45));
+      c.beginPath(); c.arc(x, y, p.r, 0, Math.PI * 2); c.fill();
+      if (p.r > 1.55) {                      // brasa: halo curto, sem shadowBlur
+        c.globalAlpha *= 0.16;
+        c.beginPath(); c.arc(x, y, p.r * 3.1, 0, Math.PI * 2); c.fill();
+      }
+    }
+
     c.globalAlpha = 1;
     raf = requestAnimationFrame(quadro);
   }
+
+  window.addEventListener('resize', medir);
   return {
-    iniciar() { medir(); raf = requestAnimationFrame(quadro); },
+    iniciar() { medir(); ultimo = performance.now(); raf = requestAnimationFrame(quadro); },
     parar() { cancelAnimationFrame(raf); raf = 0; },
   };
 }

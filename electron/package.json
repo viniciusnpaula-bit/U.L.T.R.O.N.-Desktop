@@ -1,6 +1,6 @@
 {
   "name": "ultron-desktop",
-  "version": "1.12.1",
+  "version": "1.13.0",
   "description": "U.L.T.R.O.N. Desktop para Windows \u2014 interface nativa baseada na camada web do ULTRON",
   "main": "main.js",
   "author": "U.L.T.R.O.N.",

@@ -19,7 +19,7 @@ PRIMEIRO USO
 O QUE MUDOU NO INSTALADOR (por que não é mais um .bat)
 - setup.bat foi removido. Um .bat que chama python, pip e npm é o padrão que mais
   antivírus marca como suspeito, e ele não tinha ícone, versão nem assinatura.
-- Agora existe um único programa: ULTRON-Setup.exe (ícone oficial, versão 1.12.1,
+- Agora existe um único programa: ULTRON-Setup.exe (ícone oficial, versão 1.13.0,
   descrição, log em logs\setup.log). Ele não usa %TEMP%, não pede elevação,
   não escreve no registro e não baixa nada além das dependências listadas.
 - Reexecutar o instalador conserta (repair) e atualiza sem refazer tudo.
@@ -35,6 +35,8 @@ INTERFACE E VOZ
 - Diga "Ei, Ultron" seguido do comando — ou segure Ctrl+Alt+Espaço (HOTKEY_FALAR),
 fale e solte: o comando é enviado sem precisar da palavra de ativação.
 - Ações rápidas na tela inicial: navegador, Spotify, música, volume, Rocket League, modo jogo.
+- A conversa é uma só: o que você fala e o que você escreve aparecem no mesmo lugar.
+  "limpar" no cabeçalho da conversa apaga o histórico da sessão.
 - Fechar o painel encerra a API e o núcleo.
 
 SEGURANÇA

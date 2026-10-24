@@ -95,7 +95,7 @@ class GameActionTests(unittest.TestCase):
         strip = html.split('class="signals"', 1)[1].split("</header>", 1)[0]
         for metric in ("cpuVal", "ramVal", "diskVal"):
             self.assertIn(f'id="{metric}"', strip)
-        self.assertIn('id="sessionCount"', html)
+        self.assertIn('id="commsCount"', html)
         for unsupported in ("VRAM", "Agentes Ativos", "Taxa de Tokens", "Latência do Sistema"):
             self.assertNotIn(unsupported, html)
 
