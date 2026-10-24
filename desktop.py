@@ -58,8 +58,8 @@ def main() -> int:
         _show_error("ULTRON Desktop", "Não consegui carregar a configuração. Execute ULTRON-Setup.exe e tente novamente.")
         return 1
 
-    if not any(config.CHAVES.get(provider) for provider in config.PROVEDORES):
-        _show_error("ULTRON Desktop", "Nenhuma chave de IA configurada. Edite o arquivo .env e reinicie.")
+    if not any(config.CHAVES.values()):
+        _show_error("ULTRON Desktop", "Nenhuma chave de IA configurada. Edite o .env ou abra Ajustes › Chaves de API.")
         return 1
 
     try:

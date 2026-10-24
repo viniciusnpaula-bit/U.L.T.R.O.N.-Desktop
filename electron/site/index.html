@@ -186,7 +186,7 @@
 
     <section class="block">
       <h3>Chaves de API</h3>
-      <p class="muted">Guardadas <b>cifradas</b> (AES-256 + DPAPI do Windows) em <code id="cofreArquivo">dados/cofre.json</code>. A interface nunca mostra a chave de volta — só o final. O que já está no .env continua valendo.</p>
+      <p class="muted">Guardadas <b>cifradas</b> (AES-256 + DPAPI do Windows) em <code id="cofreArquivo">dados/cofre.json</code>. A interface nunca mostra a chave de volta — só o final. Cada plataforma tem o link oficial para criar a chave. O que já está no .env continua valendo.</p>
       <div id="cofreList" class="cofre-list" aria-live="polite"><span class="micro nano">carregando…</span></div>
       <div class="field-row">
         <label class="sr-only" for="cofreNome">Credencial</label>
@@ -194,6 +194,13 @@
           <option value="gemini">Gemini</option>
           <option value="groq">Groq</option>
           <option value="nvidia">NVIDIA Build</option>
+          <option value="openai">OpenAI</option>
+          <option value="openrouter">OpenRouter</option>
+          <option value="mistral">Mistral</option>
+          <option value="deepseek">DeepSeek</option>
+          <option value="cerebras">Cerebras</option>
+          <option value="together">Together AI</option>
+          <option value="xai">xAI (Grok)</option>
           <option value="telegram_token">Telegram (token do bot)</option>
           <option value="telegram_uid">Telegram (seu ID)</option>
         </select>

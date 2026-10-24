@@ -45,12 +45,22 @@ def _dependencias():
 
 
 def _configuracao():
-    chaves = ("GEMINI_API_KEY", "GROQ_API_KEY", "NVIDIA_API_KEY")
+    chaves = ("GEMINI_API_KEY", "GROQ_API_KEY", "NVIDIA_API_KEY", "OPENAI_API_KEY",
+              "OPENROUTER_API_KEY", "MISTRAL_API_KEY", "DEEPSEEK_API_KEY",
+              "CEREBRAS_API_KEY", "TOGETHER_API_KEY", "XAI_API_KEY")
     valores = {nome: os.environ.get(nome, "") for nome in chaves}
     arquivo = BASE / ".env"
     if arquivo.is_file():
         from dotenv import dotenv_values
         valores.update({nome: valor or "" for nome, valor in dotenv_values(arquivo).items() if nome in chaves})
+    # Chaves coladas pela interface ficam no cofre cifrado, não no .env.
+    try:
+        import cofre
+        for nome in cofre.PROVEDORES:
+            if cofre.obter(nome):
+                valores[f"{nome.upper()}_API_KEY"] = "cofre"
+    except Exception:
+        pass
     quantidade = sum(bool(valores.get(nome)) for nome in chaves)
     if not quantidade:
         raise RuntimeError("Nenhuma chave de provedor configurada; valores nunca são exibidos.")

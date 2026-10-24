@@ -12,6 +12,7 @@ contextBridge.exposeInMainWorld('ultron', Object.freeze({
   cofreGuardar: (nome, valor) => ipcRenderer.invoke('cofre:guardar', nome, valor),
   cofreRemover: nome => ipcRenderer.invoke('cofre:remover', nome),
   cofreTestar: nome => ipcRenderer.invoke('cofre:testar', nome),
+  abrirLink: url => ipcRenderer.invoke('link:abrir', url),
   fatosListar: busca => ipcRenderer.invoke('mem:fatos', busca),
   fatoCorrigir: (id, texto) => ipcRenderer.invoke('mem:fato-corrigir', id, texto),
   fatoApagar: id => ipcRenderer.invoke('mem:fato-apagar', id),

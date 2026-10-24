@@ -364,7 +364,7 @@ if __name__ == "__main__":
     if "--remover-inicio" in sys.argv:
         remover_inicio()
         sys.exit(0)
-    if not any(config.CHAVES.get(p) for p in config.PROVEDORES):
+    if not any(config.CHAVES.values()):
         print("Nenhuma chave de API no arquivo .env. Rode ULTRON-Setup.exe ou edite o .env.")
         sys.exit(1)
     somente_texto = "--texto" in sys.argv

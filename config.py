@@ -14,25 +14,56 @@ def _env(nome, padrao=""):
 
 
 NOME = _env("NOME_USUARIO", "senhor")
-PROVEDORES = [p.strip().lower() for p in _env("PROVEDORES", "groq,gemini,nvidia").split(",") if p.strip()]
+# Provedores com API compatível com OpenAI. A ordem define a preferência; quem não
+# tem chave é apenas pulado. Todos podem ser configurados pelo cofre da interface.
+PROVEDORES = [p.strip().lower() for p in _env(
+    "PROVEDORES",
+    "groq,gemini,nvidia,openai,openrouter,mistral,deepseek,cerebras,together,xai",
+).split(",") if p.strip()]
 CHAVES = {
     "gemini": _env("GEMINI_API_KEY"),
     "groq": _env("GROQ_API_KEY"),
     "nvidia": _env("NVIDIA_API_KEY"),
+    "openai": _env("OPENAI_API_KEY"),
+    "openrouter": _env("OPENROUTER_API_KEY"),
+    "mistral": _env("MISTRAL_API_KEY"),
+    "deepseek": _env("DEEPSEEK_API_KEY"),
+    "cerebras": _env("CEREBRAS_API_KEY"),
+    "together": _env("TOGETHER_API_KEY"),
+    "xai": _env("XAI_API_KEY"),
 }
 MODELOS = {
     "gemini": _env("GEMINI_MODEL", "gemini-2.0-flash"),
     "groq": _env("GROQ_MODEL", "openai/gpt-oss-120b"),
     "nvidia": _env("NVIDIA_MODEL", "openai/gpt-oss-20b"),
+    "openai": _env("OPENAI_MODEL", "gpt-4o-mini"),
+    "openrouter": _env("OPENROUTER_MODEL", "openai/gpt-4o-mini"),
+    "mistral": _env("MISTRAL_MODEL", "mistral-small-latest"),
+    "deepseek": _env("DEEPSEEK_MODEL", "deepseek-chat"),
+    "cerebras": _env("CEREBRAS_MODEL", "llama-3.3-70b"),
+    "together": _env("TOGETHER_MODEL", "meta-llama/Llama-3.3-70B-Instruct-Turbo"),
+    "xai": _env("XAI_MODEL", "grok-2-latest"),
 }
 MODELOS_VISAO = {
     "gemini": _env("GEMINI_VISION_MODEL", "") or MODELOS["gemini"],
     "groq": _env("GROQ_VISION_MODEL", "meta-llama/llama-4-scout-17b-16e-instruct"),
+    "openai": _env("OPENAI_VISION_MODEL", "") or MODELOS["openai"],
+    "openrouter": _env("OPENROUTER_VISION_MODEL", "") or MODELOS["openrouter"],
+    "mistral": _env("MISTRAL_VISION_MODEL", "pixtral-12b-2409"),
+    "together": _env("TOGETHER_VISION_MODEL", "meta-llama/Llama-3.2-90B-Vision-Instruct-Turbo"),
+    "xai": _env("XAI_VISION_MODEL", "grok-2-vision-1212"),
 }
 URLS = {
     "gemini": "https://generativelanguage.googleapis.com/v1beta/openai/",
     "groq": "https://api.groq.com/openai/v1",
     "nvidia": "https://integrate.api.nvidia.com/v1",
+    "openai": "https://api.openai.com/v1",
+    "openrouter": "https://openrouter.ai/api/v1",
+    "mistral": "https://api.mistral.ai/v1",
+    "deepseek": "https://api.deepseek.com/v1",
+    "cerebras": "https://api.cerebras.ai/v1",
+    "together": "https://api.together.xyz/v1",
+    "xai": "https://api.x.ai/v1",
 }
 VOZ = _env("VOZ", "pt-BR-AntonioNeural")
 VOZ_PITCH = _env("VOZ_PITCH", "-12Hz")

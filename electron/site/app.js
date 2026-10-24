@@ -644,7 +644,20 @@ function pintarCofre(status) {
       : 'não configurada';
     const acoes = document.createElement('div');
 
-    if (item.nome === 'gemini' || item.nome === 'groq' || item.nome === 'nvidia') {
+    if (item.link) {
+      const link = document.createElement('button');
+      link.type = 'button';
+      link.textContent = 'obter chave';
+      link.title = 'Abrir a página oficial no navegador';
+      link.onclick = async () => {
+        try {
+          const aberto = await window.ultron.abrirLink(item.link);
+          if (!aberto) notaCofre('não consegui abrir o link oficial.', 'err');
+        } catch (error) { notaCofre(`falha ao abrir o link (${error.message})`, 'err'); }
+      };
+      acoes.append(link);
+    }
+    if (item.testavel) {
       const testar = document.createElement('button');
       testar.type = 'button';
       testar.textContent = 'testar';

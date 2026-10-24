@@ -1,9 +1,16 @@
 const path = require('node:path');
 const { pathToFileURL } = require('node:url');
-const { app, BrowserWindow, ipcMain, screen } = require('electron');
+const { app, BrowserWindow, ipcMain, screen, shell } = require('electron');
 const { createApiClient } = require('./api');
 
 const api = createApiClient({ baseUrl: process.env.ULTRON_API_URL, token: process.env.ULTRON_API_TOKEN });
+// Só estes domínios oficiais podem ser abertos pelo botão "obter chave".
+const LINK_HOSTS = Object.freeze([
+  'aistudio.google.com', 'console.groq.com', 'build.nvidia.com',
+  'platform.openai.com', 'openrouter.ai', 'console.mistral.ai',
+  'platform.deepseek.com', 'cloud.cerebras.ai', 'api.together.xyz',
+  'console.x.ai', 't.me',
+]);
 const quickActions = Object.freeze({
   browser: 'Abra o navegador', spotify: 'Abra o Spotify', media: 'Pause ou retome a música',
   volume: 'Aumente o volume do PC', rocket: 'Abra o Rocket League', game: 'Ative o modo jogo', minimize: 'Minimize tudo',
@@ -69,6 +76,17 @@ function registerApiHandlers() {
   ipcMain.handle('cofre:testar', (event, nome) => {
     if (!isSender(event, mainWindow) || typeof nome !== 'string') return null;
     return api.cofreTestar(nome);
+  });
+
+  // Links de "onde obter a chave": abre no navegador do sistema, nunca dentro do app.
+  ipcMain.handle('link:abrir', async (event, url) => {
+    if (!isSender(event, mainWindow) || typeof url !== 'string' || url.length > 2048) return false;
+    let parsed;
+    try { parsed = new URL(url); } catch { return false; }
+    if (parsed.protocol !== 'https:' || parsed.username || parsed.password || parsed.port) return false;
+    if (!LINK_HOSTS.includes(parsed.hostname)) return false;
+    await shell.openExternal(parsed.href);
+    return true;
   });
 
   ipcMain.handle('mem:fatos', event => {

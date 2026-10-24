@@ -60,6 +60,34 @@ class CofreTests(unittest.TestCase):
         self.assertIn(status["modo"], {"dpapi", "arquivo"})
         self.assertIn("AES-256-GCM", status["protecao"])
 
+    def test_toda_plataforma_tem_link_oficial_https(self):
+        for nome in cofre.PROVEDORES + cofre.OUTROS:
+            self.assertIn(nome, cofre.LINKS, nome)
+            self.assertTrue(cofre.LINKS[nome].startswith("https://"), nome)
+
+    def test_status_informa_link_e_quais_podem_ser_testados(self):
+        itens = {item["nome"]: item for item in cofre.status()["itens"]}
+        self.assertTrue(itens["openai"]["testavel"])
+        self.assertFalse(itens["telegram_token"]["testavel"])
+        self.assertEqual(itens["deepseek"]["link"], "https://platform.deepseek.com/api_keys")
+        self.assertEqual(itens["xai"]["link"], "https://console.x.ai/")
+
+    def test_salvar_e_remover_esquecem_os_clientes_em_cache(self):
+        import cerebro
+        cerebro._clientes["groq"] = object()
+        cofre.guardar("groq", "gsk_nova_chave_123456")
+        self.assertEqual(cerebro._clientes, {})
+        cerebro._clientes["groq"] = object()
+        cofre.remover("groq")
+        self.assertEqual(cerebro._clientes, {})
+
+    def test_provedor_com_chave_fora_da_ordem_ainda_e_usado(self):
+        import cerebro
+        with patch.object(cerebro.config, "PROVEDORES", ["groq"]):
+            with patch.dict(cerebro.config.CHAVES, {"openai": "sk-teste"}, clear=True):
+                usados = cerebro._provedores_com_chave()
+        self.assertEqual(usados, ["openai"])
+
 
 if __name__ == "__main__":
     unittest.main()

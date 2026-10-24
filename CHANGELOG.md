@@ -1,3 +1,12 @@
+ULTRON Desktop — não lançado
+- Novas plataformas de chave no cofre: OpenAI, OpenRouter, Mistral, DeepSeek,
+  Cerebras, Together AI e xAI (Grok), além de Gemini, Groq e NVIDIA Build.
+- Cada plataforma mostra o link oficial para criar a chave; o link abre no
+  navegador do sistema e só domínios oficiais são aceitos.
+- Salvar ou remover uma chave descarta os clientes em cache, então a chave nova
+  passa a valer no comando seguinte, sem reiniciar o ULTRON.
+- Provedor com chave salva é usado mesmo que não esteja em PROVEDORES.
+
 ULTRON Desktop 1.11.0 — fluxos com etapas, lembretes canceláveis e controles do Windows
 
 FLUXOS NOMEADOS (Fase 4)

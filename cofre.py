@@ -33,11 +33,31 @@ ARQUIVO = _RAIZ / "dados" / "cofre.json"
 ARQUIVO_CHAVE = _RAIZ / "dados" / ".cofre.chave"
 _trava = threading.Lock()
 
-PROVEDORES = ("gemini", "groq", "nvidia")
+PROVEDORES = ("gemini", "groq", "nvidia", "openai", "openrouter", "mistral",
+              "deepseek", "cerebras", "together", "xai")
 OUTROS = ("telegram_token", "telegram_uid")
 NOMES = {
     "gemini": "Gemini", "groq": "Groq", "nvidia": "NVIDIA Build",
+    "openai": "OpenAI", "openrouter": "OpenRouter", "mistral": "Mistral",
+    "deepseek": "DeepSeek", "cerebras": "Cerebras", "together": "Together AI",
+    "xai": "xAI (Grok)",
     "telegram_token": "Telegram (token do bot)", "telegram_uid": "Telegram (seu ID)",
+}
+# Página oficial onde cada serviço mostra/cria a chave. O processo principal do
+# Electron valida esta lista antes de abrir o navegador (nada de URL arbitrária).
+LINKS = {
+    "gemini": "https://aistudio.google.com/app/apikey",
+    "groq": "https://console.groq.com/keys",
+    "nvidia": "https://build.nvidia.com/settings/api-keys",
+    "openai": "https://platform.openai.com/api-keys",
+    "openrouter": "https://openrouter.ai/keys",
+    "mistral": "https://console.mistral.ai/api-keys",
+    "deepseek": "https://platform.deepseek.com/api_keys",
+    "cerebras": "https://cloud.cerebras.ai/",
+    "together": "https://api.together.xyz/settings/api-keys",
+    "xai": "https://console.x.ai/",
+    "telegram_token": "https://t.me/BotFather",
+    "telegram_uid": "https://t.me/userinfobot",
 }
 ENTROPIA_LABEL = b"ULTRON-Cofre-v1"
 
@@ -159,6 +179,15 @@ def mascarar(valor: str) -> str:
     return "•" * max(4, len(valor) - 4) + valor[-4:]
 
 
+def _esquecer_cache() -> None:
+    """A chave mudou: o próximo comando precisa criar clientes novos."""
+    try:
+        import cerebro
+        cerebro.esquecer_clientes()
+    except Exception:
+        pass
+
+
 def guardar(nome: str, valor: str) -> dict:
     """Guarda (ou substitui) uma credencial cifrada. Não devolve o valor."""
     if nome not in PROVEDORES + OUTROS:
@@ -174,6 +203,7 @@ def guardar(nome: str, valor: str) -> dict:
         dados = _ler()
         dados[nome] = {"valor": _cifrar(limpo), "em": time.time(), "dica": mascarar(limpo)}
         _gravar(dados)
+    _esquecer_cache()
     return {"nome": nome, "dica": mascarar(limpo)}
 
 
@@ -190,6 +220,7 @@ def remover(nome: str) -> None:
             elif nome == "telegram_token":
                 import config
                 config.TELEGRAM_TOKEN = ""
+    _esquecer_cache()
 
 
 def obter(nome: str) -> str:
@@ -222,7 +253,8 @@ def status() -> dict:
                                                               or (config.TELEGRAM_TOKEN if nome == "telegram_token" else ""))
                                                       if do_env else "")
         itens.append({"nome": nome, "rotulo": NOMES[nome], "configurada": bool(fonte),
-                      "fonte": fonte, "dica": dica})
+                      "fonte": fonte, "dica": dica, "link": LINKS.get(nome, ""),
+                      "testavel": nome in PROVEDORES})
     return {
         "itens": itens,
         "protecao": ("Windows DPAPI + AES-256-GCM" if modo == "dpapi"

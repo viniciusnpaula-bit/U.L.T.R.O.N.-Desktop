@@ -396,6 +396,7 @@ button { cursor: pointer; border: 0; background: none; }
 .cofre-item .nok { color: var(--muted-2); }
 .cofre-item button { padding: 3px 6px; font-size: 12px; border-radius: 6px; color: var(--muted); }
 .cofre-item button:hover { color: var(--text); background: var(--core-wash); }
+.cofre-item > div { display: flex; gap: 4px; flex-wrap: wrap; justify-content: flex-end; }
 .code-inline, code { font-family: Consolas, monospace; font-size: 11.5px; color: var(--muted-2); }
 .facts-list {
   display: grid; gap: 6px; max-height: 170px; overflow-y: auto; margin-top: 8px;
