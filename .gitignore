@@ -1,6 +1,7 @@
 # Nunca comitar chaves, ambiente ou dados do usuário
 .env
 venv/
+.venv/
 node_modules/
 dados/
 logs/

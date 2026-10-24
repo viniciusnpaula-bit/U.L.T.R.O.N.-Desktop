@@ -13,13 +13,15 @@ spec.loader.exec_module(builder)
 
 REQUIRED_IN_ZIP = (
     "desktop.py", "desktop_api.py", "desktop_runtime.py", "microphone_devices.py", "cerebro.py",
-    "launcher.py", "ULTRON.exe", "ULTRON-Setup.exe", "requirements.txt",
+    "launcher.py", "requirements.txt",
     "permissoes.json", "iniciar_desktop.bat", "LEIA-ME.txt", "CHANGELOG.md",
     "electron/main.js", "electron/preload.js", "electron/api.js", "electron/package.json",
     "electron/site/index.html", "electron/site/app.js", "electron/site/src/real.js",
     "electron/assets/ULTRON.ico", "tools/make_icon.py", "tools/build_setup.py",
     "installer/ultron_setup.py", "tests/test_update.py",
 )
+# Binários só existem depois de rodar tools/build_setup.py (PyInstaller).
+REQUIRED_BINARIES_IN_ZIP = ("ULTRON.exe", "ULTRON-Setup.exe")
 # ".env.example" é documentação e deve estar no pacote; ".env" com chaves reais, não.
 FORBIDDEN_IN_ZIP = (".env", "venv/", "node_modules/", "dados/", "logs/", "__pycache__/",
                     "electron/dist", "build/", ".pytest_cache/", "setup.log", "ultron.db")
@@ -42,6 +44,9 @@ class PackageBuilderTests(unittest.TestCase):
                     self.assertIsNone(zip_file.testzip())
                     for required in REQUIRED_IN_ZIP:
                         self.assertIn(required, names)
+                    for binary in REQUIRED_BINARIES_IN_ZIP:
+                        if (PACKAGE / binary).is_file():
+                            self.assertIn(binary, names)
                     for forbidden in FORBIDDEN_IN_ZIP:
                         hits = [name for name in names
                                 if name == forbidden or name.startswith(forbidden.rstrip("/") + "/")]

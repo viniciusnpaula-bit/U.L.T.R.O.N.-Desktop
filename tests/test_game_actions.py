@@ -110,17 +110,20 @@ class GameActionTests(unittest.TestCase):
         self.assertIn("document.documentElement.dataset.theme", app)
 
     def test_product_version_is_consistent(self):
+        import json
         root = Path(__file__).resolve().parents[1]
+        version = json.loads((root / "electron" / "package.json").read_text(encoding="utf-8"))["version"]
         product_files = (
-            root / "electron" / "package.json", root / "electron" / "package-lock.json",
+            root / "electron" / "package-lock.json",
             root / "electron" / "preload.js", root / "electron" / "mini-preload.js",
             root / "desktop_api.py", root / "electron" / "site" / "index.html",
             root / "LEIA-ME.txt", root / "electron" / "README.md", root / "CHANGELOG.md",
         )
         for path in product_files:
-            self.assertIn("1.11.0", path.read_text(encoding="utf-8"), str(path))
-        self.assertIn('"version"]', (root / "tools" / "build_setup.py").read_text(encoding="utf-8"))
-        self.assertIn("ULTRON-Desktop-v", (root / "tools" / "build_setup.py").read_text(encoding="utf-8"))
+            self.assertIn(version, path.read_text(encoding="utf-8"), str(path))
+        build_setup = (root / "tools" / "build_setup.py").read_text(encoding="utf-8")
+        self.assertIn('"version"]', build_setup)
+        self.assertIn("ULTRON-Desktop-v", build_setup)
 
 
 if __name__ == "__main__":
