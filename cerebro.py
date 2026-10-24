@@ -291,7 +291,7 @@ def descrever_imagem(jpeg, pergunta):
 
 
 def _loop(msgs, confirmar, origem):
-    for _ in range(6):
+    for _ in range(4):
         msg = _chamar(msgs)
         if not msg.tool_calls:
             return (msg.content or "").strip() or f"Sem resposta, {config.NOME}."
@@ -400,7 +400,7 @@ def processar_stream(texto, confirmar, origem="desconhecida"):
     with _lock:
         seguranca.parada.clear()
         _rastrear(origem, "intent_selected", "conversa", "intent", "selected")
-        msgs = [{"role": "system", "content": _system()}] + memoria.historico(16)
+        msgs = [{"role": "system", "content": _system()}] + memoria.historico(config.HISTORICO_MSGS)
         msgs.append({"role": "user", "content": texto})
         provedor = _provedor_para_stream()
         estado = {"texto": "", "concluido": False, "falhou": False}
@@ -467,7 +467,7 @@ def processar(texto, confirmar, origem="desconhecida"):
             memoria.salvar_msg("assistant", resposta)
             return resposta
         _rastrear(origem, "intent_selected", "conversa", "intent", "selected")
-        msgs = [{"role": "system", "content": _system()}] + memoria.historico(16)
+        msgs = [{"role": "system", "content": _system()}] + memoria.historico(config.HISTORICO_MSGS)
         msgs.append({"role": "user", "content": texto})
         try:
             resposta = _loop(msgs, confirmar, origem)

@@ -81,7 +81,7 @@ def _frases(texto):
     return saida
 
 
-def falar_partes(partes, eco=0.5):
+def falar_partes(partes, eco=0.3):
     """Fala frases conforme elas chegam (streaming da IA).
 
     Diferente de `falar(texto)`, `partes` é um iterável que pode BLOQUEAR: cada item

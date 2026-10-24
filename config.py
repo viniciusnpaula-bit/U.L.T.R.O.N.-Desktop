@@ -38,8 +38,13 @@ VOZ = _env("VOZ", "pt-BR-AntonioNeural")
 VOZ_PITCH = _env("VOZ_PITCH", "-12Hz")
 VOZ_RATE = _env("VOZ_RATE", "+0%")
 LIMIAR_VOZ = float(_env("LIMIAR_VOZ", "0") or 0)
-SILENCIO_FIM = float(_env("SILENCIO_FIM", "0.7") or 0.7)   # segundos de silêncio que encerram sua fala
+SILENCIO_FIM = float(_env("SILENCIO_FIM", "0.5") or 0.5)   # segundos de silêncio que encerram sua fala
 REASONING = _env("REASONING_EFFORT", "low").lower()        # "low" = IA mais rápida; vazio desliga
+# Quantas mensagens do histórico entram em cada resposta (menos = resposta mais rápida).
+try:
+    HISTORICO_MSGS = max(2, int(_env("HISTORICO_MSGS", "8") or 8))
+except ValueError:
+    HISTORICO_MSGS = 8
 HOTKEY_PARAR = _env("HOTKEY_PARAR", "ctrl+alt+x")
 # Segurar para falar: grava enquanto a combinação está pressionada, envia ao soltar
 HOTKEY_FALAR = _env("HOTKEY_FALAR", "ctrl+alt+espaco") or ""
