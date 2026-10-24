@@ -1,3 +1,14 @@
+ULTRON Desktop 1.12.1 — a interface volta a conectar ao núcleo
+
+- Corrigido: um nome de função errado em `app.js` (`salvarMicrophone`) lançava
+  `ReferenceError` ao carregar a interface e interrompia a inicialização antes
+  da conexão com o núcleo. O painel ficava em "CONECTANDO" e todo comando
+  respondia "Núcleo desconectado — comando não enviado".
+- Removidas ligações duplicadas de controles (microfone, testes de voz e
+  atualização) que sobrescreviam os handlers corretos.
+- Novo teste de interface quebra o CI quando um controle aponta para uma função
+  inexistente ou é ligado duas vezes.
+
 ULTRON Desktop 1.12.0 — novas plataformas de chave e links oficiais
 - Novas plataformas de chave no cofre: OpenAI, OpenRouter, Mistral, DeepSeek,
   Cerebras, Together AI e xAI (Grok), além de Gemini, Groq e NVIDIA Build.

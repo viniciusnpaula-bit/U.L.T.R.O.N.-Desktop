@@ -51,7 +51,7 @@ jobs:
         run: node --test electron/test/api.test.js
 
       - name: Testes da interface
-        run: node --test electron/site/test/real.test.mjs
+        run: node --test electron/site/test/real.test.mjs electron/site/test/handlers.test.mjs
 
       - name: Verificar que nada proibido entrou
         shell: pwsh

@@ -1112,15 +1112,9 @@ document.querySelectorAll('[data-profile]').forEach(node => node.onclick = () =>
   salvarPersonalidade();
 });
 $('savePersonality').onclick = salvarPersonalidade;
-$('saveMicrophone').onclick = salvarMicrophone;
-$('refreshMicrophones').onclick = () => refreshMicrophones();
-$('testMic').onclick = async () => { const n = await window.ultron?.microfoneTestar?.(); $('testResult').textContent = n?.message || n?.mensagem || '—'; };
-$('testVoice').onclick = async () => { const n = await window.ultron?.vozTestar?.('Olá, presente'); $('testResult').textContent = n?.message || n?.mensagem || '—'; };
 $('updateAction').onclick = atualizarUltron;
 $('previewPersonality').onclick = previaPersonalidade;
 $('resetPersonality').onclick = restaurarPersonalidade;
-
-$('updateAction').onclick = atualizarUltron;
 $('updateRestart').onclick = reiniciarAgora;
 $('updateRollback').onclick = desfazerAtualizacao;
 $('scrollLatest').onclick = () => { const lista = $('commsList'); lista.scrollTop = lista.scrollHeight; };
