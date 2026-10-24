@@ -1,4 +1,4 @@
-ULTRON Desktop — não lançado
+ULTRON Desktop 1.12.0 — novas plataformas de chave e links oficiais
 - Novas plataformas de chave no cofre: OpenAI, OpenRouter, Mistral, DeepSeek,
   Cerebras, Together AI e xAI (Grok), além de Gemini, Groq e NVIDIA Build.
 - Cada plataforma mostra o link oficial para criar a chave; o link abre no
