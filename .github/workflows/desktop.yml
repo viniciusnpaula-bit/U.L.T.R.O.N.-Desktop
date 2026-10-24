@@ -56,13 +56,17 @@ jobs:
       - name: Verificar que nada proibido entrou
         shell: pwsh
         run: |
-          $proibidos = @('.env', 'dados/', 'logs/', 'venv/', 'node_modules/', '__pycache__/')
+          # Casa o nome exato (.env) ou uma pasta proibida em qualquer nível.
+          # ".env.example" é documentação e NÃO deve ser barrado.
+          $proibidos = '(^|/)(\.env|dados|logs|venv|\.venv|node_modules|__pycache__)(/|$)'
+          $raiz = (Get-Location).Path
           $achados = @()
-          foreach ($p in $proibidos) {
-            $achados += Get-ChildItem -Recurse -Force -ErrorAction SilentlyContinue |
-              Where-Object { $_.FullName -like "*$p*" -and $_.FullName -notlike '*\.git\*' }
+          foreach ($item in Get-ChildItem -Recurse -Force -File -ErrorAction SilentlyContinue) {
+            $rel = $item.FullName.Substring($raiz.Length).TrimStart('\', '/').Replace('\', '/')
+            if ($rel.StartsWith('.git/')) { continue }
+            if ($rel -match $proibidos) { $achados += $rel }
           }
           if ($achados.Count -gt 0) {
-            $achados | Select-Object -First 10 FullName
+            $achados | Select-Object -First 10
             Write-Error "Itens proibidos no repositório."
           }
