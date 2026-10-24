@@ -27,10 +27,14 @@ O instalador cria o `.env`. Cole uma chave de IA — a do
 
 ```ini
 GEMINI_API_KEY=
-PROVEDORES=gemini,groq,nvidia
+PROVEDORES=groq,gemini,nvidia,openai,openrouter,mistral,deepseek,cerebras,together,xai
 ```
 
-Sem chave o painel abre e os comandos locais funcionam; a conversa com IA não responde.
+Depois de abrir, outras plataformas podem ser adicionadas em **Ajustes › Chaves de
+API**: OpenAI, OpenRouter, Mistral, DeepSeek, Cerebras, Together AI e xAI (Grok),
+cada uma com o link oficial para criar a chave.
+
+Sem chave o ULTRON avisa e não inicia; configure pelo menos uma no `.env`.
 Diga **“Ei, Ultron”** seguido do comando.
 
 ## Atualizações

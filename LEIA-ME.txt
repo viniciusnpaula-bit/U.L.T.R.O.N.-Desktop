@@ -28,7 +28,9 @@ O QUE MUDOU NO INSTALADOR (por que não é mais um .bat)
 
 INTERFACE E VOZ
 - O Desktop inicia o núcleo ULTRON e a API local (só em 127.0.0.1, com token por sessão).
-- O núcleo tenta Gemini, Groq e NVIDIA Build na ordem de PROVEDORES no .env.
+- O núcleo tenta Gemini, Groq, NVIDIA Build, OpenAI, OpenRouter, Mistral, DeepSeek,
+  Cerebras, Together AI e xAI na ordem de PROVEDORES; quem não tem chave é pulado.
+- Em Ajustes › Chaves de API cada plataforma tem o link oficial para criar a chave.
 - O microfone é um botão: pausa/retoma a escuta contínua do núcleo.
 - Diga "Ei, Ultron" seguido do comando — ou segure Ctrl+Alt+Espaço (HOTKEY_FALAR),
 fale e solte: o comando é enviado sem precisar da palavra de ativação.

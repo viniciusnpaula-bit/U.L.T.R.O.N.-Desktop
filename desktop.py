@@ -59,7 +59,7 @@ def main() -> int:
         return 1
 
     if not any(config.CHAVES.values()):
-        _show_error("ULTRON Desktop", "Nenhuma chave de IA configurada. Edite o .env ou abra Ajustes › Chaves de API.")
+        _show_error("ULTRON Desktop", "Nenhuma chave de IA configurada. Edite o .env (veja .env.example) e abra o ULTRON novamente.")
         return 1
 
     try:
