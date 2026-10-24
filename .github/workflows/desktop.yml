@@ -56,16 +56,11 @@ jobs:
       - name: Verificar que nada proibido entrou
         shell: pwsh
         run: |
-          # Casa o nome exato (.env) ou uma pasta proibida em qualquer nível.
+          # Valida o que está VERSIONADO, não artefatos criados pelos testes
+          # (pytest gera dados/, logs/ e __pycache__ durante o job).
           # ".env.example" é documentação e NÃO deve ser barrado.
           $proibidos = '(^|/)(\.env|dados|logs|venv|\.venv|node_modules|__pycache__)(/|$)'
-          $raiz = (Get-Location).Path
-          $achados = @()
-          foreach ($item in Get-ChildItem -Recurse -Force -File -ErrorAction SilentlyContinue) {
-            $rel = $item.FullName.Substring($raiz.Length).TrimStart('\', '/').Replace('\', '/')
-            if ($rel.StartsWith('.git/')) { continue }
-            if ($rel -match $proibidos) { $achados += $rel }
-          }
+          $achados = @(git ls-files | Where-Object { $_ -match $proibidos })
           if ($achados.Count -gt 0) {
             $achados | Select-Object -First 10
             Write-Error "Itens proibidos no repositório."
