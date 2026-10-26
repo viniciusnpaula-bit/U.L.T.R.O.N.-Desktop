@@ -12,6 +12,7 @@ import os
 import shutil
 import stat
 import zipfile
+from datetime import datetime
 from pathlib import Path
 
 MAX_BYTES = 2 * 1024 ** 3          # 2 GB descompactados
@@ -19,13 +20,24 @@ MAX_ARQUIVOS = 5000                # entradas por ZIP
 MAX_COMPACTAR = 5000               # arquivos por compactação
 
 CATEGORIAS = {
-    "Imagens": {".jpg", ".jpeg", ".png", ".gif", ".webp", ".bmp", ".heic"},
+    "Imagens": {".jpg", ".jpeg", ".png", ".gif", ".webp", ".bmp", ".heic", ".svg"},
     "Vídeos": {".mp4", ".mkv", ".avi", ".mov", ".webm"},
     "Áudios": {".mp3", ".wav", ".flac", ".m4a", ".ogg"},
     "Documentos": {".pdf", ".doc", ".docx", ".txt", ".xls", ".xlsx", ".ppt", ".pptx", ".csv"},
     "Compactados": {".zip", ".rar", ".7z", ".tar", ".gz"},
     "Instaladores": {".exe", ".msi", ".bat", ".cmd"},
+    "Código": {".py", ".js", ".ts", ".json", ".html", ".css", ".java", ".c", ".cpp", ".cs",
+               ".sh", ".ps1", ".ipynb", ".xml", ".yml", ".yaml"},
 }
+
+# Três jeitos de organizar. "tipo" é o padrão; "data" usa a data de modificação;
+# "extensao" cria uma pasta por sufixo, inclusive para o que não tem categoria.
+MODOS = ("tipo", "data", "extensao")
+
+# Lixo de sistema e download pela metade nunca é movido: some sozinho e só
+# atrapalharia a pasta de destino.
+_IGNORAR_NOMES = {"desktop.ini", "thumbs.db", ".ds_store"}
+_IGNORAR_SUFIXOS = {".tmp", ".temp", ".part", ".crdownload", ".download"}
 
 
 def categoria(sufixo: str) -> str:
@@ -48,37 +60,90 @@ def nome_livre(destino: Path) -> Path:
     raise FileExistsError(f"não há nome livre para {destino.name}")
 
 
-def plano_organizacao(pasta: Path) -> dict[str, list[Path]]:
-    """Agrupa os arquivos soltos da pasta por categoria. Não move nada."""
+def _ignorar(item: Path) -> bool:
+    nome = item.name
+    if nome.startswith(".") or nome.startswith("~$"):
+        return True
+    if nome.lower() in _IGNORAR_NOMES:
+        return True
+    return item.suffix.lower() in _IGNORAR_SUFIXOS
+
+
+def _grupo(item: Path, modo: str) -> str:
+    if modo == "data":
+        try:
+            quando = datetime.fromtimestamp(item.stat().st_mtime)
+        except OSError:
+            return "Sem data"
+        return f"{quando.year}/{quando.month:02d}"
+    if modo == "extensao":
+        sufixo = item.suffix.lower().lstrip(".")
+        return sufixo.upper() if sufixo else "SEM-EXTENSAO"
+    return categoria(item.suffix)
+
+
+def _candidatos(pasta: Path, subpastas: bool) -> list[Path]:
+    if not subpastas:
+        brutos = list(pasta.iterdir())
+    else:
+        brutos = []
+        for raiz, pastas, nomes in os.walk(pasta, followlinks=False):
+            pastas[:] = [p for p in pastas if not p.startswith(".") and not Path(raiz, p).is_symlink()]
+            brutos.extend(Path(raiz, nome) for nome in nomes)
+    return sorted(
+        (item for item in brutos if item.is_file() and not item.is_symlink() and not _ignorar(item)),
+        key=lambda item: str(item).lower(),
+    )
+
+
+def plano_organizacao(pasta: Path, modo: str = "tipo", subpastas: bool = False) -> dict[str, list[Path]]:
+    """Agrupa os arquivos soltos da pasta. Não move nada."""
+    modo = str(modo or "tipo").strip().lower()
+    if modo not in MODOS:
+        raise ValueError(f"modo inválido: {modo}")
     plano: dict[str, list[Path]] = {}
-    for item in sorted(pasta.iterdir(), key=lambda p: p.name.lower()):
-        if not item.is_file() or item.is_symlink():
+    for item in _candidatos(pasta, bool(subpastas)):
+        grupo = _grupo(item, modo)
+        # Já está na pasta de destino: mover criaria "nome (2)" ao lado do
+        # original. Isso acontece ao reorganizar uma pasta já organizada.
+        if item.parent == pasta / grupo:
             continue
-        plano.setdefault(categoria(item.suffix), []).append(item)
+        plano.setdefault(grupo, []).append(item)
     return plano
 
 
-def organizar(pasta: Path) -> dict:
-    """Move os arquivos soltos para subpastas por tipo. Devolve o que aconteceu.
+def _garantir_pasta(alvo: Path, criadas: list[str]) -> None:
+    """Cria o destino e anota cada nível novo, para o desfazer removê-los."""
+    pendentes: list[Path] = []
+    atual = alvo
+    while not atual.exists():
+        pendentes.append(atual)
+        if atual.parent == atual:
+            break
+        atual = atual.parent
+    alvo.mkdir(parents=True, exist_ok=True)
+    criadas.extend(str(pasta) for pasta in reversed(pendentes))
+
+
+def organizar(pasta: Path, modo: str = "tipo", subpastas: bool = False) -> dict:
+    """Move os arquivos para subpastas conforme o modo. Devolve o que aconteceu.
 
     `movimentos` e `pastas_criadas` existem para o diário de desfazer: sem eles
     não dá para devolver cada arquivo ao lugar exato sem adivinhar.
     """
-    plano = plano_organizacao(pasta)
+    modo = str(modo or "tipo").strip().lower()
+    plano = plano_organizacao(pasta, modo, subpastas)
     movidos: dict[str, int] = {}
     erros: list[str] = []
     movimentos: list[dict] = []
     pastas_criadas: list[str] = []
     for grupo, itens in sorted(plano.items()):
         alvo_pasta = pasta / grupo
-        existia = alvo_pasta.exists()
         try:
-            alvo_pasta.mkdir(exist_ok=True)
+            _garantir_pasta(alvo_pasta, pastas_criadas)
         except OSError as erro:
             erros.append(f"{grupo}: não consegui criar a pasta ({erro.strerror or erro})")
             continue
-        if not existia:
-            pastas_criadas.append(str(alvo_pasta))
         for item in itens:
             try:
                 destino = nome_livre(alvo_pasta / item.name)
@@ -88,7 +153,9 @@ def organizar(pasta: Path) -> dict:
             except OSError as erro:
                 erros.append(f"{item.name}: {erro.strerror or erro}")
     return {"movidos": movidos, "erros": erros, "total": sum(movidos.values()),
-            "movimentos": movimentos, "pastas_criadas": pastas_criadas}
+            "movimentos": movimentos, "pastas_criadas": pastas_criadas,
+            "modo": modo, "subpastas": bool(subpastas)}
+
 
 
 def _tamanho_arvore(origem: Path) -> tuple[int, int]:

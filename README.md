@@ -44,6 +44,11 @@ aparece **no lugar do núcleo**, sem abrir outra janela. Vídeos do YouTube e do
 Vimeo rodam embutidos; sites abrem em área isolada; PDF abre no visualizador do
 Windows. `Esc` ou o botão **fechar** devolvem o núcleo.
 
+Vídeo entra **no mudo**: o botão **som** no cabeçalho do palco liga o áudio a
+pedido. Em YouTube/Vimeo ele recarrega o player sem o parâmetro de mudo; em
+arquivo local alterna na hora. Isso também evita o bloqueio de autoplay com som
+que o Chromium aplica.
+
 Arquivos locais precisam estar na allowlist de pastas do ULTRON. A interface
 recebe só um id temporário, nunca o caminho do arquivo. Site externo e mídia
 fora dos hosts conhecidos pedem confirmação antes de aparecer.
@@ -63,6 +68,23 @@ e data. Caminhos protegidos (Windows, AppData, `.ssh`, o próprio ULTRON) e
 caminhos fora da pasta do usuário ou da allowlist nunca são tocados. O diário
 expira em 7 dias, guarda no máximo 50 operações e não sai do computador.
 
+## Organizar arquivos
+
+Peça **“organiza a pasta Downloads”** e o ULTRON primeiro mostra a prévia (quantos
+arquivos em cada destino) e só move depois da confirmação. Três modos:
+
+- **tipo** (padrão): Imagens, Vídeos, Áudios, Documentos, Compactados,
+  Instaladores, Código e Outros;
+- **data**: `Ano/Mês` pela data de modificação;
+- **extensão**: uma pasta por sufixo (`PDF`, `JPG`, …) e `SEM-EXTENSAO`.
+
+Por padrão só entram os arquivos soltos na pasta; `subpastas=true` inclui o que
+está dentro das subpastas (a estrutura antiga é achatada, mas o desfazer devolve
+cada arquivo ao caminho original). Nada é sobrescrito — nome repetido vira
+`nome (2).ext`. Arquivos ocultos, `desktop.ini`, `~$…` do Office e restos de
+download (`.tmp`, `.part`, `.crdownload`) ficam onde estão. A pasta precisa estar
+na allowlist, e organizar sempre pede confirmação.
+
 ## Memória e nuances
 
 A conversa fica em SQLite (`dados/ultron.db`) e **não** é apagada por “limpar”:
@@ -77,6 +99,20 @@ O texto do usuário também passa por uma leitura local de nuances — frustraç
 irritação, ansiedade, tristeza, confusão, animação e gratidão — e o tom da
 resposta se ajusta. É uma leitura objetiva por léxico, negação, intensificadores
 e pontuação; não é um diagnóstico.
+
+## Autoconhecimento
+
+A cada resposta o ULTRON recebe um bloco curto gerado do sistema vivo: nome e
+perfil ativos, versão do pacote, SO com build e arquitetura, núcleos e RAM,
+quantidade de ferramentas por área e o jeito/voz em uso. Junto vão os limites
+fixos do produto — não gera nem edita imagem, não edita vídeo, não envia
+WhatsApp, não tem app de celular — e o resumo do portão de segurança.
+
+O bloco é montado uma vez por processo (sem WMI nem PowerShell, para não atrasar
+a resposta) e se atualiza em uma hora. Se a leitura falhar, ele diz que não sabe:
+nunca inventa e nunca impede uma resposta. Trocar o perfil (U.L.T.R.O.N., JARVIS,
+VISÃO, EDITH) muda o nome que o modelo declara; registrar uma ferramenta nova
+muda a contagem sozinho.
 
 ## Voz
 
@@ -136,7 +172,7 @@ Gere os dois com `python tools/build_setup.py --zip`.
 ## Desenvolvimento
 
 ```bash
-python -m pytest tests -q            # suíte local (307 testes)
+python -m pytest tests -q            # suíte local (328 testes)
 python tools/make_icon.py            # regera ULTRON.ico a partir da arte
 python tools/build_setup.py --zip    # compila ULTRON.exe, ULTRON-Setup.exe e o ZIP
 python launcher.py --doctor          # diagnóstico
@@ -164,6 +200,7 @@ Estrutura:
 | `fala.py` | correção de palavras mal ouvidas no comando de voz |
 | `memoria.py`, `nuance.py` | memória SQLite entre sessões e leitura local de nuances |
 | `personalidade.py`, `voz.py` | perfis, jeito, dados do usuário, saudação e vozes Edge TTS |
+| `autoconhecimento.py` | bloco do system prompt gerado do sistema vivo (nome, versão, SO, habilidades, limites) |
 | `voz_nativa.py` | reconhecimento de voz opcional do Windows (SAPI), offline |
 | `seguranca.py`, `permissoes.json` | riscos, confirmações, PIN, allowlist |
 | `installer/`, `tools/` | instalador e build |

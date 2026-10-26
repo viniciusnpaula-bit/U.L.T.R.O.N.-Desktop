@@ -177,6 +177,32 @@ class DesfazerFerramentasTests(unittest.TestCase):
         self.assertFalse((bagunca / "Imagens").exists())
         self.assertFalse((bagunca / "Documentos").exists())
 
+    def test_organizar_por_data_e_desfazer_remove_ano_e_mes(self):
+        import os
+        from datetime import datetime
+
+        bagunca = self.base / "por-data"
+        bagunca.mkdir()
+        nota = bagunca / "nota.txt"
+        nota.write_text("n", encoding="utf-8")
+        os.utime(nota, (datetime(2022, 7, 1, 12).timestamp(),) * 2)
+
+        self.executar("organizar_arquivos", {"pasta": str(bagunca), "modo": "data"})
+        self.assertTrue((bagunca / "2022" / "07" / "nota.txt").is_file())
+
+        self.executar("desfazer")
+        self.assertTrue(nota.is_file())
+        self.assertFalse((bagunca / "2022").exists())
+
+    def test_organizar_recusa_modo_invalido_sem_mover(self):
+        bagunca = self.base / "modo-invalido"
+        bagunca.mkdir()
+        nota = bagunca / "nota.txt"
+        nota.write_text("n", encoding="utf-8")
+        saida = self.executar("organizar_arquivos", {"pasta": str(bagunca), "modo": "por-cor"})
+        self.assertIn("Modo inválido", saida)
+        self.assertTrue(nota.is_file())
+
     # ---------------------------------------------------------- apagar
     def test_apagar_e_desfazer_restaura_pela_lixeira(self):
         alvo = self.base / "apagado.txt"

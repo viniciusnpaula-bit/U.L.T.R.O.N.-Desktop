@@ -1,7 +1,9 @@
+import os
 import sys
 import tempfile
 import unittest
 import zipfile
+from datetime import datetime
 from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
@@ -96,6 +98,91 @@ class OrganizarTests(unittest.TestCase):
         self.assertEqual(list(plano), ["Documentos"])
         self.assertTrue((self.base / "a.pdf").is_file())
         self.assertFalse((self.base / "Documentos").exists())
+
+    def test_modo_data_agrupa_por_ano_e_mes(self):
+        antigo = self.base / "velho.txt"
+        antigo.write_text("a", encoding="utf-8")
+        recente = self.base / "novo.txt"
+        recente.write_text("b", encoding="utf-8")
+        os.utime(antigo, (datetime(2023, 5, 10, 12).timestamp(),) * 2)
+        os.utime(recente, (datetime(2024, 2, 3, 9).timestamp(),) * 2)
+
+        plano = arquivos.plano_organizacao(self.base, "data")
+        self.assertEqual(sorted(plano), ["2023/05", "2024/02"])
+
+        resultado = arquivos.organizar(self.base, "data")
+        self.assertEqual(resultado["total"], 2)
+        self.assertTrue((self.base / "2023" / "05" / "velho.txt").is_file())
+        self.assertTrue((self.base / "2024" / "02" / "novo.txt").is_file())
+        # o desfazer precisa dos dois níveis criados para removê-los depois
+        self.assertIn(str(self.base / "2023"), resultado["pastas_criadas"])
+        self.assertIn(str(self.base / "2023" / "05"), resultado["pastas_criadas"])
+
+    def test_modo_extensao_usa_o_sufixo(self):
+        (self.base / "a.pdf").write_bytes(b"x")
+        (self.base / "b.JPG").write_bytes(b"x")
+        (self.base / "LEIAME").write_text("x", encoding="utf-8")
+        resultado = arquivos.organizar(self.base, "extensao")
+        self.assertEqual(resultado["total"], 3)
+        self.assertTrue((self.base / "PDF" / "a.pdf").is_file())
+        self.assertTrue((self.base / "JPG" / "b.JPG").is_file())
+        self.assertTrue((self.base / "SEM-EXTENSAO" / "LEIAME").is_file())
+
+    def test_modo_desconhecido_e_recusado(self):
+        with self.assertRaises(ValueError):
+            arquivos.plano_organizacao(self.base, "por-cor")
+
+    def test_subpastas_inclui_arquivos_dentro_das_pastas(self):
+        dentro = self.base / "antiga"
+        dentro.mkdir()
+        (dentro / "nota.txt").write_text("n", encoding="utf-8")
+        (self.base / "foto.jpg").write_bytes(b"x")
+
+        plano = arquivos.plano_organizacao(self.base, "tipo", subpastas=True)
+        self.assertEqual(len(plano["Documentos"]), 1)
+        resultado = arquivos.organizar(self.base, "tipo", subpastas=True)
+        self.assertEqual(resultado["total"], 2)
+        self.assertTrue((self.base / "Documentos" / "nota.txt").is_file())
+        self.assertTrue((self.base / "Imagens" / "foto.jpg").is_file())
+
+    def test_subpastas_nao_duplica_o_que_ja_esta_no_destino(self):
+        documentos = self.base / "Documentos"
+        documentos.mkdir()
+        (documentos / "nota.txt").write_text("n", encoding="utf-8")
+
+        plano = arquivos.plano_organizacao(self.base, "tipo", subpastas=True)
+        self.assertEqual(plano, {})
+        resultado = arquivos.organizar(self.base, "tipo", subpastas=True)
+        self.assertEqual(resultado["total"], 0)
+        self.assertFalse((documentos / "nota (2).txt").exists())
+
+    def test_subpastas_nao_duplica_pasta_de_data_existente(self):
+        mes = self.base / "2023" / "05"
+        mes.mkdir(parents=True)
+        nota = mes / "nota.txt"
+        nota.write_text("n", encoding="utf-8")
+        os.utime(nota, (datetime(2023, 5, 10, 12).timestamp(),) * 2)
+
+        plano = arquivos.plano_organizacao(self.base, "data", subpastas=True)
+        self.assertEqual(plano, {})
+        self.assertTrue((mes / "nota.txt").is_file())
+        self.assertFalse((mes / "nota (2).txt").exists())
+
+    def test_ignora_lixo_de_sistema_e_arquivos_ocultos(self):
+        for nome in (".oculto", "~$contrato.docx", "rascunho.tmp", "desktop.ini"):
+            (self.base / nome).write_text("x", encoding="utf-8")
+        (self.base / "nota.txt").write_text("n", encoding="utf-8")
+
+        resultado = arquivos.organizar(self.base)
+        self.assertEqual(resultado["total"], 1)
+        self.assertTrue((self.base / "Documentos" / "nota.txt").is_file())
+        for nome in (".oculto", "~$contrato.docx", "rascunho.tmp", "desktop.ini"):
+            self.assertTrue((self.base / nome).is_file(), nome)
+
+    def test_codigo_tem_categoria_propria(self):
+        self.assertEqual(arquivos.categoria(".py"), "Código")
+        self.assertEqual(arquivos.categoria(".json"), "Código")
+        self.assertEqual(arquivos.categoria(".desconhecido"), "Outros")
 
 
 if __name__ == "__main__":

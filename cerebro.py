@@ -7,6 +7,7 @@ import threading
 
 from openai import OpenAI
 
+import autoconhecimento
 import config
 import ferramentas
 import nuance
@@ -137,8 +138,10 @@ def _system():
     fatos = memoria.fatos_centrais(8)
     texto_fatos = "\n".join(f"- {f}" for f in fatos) if fatos else "(nenhum ainda)"
     trat = personalidade.tratar_nome(config.NOME)
-    return f"""Você é o ULTRON, assistente pessoal de IA por voz e texto, em português do Brasil.
+    rotulo = personalidade.carregar().get("rotulo") or "ULTRON"
+    return f"""Você é o assistente pessoal do usuário, por voz e texto, em português do Brasil. Seu nome é {rotulo}.
 {personalidade.frase_do_sistema()}
+{autoconhecimento.bloco()}
 Se não souber, diga que não sabe. Nunca invente um detalhe para parecer útil.
 Precisão: se o pedido tiver duas leituras possíveis e a diferença mudar o resultado (apagar ou abrir, enviar ou salvar, reiniciar ou desligar), faça uma pergunta curta antes de agir. Se faltar um dado essencial, pergunte em vez de supor. Se o usuário corrigir algo, vale o que ele acabou de dizer.
 Contexto: use os trechos de conversas anteriores e os fatos abaixo quando ajudarem de verdade. Se um trecho antigo conflitar com a fala atual, siga a fala atual. Não repita o contexto de volta para o usuário.

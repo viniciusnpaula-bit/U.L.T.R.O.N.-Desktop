@@ -342,6 +342,9 @@ function confirmation(event) {
 
 /* ── palco: vídeo, imagem, PDF, site ou texto no lugar do núcleo ─────────── */
 const PALCO_ROTULO = Object.freeze({ video: 'vídeo', imagem: 'imagem', pdf: 'PDF', site: 'site', texto: 'texto' });
+// Vídeo começa mudo (autoplay confiável e sem susto). Em player de outra origem
+// o som só liga recarregando sem o parâmetro de mudo — daí o estado fixo.
+let palcoSomLigado = false;
 
 function palcoElemento(tag, atributos = {}) {
   const node = document.createElement(tag);
@@ -362,10 +365,16 @@ function palcoAviso(texto) {
 function esconderPalco({ avisar = false } = {}) {
   if (state.palco?.id) state.palcoIgnorado = state.palco.id;
   state.palco = null;
+  palcoSomLigado = false;
   const painel = $('palco');
   painel.hidden = true;
   $('chamber').dataset.palco = 'off';
   $('palcoBody').replaceChildren();
+  $('palcoSound').hidden = true;
+  $('palcoSound').disabled = false;
+  $('palcoSound').textContent = 'som';
+  $('palcoSound').setAttribute('aria-pressed', 'false');
+  $('palcoSound').title = 'Ligar o som do vídeo';
   $('palcoExternal').hidden = true;
   $('palcoExternal').dataset.url = '';
   $('palcoExternal').dataset.id = '';
@@ -387,6 +396,13 @@ function mostrarPalco(dados) {
   const local = fonte.startsWith('ultron-palco://media/');
   const corpo = $('palcoBody');
   corpo.replaceChildren();
+  const botaoSom = $('palcoSound');
+  palcoSomLigado = false;
+  botaoSom.hidden = tipo !== 'video';
+  botaoSom.disabled = false;
+  botaoSom.textContent = 'som';
+  botaoSom.setAttribute('aria-pressed', 'false');
+  botaoSom.title = 'Ligar o som do vídeo';
 
   if (tipo === 'texto') {
     const pre = document.createElement('pre');
@@ -402,8 +418,9 @@ function mostrarPalco(dados) {
       }));
     } else {
       const video = palcoElemento('video', {
-        src: fonte, controls: '', autoplay: '', playsinline: '', preload: 'metadata',
+        src: fonte, controls: '', autoplay: '', playsinline: '', preload: 'metadata', muted: '',
       });
+      video.muted = true;
       video.addEventListener('error', () => corpo.replaceChildren(palcoAviso('Não consegui abrir este vídeo.')));
       corpo.append(video);
     }
@@ -454,6 +471,35 @@ function mostrarPalco(dados) {
   state.palcoIgnorado = null;
   $('palco').hidden = false;
   $('chamber').dataset.palco = 'on';
+}
+
+function palcoSom() {
+  if (!state.palco || state.palco.tipo !== 'video' || palcoSomLigado) return;
+  const botao = $('palcoSound');
+  const corpo = $('palcoBody');
+  const video = corpo.querySelector('video');
+  if (video) {
+    video.muted = !video.muted;
+    botao.textContent = video.muted ? 'som' : 'mudo';
+    botao.setAttribute('aria-pressed', String(!video.muted));
+    botao.title = video.muted ? 'Ligar o som do vídeo' : 'Silenciar o vídeo';
+    return;
+  }
+  const iframe = corpo.querySelector('iframe');
+  const comSom = state.palco.fonte_com_som;
+  if (!iframe || typeof comSom !== 'string' || !comSom) {
+    botao.hidden = true;
+    return;
+  }
+  // Player de outra origem: o áudio não pode ser mudado por dentro. Recarregar
+  // sem o parâmetro de mudo é o caminho suportado pelos embeds.
+  iframe.src = comSom;
+  palcoSomLigado = true;
+  botao.textContent = 'som ligado';
+  botao.setAttribute('aria-pressed', 'true');
+  botao.disabled = true;
+  botao.title = 'Som ligado';
+  $('palcoNote').textContent = 'som ligado';
 }
 
 function sincronizarPalco(dados) {
@@ -1477,6 +1523,7 @@ $('drawerBackdrop').addEventListener('pointerdown', event => { event.preventDefa
 document.querySelectorAll('[data-fechar]').forEach(botao => botao.addEventListener('click', fecharGaveta));
 $('toggleHud').onclick = () => window.ultron.toggleHud();
 $('palcoClose').onclick = () => fecharPalco();
+$('palcoSound').onclick = () => palcoSom();
 $('palcoExternal').onclick = async () => {
   const botao = $('palcoExternal');
   const id = botao.dataset.id || '';

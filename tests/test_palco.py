@@ -137,15 +137,37 @@ class PalcoTests(unittest.TestCase):
         dados = resultado["palco"]
         self.assertTrue(dados["embed"])
         self.assertEqual(dados["fonte"],
+                         "https://www.youtube-nocookie.com/embed/dQw4w9WgXcQ?autoplay=1&mute=1&rel=0")
+        self.assertEqual(dados["fonte_com_som"],
                          "https://www.youtube-nocookie.com/embed/dQw4w9WgXcQ?autoplay=1&rel=0")
+        self.assertTrue(dados["mudo"])
         self.assertEqual(dados["url"], "https://www.youtube.com/watch?v=dQw4w9WgXcQ")
 
     def test_vimeo_vira_player_isolado(self):
         with patch.object(palco, "_url_remota", side_effect=lambda url: url):
             resultado = palco.mostrar("video", "https://vimeo.com/123456789")
         self.assertTrue(resultado["ok"], resultado)
-        self.assertEqual(resultado["palco"]["fonte"],
+        dados = resultado["palco"]
+        self.assertEqual(dados["fonte"],
+                         "https://player.vimeo.com/video/123456789?autoplay=1&muted=1")
+        self.assertEqual(dados["fonte_com_som"],
                          "https://player.vimeo.com/video/123456789?autoplay=1")
+        self.assertTrue(dados["mudo"])
+
+    def test_video_direto_comeca_mudo_sem_fonte_alternativa(self):
+        with patch.object(palco, "_url_remota", side_effect=lambda url: url):
+            resultado = palco.mostrar("video", "https://exemplo.com/clipe.mp4")
+        self.assertTrue(resultado["ok"], resultado)
+        dados = resultado["palco"]
+        self.assertTrue(dados["mudo"])
+        self.assertNotIn("fonte_com_som", dados)
+
+    def test_video_local_comeca_mudo(self):
+        video = self.arquivo("clip.mp4")
+        resultado = palco.mostrar("video", str(video))
+        self.assertTrue(resultado["ok"], resultado)
+        self.assertTrue(resultado["palco"]["mudo"])
+        self.assertIn("sem som", resultado["palco"]["nota"])
 
     def test_site_local_e_recusado_antes_de_qualquer_requisicao(self):
         resultado = palco.mostrar("site", "http://127.0.0.1:8080/painel")

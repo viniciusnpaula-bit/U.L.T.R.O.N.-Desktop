@@ -1,3 +1,28 @@
+ULTRON Desktop 1.16.0 — autoconhecimento, vídeo no mudo e organizar arquivos
+
+- Autoconhecimento em runtime: o system prompt passa a trazer, gerado do sistema
+  vivo, o nome/perfil ativo, a versão do pacote, o SO com build e arquitetura, a
+  contagem de ferramentas por área, os limites fixos do produto (sem gerar ou
+  editar imagem, sem editar vídeo, sem WhatsApp, sem app de celular) e o resumo
+  do portão de segurança. É montado uma vez por processo, sem WMI nem PowerShell,
+  e falha em silêncio: nunca impede uma resposta.
+- Renomear o perfil (U.L.T.R.O.N., JARVIS, VISÃO, EDITH) agora muda também a
+  identidade que o modelo declara, em vez de um "Você é o ULTRON" fixo.
+- Ferramenta nova registrada entra na contagem sozinha, em "outras" quando não
+  tiver grupo — sem editar o prompt.
+- Palco: vídeo começa no mudo (YouTube, Vimeo, link direto e arquivo local) e
+  o som liga pelo botão "som" no cabeçalho. No player externo o botão recarrega
+  sem o parâmetro de mudo; em vídeo local o áudio alterna na hora. Também
+  resolve o autoplay que o Chromium bloqueia quando há som.
+- Organizar arquivos ganhou três modos: por tipo (padrão), por data (Ano/Mês da
+  última modificação) e por extensão (PDF, JPG...). `subpastas=true` inclui o que
+  está dentro das subpastas. A prévia continua vindo antes da confirmação, nada é
+  sobrescrito e o desfazer devolve cada arquivo ao caminho original, removendo
+  inclusive as pastas de ano/mês criadas. Lixo de sistema, arquivos ocultos e
+  restos de download (.tmp, .part, .crdownload) não são movidos. Nova categoria
+  "Código" para .py, .js, .json, .html e afins.
+- Testes: 328 Python e 30 Node.
+
 ULTRON Desktop 1.15.0 — memória, voz nativa e Voz e Jeito
 
 - Memória entre sessões em SQLite local (`dados/ultron.db`): recall determinístico

@@ -1156,12 +1156,15 @@ def cancelar_desligamento():
 
 
 # ---------- organização de arquivos ----------
-def _cls_organizar(pasta="", **_):
+def _cls_organizar(pasta="", modo="tipo", subpastas=False, **_):
     """Organizar move muitos arquivos: só em pasta da allowlist e sempre com confirmação."""
     if _pasta_permitida(pasta) is None:
         return Classificacao(ALTO, "arquivo.organizar", False, negar="outside_allowlist")
+    como = {"data": "por ano e mês", "extensao": "por extensão"}.get(str(modo or "tipo").lower(),
+                                                                     "por tipo")
+    onde = "incluindo subpastas" if subpastas else "só os arquivos soltos"
     return Classificacao(ALTO, "arquivo.organizar", True,
-                         resumo=f"mover os arquivos soltos de {Path(str(pasta)).name} para subpastas por tipo")
+                         resumo=f"mover os arquivos de {Path(str(pasta)).name} ({onde}) para subpastas {como}")
 
 
 def _cls_prever_organizacao(pasta="", **_):
@@ -1171,34 +1174,59 @@ def _cls_prever_organizacao(pasta="", **_):
     return Classificacao(BAIXO, "arquivo.organizar_previa", True)
 
 
-@ferramenta("Planeja organizar arquivos de uma pasta por tipo, SEM mover nada ainda. "
-            "Mostre esta prévia ao usuário e use organizar_arquivos depois que ele confirmar.",
-            params={"pasta": "pasta a organizar (precisa estar na allowlist de diretórios)"},
+def _modo_organizacao(modo):
+    import arquivos
+    escolhido = str(modo or "tipo").strip().lower()
+    if escolhido not in arquivos.MODOS:
+        return None
+    return escolhido
+
+
+@ferramenta("Planeja organizar arquivos de uma pasta, SEM mover nada ainda. Mostre esta prévia "
+            "ao usuário e use organizar_arquivos depois que ele confirmar. "
+            "modo='tipo' agrupa em Imagens, Documentos, Vídeos...; modo='data' agrupa em Ano/Mês "
+            "pela data de modificação; modo='extensao' cria uma pasta por extensão (PDF, JPG...). "
+            "subpastas=true inclui arquivos dentro das subpastas (a estrutura antiga é achatada).",
+            params={"pasta": "pasta a organizar (precisa estar na allowlist de diretórios)",
+                    "modo": "tipo (padrão), data ou extensao",
+                    "subpastas": "true para incluir arquivos que estão dentro de subpastas"},
             classificar=_cls_prever_organizacao)
-def prever_organizacao(pasta: str):
+def prever_organizacao(pasta: str, modo: str = "tipo", subpastas: bool = False):
     import arquivos
     base = _pasta_permitida(pasta)
     if base is None:
         return "AÇÃO NEGADA: pasta fora das permitidas em permissoes.json."
-    plano = arquivos.plano_organizacao(base)
+    escolhido = _modo_organizacao(modo)
+    if escolhido is None:
+        return "Modo inválido. Use tipo, data ou extensao."
+    plano = arquivos.plano_organizacao(base, escolhido, bool(subpastas))
     if not plano:
         return f"Nada para organizar em {base.name}."
     linhas = [f"{grupo}: {len(itens)} arquivo(s)" for grupo, itens in sorted(plano.items())]
-    return "Prévia (nada foi movido):\n" + "\n".join(linhas) + \
-           "\nConfirme com 'sim' para organizar, ou cancele."
+    total = sum(len(itens) for itens in plano.values())
+    como = {"data": "por ano e mês", "extensao": "por extensão"}.get(escolhido, "por tipo")
+    alcance = "incluindo subpastas" if subpastas else "só os arquivos soltos na pasta"
+    return (f"Prévia (nada foi movido): {total} arquivo(s), {como}, {alcance}.\n"
+            + "\n".join(linhas) + "\nConfirme com 'sim' para organizar, ou cancele.")
 
 
-@ferramenta("Organiza de verdade: move os arquivos soltos da pasta para subpastas por tipo "
-            "(Imagens, Documentos, ...). Nunca sobrescreve: em caso de nome repetido, usa ' (2)'.",
+@ferramenta("Organiza de verdade: move os arquivos da pasta para subpastas conforme o modo "
+            "(tipo, data ou extensao). Nunca sobrescreve: em caso de nome repetido, usa ' (2)'. "
+            "A operação pode ser desfeita com desfazer.",
             risco=ALTO,
-            params={"pasta": "pasta a organizar (precisa estar na allowlist de diretórios)"},
+            params={"pasta": "pasta a organizar (precisa estar na allowlist de diretórios)",
+                    "modo": "tipo (padrão), data ou extensao",
+                    "subpastas": "true para incluir arquivos que estão dentro de subpastas"},
             classificar=_cls_organizar)
-def organizar_arquivos(pasta: str):
+def organizar_arquivos(pasta: str, modo: str = "tipo", subpastas: bool = False):
     import arquivos
     base = _pasta_permitida(pasta)
     if base is None:
         return "AÇÃO NEGADA: pasta fora das permitidas em permissoes.json."
-    resultado = arquivos.organizar(base)
+    escolhido = _modo_organizacao(modo)
+    if escolhido is None:
+        return "Modo inválido. Use tipo, data ou extensao."
+    resultado = arquivos.organizar(base, escolhido, bool(subpastas))
     if resultado["total"] and resultado.get("movimentos"):
         movimentos = resultado["movimentos"]
         _desfazer_registrar(
@@ -1210,8 +1238,9 @@ def organizar_arquivos(pasta: str):
         )
     if not resultado["total"] and not resultado["erros"]:
         return f"Nada para organizar em {base.name}."
+    como = {"data": "por ano e mês", "extensao": "por extensão"}.get(escolhido, "por tipo")
     linhas = [f"{grupo}: {quantos} arquivo(s)" for grupo, quantos in sorted(resultado["movidos"].items())]
-    resumo = f"Organizei {resultado['total']} arquivo(s) em {base.name}."
+    resumo = f"Organizei {resultado['total']} arquivo(s) em {base.name}, {como}."
     if linhas:
         resumo += "\n" + "\n".join(linhas)
     if resultado["erros"]:

@@ -264,6 +264,9 @@ def _mostrar_local(tipo: str, alvo: str, titulo: str) -> dict:
         "embed": False,
         "nota": "arquivo local — nada saiu do computador",
     }
+    if tipo == "video":
+        dados["mudo"] = True
+        dados["nota"] = "arquivo local, sem som até você pedir — nada saiu do computador"
     _publicar(dados)
     if de_pasta:
         mensagem = f"Mostrando o {tipo} mais recente da pasta: '{dados['titulo']}' no palco."
@@ -341,32 +344,36 @@ def mostrar(tipo: str = "auto", alvo: str = "", titulo: str = "") -> dict:
             if tipo == "video":
                 video_id = _youtube_id(url)
                 if video_id:
-                    embed = f"https://www.youtube-nocookie.com/embed/{video_id}?autoplay=1&rel=0"
+                    # Começa mudo: o Chromium só garante autoplay sem som, e o
+                    # usuário liga o áudio quando quiser (botão do palco).
+                    embed = f"https://www.youtube-nocookie.com/embed/{video_id}?autoplay=1&mute=1&rel=0"
                     dados = {
                         "id": secrets.token_hex(16), "tipo": "video",
                         "titulo": titulo or "vídeo do YouTube", "fonte": embed,
-                        "url": url, "embed": True,
-                        "nota": "YouTube em modo de privacidade (youtube-nocookie)",
+                        "fonte_com_som": f"https://www.youtube-nocookie.com/embed/{video_id}?autoplay=1&rel=0",
+                        "url": url, "embed": True, "mudo": True,
+                        "nota": "YouTube em modo de privacidade (youtube-nocookie), sem som até você pedir",
                     }
                     _publicar(dados)
-                    return {"ok": True, "mensagem": "Vídeo do YouTube no palco.", "palco": dados}
+                    return {"ok": True, "mensagem": "Vídeo do YouTube no palco, no mudo.", "palco": dados}
                 vimeo_id = _vimeo_id(url)
                 if vimeo_id:
-                    embed = f"https://player.vimeo.com/video/{vimeo_id}?autoplay=1"
+                    embed = f"https://player.vimeo.com/video/{vimeo_id}?autoplay=1&muted=1"
                     dados = {
                         "id": secrets.token_hex(16), "tipo": "video",
                         "titulo": titulo or "vídeo do Vimeo", "fonte": embed,
-                        "url": url, "embed": True,
-                        "nota": "Vimeo em área isolada",
+                        "fonte_com_som": f"https://player.vimeo.com/video/{vimeo_id}?autoplay=1",
+                        "url": url, "embed": True, "mudo": True,
+                        "nota": "Vimeo em área isolada, sem som até você pedir",
                     }
                     _publicar(dados)
-                    return {"ok": True, "mensagem": "Vídeo do Vimeo no palco.", "palco": dados}
+                    return {"ok": True, "mensagem": "Vídeo do Vimeo no palco, no mudo.", "palco": dados}
                 if Path(urlparse(url).path).suffix.lower() in _EXT["video"]:
                     dados = {
                         "id": secrets.token_hex(16), "tipo": "video",
                         "titulo": titulo or "vídeo", "fonte": url,
-                        "url": url, "embed": False,
-                        "nota": "vídeo externo",
+                        "url": url, "embed": False, "mudo": True,
+                        "nota": "vídeo externo, sem som até você pedir",
                     }
                     _publicar(dados)
                     return {"ok": True, "mensagem": "Vídeo externo no palco.", "palco": dados}
