@@ -6,7 +6,7 @@ import { criarOrbe, criarCampo, estadoDoOrbe } from './src/orb.js';
 const VAZIO = { textContent: '', value: '', hidden: true, dataset: {}, style: {}, className: '',
   classList: { add() {}, remove() {}, toggle() {}, contains: () => false },
   setAttribute() {}, removeAttribute() {}, getAttribute: () => null, append() {}, appendChild() {},
-  prepend() {}, replaceChildren() {}, addEventListener() {}, removeEventListener() {},
+  prepend() {}, replaceChildren() {}, remove() {}, addEventListener() {}, removeEventListener() {},
   focus() {}, blur() {}, click() {}, querySelector: () => null, querySelectorAll: () => [],
   getBoundingClientRect: () => ({ top: 0, left: 0, right: 0, bottom: 0, width: 0, height: 0 }),
   children: [], hidden: true, isConnected: false };
@@ -20,9 +20,11 @@ const THEMES = ['ultron', 'jarvis', 'amber', 'emerald'];
 const state = {
   connected: false, paused: false, history: [], commands: new Map(),
   pending: null, status: {}, lastResponse: '',
-  turns: [],          // bate-papo de voz: {role, text, source, at}
+  turns: [],          // bate-papo: {role, text, source, at} — últimas 15
   turnKeys: new Set(),
   writing: 0,         // turnos que vieram do campo de texto nesta sessão
+  palco: null,        // mídia exibida no lugar do núcleo
+  palcoIgnorado: null, // id fechado localmente: não reabre por um status atrasado
 };
 const transport = new RealTransport({ onEvent: handleEvent });
 
@@ -109,7 +111,10 @@ function responder(text) {
   publishHudSnapshot();
 }
 
-/* ── bate-papo de voz ─────────────────────────────────────────────────────── */
+/* ── bate-papo ────────────────────────────────────────────────────────────── */
+
+/* Mesmo limite do núcleo: as 15 últimas mensagens, de voz ou de texto. */
+const LIMITE_TURNOS = 15;
 
 /* Identidade estável por turno: a API e o evento podem trazer a mesma fala. */
 function chaveTurno(turno) {
@@ -124,7 +129,7 @@ function horaDe(segundos) {
 function bolha(turno) {
   const usuario = turno.role === 'user';
   const item = document.createElement('article');
-  item.className = `msg ${usuario ? 'user' : 'core'}`;
+  item.className = `msg ${usuario ? 'user' : 'ultron'}`;
   item.dataset.key = chaveTurno(turno);
 
   const head = document.createElement('div');
@@ -148,17 +153,19 @@ function adicionarTurno(turno, { fresh = true } = {}) {
   if (state.turnKeys.has(key)) return false;
   state.turnKeys.add(key);
   state.turns.push(turno);
-  if (state.turns.length > 120) state.turns.shift();
+  while (state.turns.length > LIMITE_TURNOS) {
+    state.turnKeys.delete(chaveTurno(state.turns.shift()));
+  }
 
   const lista = $('commsList');
   $('commsEmpty')?.remove();
   const item = bolha(turno);
   if (fresh) item.classList.add('fresh');
   lista.append(item);
-  while (lista.children.length > 120) lista.firstElementChild.remove();
+  while (lista.children.length > LIMITE_TURNOS) lista.firstElementChild.remove();
   const perto = lista.scrollHeight - lista.scrollTop - lista.clientHeight < 90;
   if (perto || turno.role === 'assistant') lista.scrollTop = lista.scrollHeight;
-  $('commsCount').textContent = `${state.turns.length} ${state.turns.length === 1 ? 'fala' : 'falas'}`;
+  $('commsCount').textContent = `${state.turns.length} ${state.turns.length === 1 ? 'mensagem' : 'mensagens'}`;
   return true;
 }
 
@@ -171,12 +178,12 @@ function renderTurnos(turnos) {
     const vazio = document.createElement('div');
     vazio.className = 'comms-empty';
     vazio.id = 'commsEmpty';
-    vazio.innerHTML = '<b>Ainda não há conversa.</b><span>Diga “Ei, Ultron” — cada fala reconhecida e cada resposta aparecem aqui.</span>';
+    vazio.innerHTML = '<b>Ainda não há mensagens.</b><span>Diga “Ei, Ultron” ou escreva abaixo — cada mensagem, de voz ou texto, aparece aqui.</span>';
     lista.append(vazio);
-    $('commsCount').textContent = '0 falas';
+    $('commsCount').textContent = '0 mensagens';
     return;
   }
-  for (const turno of turnos) adicionarTurno(turno, { fresh: false });
+  for (const turno of turnos.slice(-LIMITE_TURNOS)) adicionarTurno(turno, { fresh: false });
   lista.scrollTop = lista.scrollHeight;
 }
 
@@ -211,6 +218,7 @@ function updateStatus(data) {
   data = state.status = { ...state.status, ...data };
   state.connected = data.api_running === true && data.core_running === true;
   state.paused = data.microphone_paused === true;
+  sincronizarPalco(data.palco || null);
 
   const mic = data.microphone_error ? 'erro' : state.paused ? 'pausado'
     : data.microphone_capturing ? 'capturando'
@@ -332,6 +340,138 @@ function confirmation(event) {
   (pin || approve).focus();
 }
 
+/* ── palco: vídeo, imagem, PDF, site ou texto no lugar do núcleo ─────────── */
+const PALCO_ROTULO = Object.freeze({ video: 'vídeo', imagem: 'imagem', pdf: 'PDF', site: 'site', texto: 'texto' });
+
+function palcoElemento(tag, atributos = {}) {
+  const node = document.createElement(tag);
+  for (const [nome, valor] of Object.entries(atributos)) {
+    if (valor === undefined || valor === null || valor === false) continue;
+    node.setAttribute(nome, String(valor));
+  }
+  return node;
+}
+
+function palcoAviso(texto) {
+  const aviso = document.createElement('p');
+  aviso.className = 'palco-aviso';
+  aviso.textContent = texto;
+  return aviso;
+}
+
+function esconderPalco({ avisar = false } = {}) {
+  if (state.palco?.id) state.palcoIgnorado = state.palco.id;
+  state.palco = null;
+  const painel = $('palco');
+  painel.hidden = true;
+  $('chamber').dataset.palco = 'off';
+  $('palcoBody').replaceChildren();
+  $('palcoExternal').hidden = true;
+  $('palcoExternal').dataset.url = '';
+  $('palcoExternal').dataset.id = '';
+  $('palcoExternal').textContent = 'abrir no navegador';
+  $('palcoKind').textContent = 'palco';
+  $('palcoTitle').textContent = '—';
+  $('palcoNote').textContent = '—';
+  $('palcoSource').textContent = '';
+  if (avisar) transport.palcoFechar().catch(() => {});
+}
+
+function mostrarPalco(dados) {
+  if (!dados || typeof dados !== 'object') return;
+  const tipo = Object.hasOwn(PALCO_ROTULO, dados.tipo) ? dados.tipo : '';
+  if (!tipo) return;
+  const fonte = typeof dados.fonte === 'string' ? dados.fonte : '';
+  const titulo = typeof dados.titulo === 'string' && dados.titulo
+    ? dados.titulo : (PALCO_ROTULO[tipo] || 'palco');
+  const local = fonte.startsWith('ultron-palco://media/');
+  const corpo = $('palcoBody');
+  corpo.replaceChildren();
+
+  if (tipo === 'texto') {
+    const pre = document.createElement('pre');
+    pre.textContent = String(dados.conteudo || '');
+    corpo.append(pre);
+  } else if (tipo === 'video') {
+    if (dados.embed && /^https:\/\//i.test(fonte)) {
+      corpo.append(palcoElemento('iframe', {
+        src: fonte, title: titulo, allowfullscreen: '',
+        allow: 'autoplay; encrypted-media; picture-in-picture; fullscreen',
+        referrerpolicy: 'no-referrer',
+        sandbox: 'allow-scripts allow-same-origin allow-presentation',
+      }));
+    } else {
+      const video = palcoElemento('video', {
+        src: fonte, controls: '', autoplay: '', playsinline: '', preload: 'metadata',
+      });
+      video.addEventListener('error', () => corpo.replaceChildren(palcoAviso('Não consegui abrir este vídeo.')));
+      corpo.append(video);
+    }
+  } else if (tipo === 'imagem') {
+    const img = palcoElemento('img', { src: fonte, alt: titulo, decoding: 'async' });
+    img.addEventListener('error', () => corpo.replaceChildren(palcoAviso('Não consegui abrir esta imagem.')));
+    corpo.append(img);
+  } else if (tipo === 'pdf') {
+    // O visualizador embutido do Electron não abre o esquema ultron-palco.
+    // O cartão diz o que é e o botão abre no visualizador do sistema, pelo id
+    // opaco: o caminho do arquivo nunca chega ao renderer.
+    const cartao = document.createElement('div');
+    cartao.className = 'palco-doc';
+    const selo = document.createElement('span');
+    selo.className = 'palco-doc-selo';
+    selo.textContent = 'PDF';
+    const nome = document.createElement('p');
+    nome.className = 'palco-doc-nome';
+    nome.textContent = titulo;
+    const dica = document.createElement('p');
+    dica.className = 'palco-doc-dica';
+    dica.textContent = local
+      ? 'Abre no visualizador de PDF do Windows, fora do ULTRON.'
+      : 'Abre no navegador do sistema, fora do ULTRON.';
+    cartao.append(selo, nome, dica);
+    corpo.append(cartao);
+  } else if (tipo === 'site') {
+    corpo.append(palcoElemento('iframe', {
+      src: fonte, title: titulo, referrerpolicy: 'no-referrer',
+      sandbox: 'allow-scripts allow-same-origin allow-forms',
+    }));
+  }
+
+  $('palcoKind').textContent = PALCO_ROTULO[tipo] || 'palco';
+  $('palcoTitle').textContent = titulo;
+  $('palcoNote').textContent = typeof dados.nota === 'string' ? dados.nota : '';
+  const externo = typeof dados.url === 'string' && /^https?:\/\//i.test(dados.url) ? dados.url : '';
+  const abrirPdf = tipo === 'pdf' && local && Boolean(dados.id);
+  const botaoExterno = $('palcoExternal');
+  botaoExterno.hidden = !(externo || abrirPdf);
+  botaoExterno.textContent = abrirPdf ? 'abrir PDF' : 'abrir no navegador';
+  botaoExterno.dataset.url = externo;
+  botaoExterno.dataset.id = abrirPdf ? String(dados.id) : '';
+  $('palcoSource').textContent = externo
+    ? (() => { try { return new URL(externo).hostname; } catch { return ''; } })()
+    : (local ? 'arquivo local' : '');
+  state.palco = dados;
+  state.palcoIgnorado = null;
+  $('palco').hidden = false;
+  $('chamber').dataset.palco = 'on';
+}
+
+function sincronizarPalco(dados) {
+  if (!dados) {
+    state.palcoIgnorado = null;
+    if (state.palco) esconderPalco();
+    return;
+  }
+  if (state.palco && state.palco.id === dados.id) return;
+  if (state.palcoIgnorado && state.palcoIgnorado === dados.id) return;
+  mostrarPalco(dados);
+}
+
+function fecharPalco() {
+  if (!state.palco) return;
+  esconderPalco({ avisar: true });
+}
+
 /* ── eventos do núcleo ───────────────────────────────────────────────────── */
 function handleEvent(event) {
   if (event.event === 'ULTRON_ONLINE') {
@@ -351,6 +491,8 @@ function handleEvent(event) {
   }
   if (event.event === 'CONFIRMATION_REQUIRED') confirmation(event);
   if (event.event === 'SPEECH_CONFIRM') confirmarFala(event);
+  if (event.event === 'PALCO_SHOW') mostrarPalco(event.data || {});
+  if (event.event === 'PALCO_HIDE') esconderPalco();
   if (event.event === 'COMMAND_RESULT') {
     const command = state.commands.get(event.request_id) || 'comando por voz';
     state.commands.delete(event.request_id);
@@ -451,13 +593,60 @@ async function refreshStatus(show = false) {
 }
 
 
-/* ── voz: testar microfone, testar voz e escolher a voz ──────────────────── */
+/* ── voz e jeito: testar microfone, escolher voz, estilo e dados ─────────── */
 let vozCache = null;
+let vozEscolhida = '';
 
 function vozNota(texto, classe = '') {
   const alvo = $('testResult');
+  if (!alvo) return;
   alvo.textContent = texto;
   alvo.className = `micro nano ${classe}`;
+}
+
+function separarRotulo(rotulo) {
+  const texto = String(rotulo || '').trim();
+  const achado = texto.match(/^(.+?)\s*\((.+)\)$/);
+  return achado ? { nome: achado[1].trim(), detalhe: achado[2].trim() } : { nome: texto, detalhe: '' };
+}
+
+function pintarVoz(id) {
+  vozEscolhida = id || '';
+  const select = $('voiceSelect');
+  if (select) select.value = vozEscolhida;
+  document.querySelectorAll('#voiceCards [data-voz]').forEach(node => {
+    node.setAttribute('aria-checked', String(node.dataset.voz === vozEscolhida));
+  });
+}
+
+function renderVoiceCards(vozes, atual) {
+  const grade = $('voiceCards');
+  if (!grade) return;
+  grade.replaceChildren();
+  if (!vozes.length) {
+    const vazio = document.createElement('p');
+    vazio.className = 'choice-empty';
+    vazio.textContent = 'nenhuma voz disponível agora. A reserva local continua funcionando.';
+    grade.append(vazio);
+    return;
+  }
+  for (const voz of vozes) {
+    const { nome, detalhe } = separarRotulo(voz.rotulo || voz.id);
+    const cartao = document.createElement('button');
+    cartao.type = 'button';
+    cartao.className = 'choice-card';
+    cartao.dataset.voz = voz.id;
+    cartao.setAttribute('role', 'radio');
+    cartao.setAttribute('aria-checked', 'false');
+    const titulo = document.createElement('b');
+    titulo.textContent = nome || voz.id;
+    const nota = document.createElement('span');
+    nota.textContent = detalhe || voz.id;
+    cartao.append(titulo, nota);
+    cartao.addEventListener('click', () => escolherVoz(voz.id));
+    grade.append(cartao);
+  }
+  pintarVoz(atual);
 }
 
 async function carregarVoz() {
@@ -475,11 +664,28 @@ async function carregarVoz() {
       opcao.textContent = voz.rotulo || voz.id;
       select.append(opcao);
     }
-    const atual = vozCache.preferencias?.voz || '';
+    const atual = vozCache.preferencias?.voz || vozCache.ativas?.id || '';
     select.value = [...select.options].some(o => o.value === atual) ? atual : '';
+    renderVoiceCards(vozCache.vozes || [], atual);
     $('voiceActive').textContent = `voz ativa: ${vozCache.ativas?.id || atual || '—'} · reserva: ${vozCache.ativas?.reserva || 'pyttsx3'}`;
   } catch (error) {
     vozNota(`não consegui ler as vozes (${error.message})`, 'err');
+  }
+}
+
+async function escolherVoz(id) {
+  if (!id) return;
+  pintarVoz(id);
+  vozNota('salvando a voz…');
+  try {
+    await window.ultron.vozSalvar({ voz: id });
+    await carregarVoz();
+    vozNota('voz salva. ouça o teste…');
+    const r = await window.ultron.vozTestar('Olá. Esta é a minha voz.');
+    if (r.ok) vozNota(`voz em uso: ${r.voz?.id || id}`, 'ok');
+    else vozNota(r.erro || 'a voz foi salva, mas o teste não respondeu', 'err');
+  } catch (error) {
+    vozNota(`não consegui salvar a voz (${error.message})`, 'err');
   }
 }
 
@@ -517,8 +723,11 @@ async function salvarVoz() {
   }
 }
 
-/* ── personalidade: perfil, tratamento, prévia e padrão ──────────────────── */
+/* ── personalidade: identidade, jeito, dados do usuário e saudação ────────── */
 let perfilAtual = 'ultron';
+let jeitoAtual = 'equilibrado';
+let jeitosCache = [];
+let saudacaoLigada = true;
 // tratamento guardado por perfil: trocar de perfil não herda o do anterior
 let tratamentosPorPerfil = {};
 
@@ -531,6 +740,60 @@ function pintarPerfil(perfil) {
   if (typeof salvo === 'string') $('tratamentoInput').value = salvo;
 }
 
+function renderStyleCards(jeitos) {
+  const grade = $('styleCards');
+  if (!grade) return;
+  grade.replaceChildren();
+  for (const jeito of jeitos) {
+    const cartao = document.createElement('button');
+    cartao.type = 'button';
+    cartao.className = 'choice-card';
+    cartao.dataset.jeito = jeito.id;
+    cartao.setAttribute('role', 'radio');
+    cartao.setAttribute('aria-checked', 'false');
+    const titulo = document.createElement('b');
+    titulo.textContent = jeito.rotulo || jeito.id;
+    const nota = document.createElement('span');
+    nota.textContent = jeito.descricao || '';
+    cartao.append(titulo, nota);
+    cartao.addEventListener('click', () => escolherJeito(jeito.id));
+    grade.append(cartao);
+  }
+}
+
+function pintarJeito(jeito) {
+  jeitoAtual = jeito || 'equilibrado';
+  document.querySelectorAll('#styleCards [data-jeito]').forEach(node => {
+    node.setAttribute('aria-checked', String(node.dataset.jeito === jeitoAtual));
+  });
+}
+
+function pintarSaudacao(ligada) {
+  saudacaoLigada = Boolean(ligada);
+  const botao = $('greetingToggle');
+  if (!botao) return;
+  botao.setAttribute('aria-checked', String(saudacaoLigada));
+  botao.textContent = `saudação ao abrir: ${saudacaoLigada ? 'ligada' : 'desligada'}`;
+}
+
+function preencherUsuario(usuario = {}) {
+  if ($('userName')) $('userName').value = usuario.nome || '';
+  if ($('userNickname')) $('userNickname').value = usuario.apelido || '';
+  if ($('userAge')) $('userAge').value = usuario.idade || '';
+  if ($('userGender')) $('userGender').value = usuario.genero || '';
+  if ($('userAbout')) $('userAbout').value = usuario.sobre || '';
+}
+
+function dadosDoUsuario() {
+  return {
+    nome: $('userName')?.value.trim() || '',
+    apelido: $('userNickname')?.value.trim() || '',
+    idade: $('userAge')?.value.trim() || '',
+    genero: $('userGender')?.value || '',
+    sobre: $('userAbout')?.value.trim() || '',
+  };
+}
+
 async function carregarPersonalidade() {
   try {
     const info = await window.ultron.personalidadeInfo();
@@ -539,9 +802,14 @@ async function carregarPersonalidade() {
     for (const p of info.perfis || []) {
       if (typeof p.tratamento === 'string') tratamentosPorPerfil[p.id] = p.tratamento;
     }
+    jeitosCache = Array.isArray(info.jeitos) ? info.jeitos : [];
+    renderStyleCards(jeitosCache);
     pintarPerfil(atual.perfil || 'ultron');
+    pintarJeito(atual.jeito || 'equilibrado');
     $('tratamentoInput').value = atual.tratamento || tratamentosPorPerfil[atual.perfil] || '';
-    $('profileNote').textContent = `perfil ${atual.perfil || 'ultron'} · tratamento “${atual.tratamento || '—'}”`;
+    preencherUsuario(atual.usuario || {});
+    pintarSaudacao(atual.saudacao !== false);
+    $('profileNote').textContent = `perfil ${atual.perfil || 'ultron'} · jeito ${atual.jeito || 'equilibrado'} · tratamento “${atual.tratamento || '—'}”`;
     $('profileNote').className = 'micro nano ok';
   } catch (error) {
     $('profileNote').textContent = `não consegui ler a personalidade (${error.message})`;
@@ -549,20 +817,53 @@ async function carregarPersonalidade() {
   }
 }
 
-async function salvarPersonalidade() {
+async function salvarPersonalidade({ usuario = false, saudacao = false } = {}) {
   try {
-    const salvo = await window.ultron.personalidadeSalvar({
+    const dados = {
       perfil: perfilAtual,
       tratamento: $('tratamentoInput').value.trim(),
-    });
+      jeito: jeitoAtual,
+    };
+    if (usuario) dados.usuario = dadosDoUsuario();
+    if (saudacao) dados.saudacao = saudacaoLigada;
+    const salvo = await window.ultron.personalidadeSalvar(dados);
     tratamentosPorPerfil = { ...tratamentosPorPerfil, ...(salvo.tratamentos || {}) };
     tratamentosPorPerfil[salvo.perfil] = salvo.tratamento;
     pintarPerfil(salvo.perfil);
+    pintarJeito(salvo.jeito);
     $('tratamentoInput').value = salvo.tratamento || '';
-    $('profileNote').textContent = `aplicado: perfil ${salvo.perfil} · tratamento “${salvo.tratamento}”`;
+    // só repinta os campos quando eles vieram do servidor (botão aplicar):
+    // salvar jeito/perfil/saudação não pode apagar o que ainda está sendo digitado
+    if (usuario && salvo.usuario) preencherUsuario(salvo.usuario);
+    pintarSaudacao(salvo.saudacao !== false);
+    const nomeJeito = jeitosCache.find(j => j.id === salvo.jeito)?.rotulo || salvo.jeito;
+    $('profileNote').textContent = `aplicado: ${salvo.perfil} · ${nomeJeito} · tratamento “${salvo.tratamento}”`;
     $('profileNote').className = 'micro nano ok';
+    return salvo;
   } catch (error) {
     $('profileNote').textContent = `não consegui aplicar (${error.message})`;
+    $('profileNote').className = 'micro nano err';
+    return null;
+  }
+}
+
+async function escolherJeito(jeito) {
+  if (!jeito) return;
+  pintarJeito(jeito);
+  await salvarPersonalidade();
+}
+
+async function alternarSaudacao() {
+  pintarSaudacao(!saudacaoLigada);
+  try {
+    // caminho próprio: salva apenas a saudação, sem reenviar campos em edição
+    const salvo = await window.ultron.personalidadeSalvar({ saudacao: saudacaoLigada });
+    pintarSaudacao(salvo.saudacao !== false);
+    $('profileNote').textContent = `saudação ao abrir: ${saudacaoLigada ? 'ligada' : 'desligada'}`;
+    $('profileNote').className = 'micro nano ok';
+  } catch (error) {
+    pintarSaudacao(!saudacaoLigada);
+    $('profileNote').textContent = `não consegui salvar a saudação (${error.message})`;
     $('profileNote').className = 'micro nano err';
   }
 }
@@ -587,6 +888,20 @@ async function restaurarPersonalidade() {
     $('profileNote').textContent = `não consegui restaurar (${error.message})`;
   }
 }
+
+/* abas internas: voz · jeito · microfone · sobre você */
+function mostrarAba(nome) {
+  const abas = { voz: 'paneVoice', jeito: 'paneStyle', microfone: 'paneMic', sobre: 'paneAbout' };
+  const botoes = { voz: 'tabVoice', jeito: 'tabStyle', microfone: 'tabMic', sobre: 'tabAbout' };
+  for (const [chave, idPainel] of Object.entries(abas)) {
+    const painel = $(idPainel);
+    const botao = $(botoes[chave]);
+    const ativo = chave === nome;
+    if (painel) painel.hidden = !ativo;
+    if (botao) botao.setAttribute('aria-selected', String(ativo));
+  }
+}
+
 
 /* Confirmação de fala incerta: mostramos as interpretações e NADA é executado
    sem escolha. Cancelar significa não executar. */
@@ -997,7 +1312,12 @@ function aplicarRail(nome, aberto) {
     if (!botao) continue;
     botao.setAttribute('aria-pressed', String(aberto));
     botao.setAttribute('aria-expanded', String(aberto));
-    botao.title = `${aberto ? 'Recolher' : 'Abrir'} conversa de voz (Ctrl+1)`;
+    botao.title = `${aberto ? 'Recolher' : 'Abrir'} bate-papo (Ctrl+1)`;
+  }
+  const alternador = $('toggleChat');
+  if (alternador) {
+    alternador.setAttribute('aria-expanded', String(aberto));
+    alternador.title = `${aberto ? 'Recolher' : 'Abrir'} bate-papo (Ctrl+1)`;
   }
   const painel = $('drawerChat');
   if (painel) painel.setAttribute('aria-hidden', String(!aberto));
@@ -1126,19 +1446,26 @@ document.querySelectorAll('[data-profile]').forEach(node => node.onclick = () =>
   pintarPerfil(node.dataset.profile);
   salvarPersonalidade();
 });
-$('savePersonality').onclick = salvarPersonalidade;
+$('savePersonality').onclick = () => salvarPersonalidade({ usuario: true, saudacao: true });
+$('greetingToggle').onclick = alternarSaudacao;
+$('tabVoice').onclick = () => mostrarAba('voz');
+$('tabStyle').onclick = () => mostrarAba('jeito');
+$('tabMic').onclick = () => mostrarAba('microfone');
+$('tabAbout').onclick = () => mostrarAba('sobre');
 $('updateAction').onclick = atualizarUltron;
 $('previewPersonality').onclick = previaPersonalidade;
 $('resetPersonality').onclick = restaurarPersonalidade;
 $('updateRestart').onclick = reiniciarAgora;
 $('updateRollback').onclick = desfazerAtualizacao;
 $('scrollLatest').onclick = () => { const lista = $('commsList'); lista.scrollTop = lista.scrollHeight; };
-$('clearHistory').onclick = () => {
+$('clearHistory').onclick = async () => {
+  let confirmado = true;
+  try { await transport.clearConversation(); } catch { confirmado = false; }
   state.history = [];
   renderTurnos([]);
   if ($('memoryList')) $('memoryList').replaceChildren();
   if ($('recentList')) $('recentList').replaceChildren();
-  toast('Sessão limpa.');
+  toast(confirmado ? 'Sessão limpa.' : 'Tela limpa. O núcleo não confirmou a limpeza.');
 };
 $('toggleChat')?.addEventListener('click', () => alternarRail('chat'));
 $('collapseChat').onclick = () => alternarRail('chat');
@@ -1149,6 +1476,28 @@ $('drawerBackdrop').addEventListener('pointerdown', event => { event.preventDefa
 /* botões com data-fechar (usados em blocos) também fecham */
 document.querySelectorAll('[data-fechar]').forEach(botao => botao.addEventListener('click', fecharGaveta));
 $('toggleHud').onclick = () => window.ultron.toggleHud();
+$('palcoClose').onclick = () => fecharPalco();
+$('palcoExternal').onclick = async () => {
+  const botao = $('palcoExternal');
+  const id = botao.dataset.id || '';
+  if (id) {
+    try {
+      const aberto = await transport.palcoAbrir(id);
+      if (!aberto) toast('Não consegui abrir este PDF.');
+    } catch {
+      toast('Não foi possível abrir o visualizador de PDF.');
+    }
+    return;
+  }
+  const url = botao.dataset.url || '';
+  if (!url) return;
+  try {
+    const aberto = await window.ultron.abrirExterno(url);
+    if (!aberto) toast('Não abri esse endereço: ele não passou na verificação de segurança.');
+  } catch {
+    toast('Não foi possível abrir o navegador do sistema.');
+  }
+};
 window.ultron.onHudVisibility(visible => {
   $('toggleHud').textContent = visible ? 'fechar flutuante' : 'janela flutuante';
   $('toggleHud').title = visible ? 'Fechar painel flutuante' : 'Abrir painel flutuante';
@@ -1160,17 +1509,36 @@ window.ultron.onHudAction(async request => {
 });
 $('emergencyStopButton').onclick = async () => {
   if (!window.confirm('Acionar a parada de emergência do ULTRON?')) return;
-  try { await transport.emergencyStop(); toast('Parada de emergência enviada ao núcleo.'); }
-  catch (error) { toast(`A parada de emergência falhou: ${error.message}`); }
+  pararTudo();
 };
 
-/* atalhos: Ctrl+1 conversa · Ctrl+2 eventos · Ctrl+, sistema · Ctrl+K comando · Esc */
+/* parada de emergência sem confirmação: usada pelo botão e pelo Esc duplo */
+async function pararTudo() {
+  try { await transport.emergencyStop(); toast('Parada de emergência enviada ao núcleo.'); }
+  catch (error) { toast(`A parada de emergência falhou: ${error.message}`); }
+}
+
+/* atalhos: Ctrl+1 bate-papo · Ctrl+2 eventos · Ctrl+, sistema · Ctrl+K comando · Esc · Esc Esc para tudo */
+let ultimoEsc = 0;
 function atalhos(event) {
   if (event.ctrlKey && event.key === ',') { event.preventDefault(); event.stopPropagation(); drawer(!gavetaAberta); return; }
   if (event.ctrlKey && (event.key === '1' || event.key === '!')) { event.preventDefault(); event.stopPropagation(); alternarRail('chat'); return; }
   if (event.ctrlKey && event.key.toLowerCase() === 'k') { event.preventDefault(); $('commandInput').focus(); return; }
   if (event.key === 'Escape') {
-    if (!$('drawer').hidden) { event.preventDefault(); event.stopPropagation(); fecharGaveta(); }
+    const agora = Date.now();
+    if (agora - ultimoEsc < 1200) {
+      ultimoEsc = 0;
+      event.preventDefault();
+      event.stopPropagation();
+      pararTudo();
+      return;
+    }
+    ultimoEsc = agora;
+    const alvo = event.target;
+    const digitando = Boolean(alvo && typeof alvo.tagName === 'string' &&
+      /^(INPUT|TEXTAREA|SELECT)$/.test(alvo.tagName));
+    if (!$('drawer').hidden) { event.preventDefault(); event.stopPropagation(); fecharGaveta(); return; }
+    if (state.palco && !digitando) { event.preventDefault(); event.stopPropagation(); fecharPalco(); }
   }
 }
 /* captura: funciona mesmo quando o foco está num select/botão dentro da barra */

@@ -30,12 +30,26 @@ class FakeRuntime:
                             "selected_id": None, "selected_name": "Padrão do sistema",
                             "selected_available": True, "active_name": "Padrão do sistema"}
         self.selected_microphone = None
+        self.palco_closed = False
+        self.fatos = [{"id": 1, "texto": "gosta de café"}]
+        self.fatos_apagados = []
+        self.conversation_cleared = False
+        self.personalidade = {
+            "perfil": "ultron", "tratamento": "senhor", "jeito": "equilibrado",
+            "usuario": {"nome": "", "apelido": "", "idade": "", "genero": "", "sobre": ""},
+            "saudacao": True, "tratamentos": {"ultron": "senhor", "jarvis": "senhor"},
+        }
+        self.personalidade_salva = []
 
     def get_snapshot(self):
         return self.snapshot
 
     def conversation_turns(self):
         return [{"role": "user", "text": "oi", "source": "voz", "at": 1.0}]
+
+    def limpar_conversa(self):
+        self.conversation_cleared = True
+        return 1
 
     def poll_events(self):
         events, self.events = self.events, []
@@ -65,6 +79,42 @@ class FakeRuntime:
     def request_shutdown(self):
         self.shutdown_requested = True
         self.snapshot["shutdown_requested"] = True
+
+    def fechar_palco(self):
+        self.palco_closed = True
+        return {"ok": True, "mensagem": "Palco fechado."}
+
+    def fatos_listar(self):
+        return {"fatos": list(self.fatos)}
+
+    def fatos_corrigir(self, id, texto):
+        self.fatos = [fato for fato in self.fatos if fato["id"] != id]
+        self.fatos.append({"id": id, "texto": texto})
+        return {"ok": True, "fato": {"id": id, "texto": texto}}
+
+    def fatos_apagar(self, id):
+        self.fatos = [fato for fato in self.fatos if fato["id"] != id]
+        self.fatos_apagados.append(id)
+        return {"ok": True, "apagado": id}
+
+    def personalidade_info(self):
+        return {
+            "atual": dict(self.personalidade),
+            "perfis": [{"id": "ultron", "rotulo": "U.L.T.R.O.N.", "tratamento": "senhor"}],
+            "jeitos": [{"id": "equilibrado", "rotulo": "Equilibrado", "descricao": "O padrão.", "tom": "direto"}],
+        }
+
+    def personalidade_salvar(self, valores):
+        self.personalidade_salva.append(dict(valores))
+        self.personalidade.update(valores)
+        return dict(self.personalidade)
+
+    def personalidade_previa(self):
+        return {"instrucao": "Personalidade de teste.", "atual": dict(self.personalidade)}
+
+    def personalidade_restaurar(self):
+        self.personalidade_salva.append({"restaurar": True})
+        return dict(self.personalidade)
 
 
 class DesktopApiTests(unittest.TestCase):
@@ -99,7 +149,7 @@ class DesktopApiTests(unittest.TestCase):
     def test_health_status_and_events_require_token_and_return_expected_data(self):
         status, health = self.call("/api/v1/health")
         self.assertEqual(status, 200)
-        self.assertEqual(health["version"], "1.14.0")
+        self.assertEqual(health["version"], "1.15.0")
         status, snapshot = self.call("/api/v1/status")
         self.assertEqual(status, 200)
         self.assertFalse(snapshot["microphone_paused"])
@@ -114,6 +164,18 @@ class DesktopApiTests(unittest.TestCase):
         self.assertEqual(status, 200)
         self.assertEqual(data["turns"][0]["role"], "user")
         self.assertEqual(data["turns"][0]["source"], "voz")
+
+    def test_clear_conversation_route_requires_token_and_empty_body(self):
+        status, _ = self.call("/api/v1/conversation/clear", method="POST", data={}, use_token=False)
+        self.assertEqual(status, 401)
+        self.assertFalse(self.runtime.conversation_cleared)
+        status, _ = self.call("/api/v1/conversation/clear", method="POST", data={"all": True})
+        self.assertEqual(status, 400)
+        self.assertFalse(self.runtime.conversation_cleared)
+        status, data = self.call("/api/v1/conversation/clear", method="POST", data={})
+        self.assertEqual(status, 200)
+        self.assertEqual(data, {"cleared": 1})
+        self.assertTrue(self.runtime.conversation_cleared)
 
     def test_missing_or_wrong_token_is_rejected_without_work(self):
         status, _ = self.call("/api/v1/commands", method="POST", data={"text": "hello"}, use_token=False)
@@ -194,6 +256,77 @@ class DesktopApiTests(unittest.TestCase):
         self.assertEqual(status, 202)
         self.assertTrue(result["shutdown_requested"])
         self.assertTrue(self.runtime.shutdown_requested)
+
+    def test_palco_close_requires_empty_payload_and_reaches_the_runtime(self):
+        status, _ = self.call("/api/v1/palco/fechar", method="POST", data={"x": 1})
+        self.assertEqual(status, 400)
+        self.assertFalse(self.runtime.palco_closed)
+        status, result = self.call("/api/v1/palco/fechar", method="POST", data={})
+        self.assertEqual(status, 200)
+        self.assertTrue(result["ok"])
+        self.assertTrue(self.runtime.palco_closed)
+
+    def test_post_only_routes_are_not_reachable_by_get(self):
+        for path in ("/api/v1/lembretes/cancelar", "/api/v1/cofre/remover",
+                     "/api/v1/cofre/testar"):
+            status, body = self.call(path)
+            self.assertEqual(status, 404, path)
+            self.assertEqual(body["error"], "not_found")
+
+    def test_get_fatos_lists_and_post_corrects_or_deletes(self):
+        status, data = self.call("/api/v1/fatos")
+        self.assertEqual(status, 200)
+        self.assertEqual(data["fatos"][0]["id"], 1)
+
+        status, result = self.call("/api/v1/fatos", method="POST",
+                                   data={"id": 1, "texto": "gosta de chá"})
+        self.assertEqual(status, 200)
+        self.assertEqual(result["fato"]["texto"], "gosta de chá")
+
+        status, result = self.call("/api/v1/fatos", method="POST", data={"id": 1})
+        self.assertEqual(status, 200)
+        self.assertEqual(result["apagado"], 1)
+        self.assertEqual(self.runtime.fatos_apagados, [1])
+
+    def test_personalidade_info_and_previa_expose_the_new_panel(self):
+        status, data = self.call("/api/v1/personalidade")
+        self.assertEqual(status, 200)
+        self.assertEqual(data["atual"]["jeito"], "equilibrado")
+        self.assertEqual(data["jeitos"][0]["id"], "equilibrado")
+        status, data = self.call("/api/v1/personalidade/previa")
+        self.assertEqual(status, 200)
+        self.assertIn("instrucao", data)
+
+    def test_personalidade_accepts_jeito_usuario_and_saudacao(self):
+        status, data = self.call("/api/v1/personalidade", method="POST", data={
+            "perfil": "jarvis",
+            "jeito": "mordomo",
+            "usuario": {"nome": "Pedro", "idade": "32"},
+            "saudacao": False,
+        })
+        self.assertEqual(status, 200)
+        self.assertEqual(data["jeito"], "mordomo")
+        self.assertFalse(data["saudacao"])
+        self.assertEqual(self.runtime.personalidade_salva[-1]["usuario"]["nome"], "Pedro")
+
+    def test_personalidade_rejects_unknown_keys_and_wrong_types(self):
+        for corpo in (
+            {"perfil": "ultron", "inventado": True},
+            {"usuario": "não é objeto"},
+            {"saudacao": 1},
+            {"jeito": 3},
+        ):
+            status, erro = self.call("/api/v1/personalidade", method="POST", data=corpo)
+            self.assertEqual(status, 400, corpo)
+            self.assertEqual(erro["error"], "invalid_personalidade_payload")
+        self.assertEqual(self.runtime.personalidade_salva, [])
+
+    def test_personalidade_restaurar_requires_empty_payload(self):
+        status, _ = self.call("/api/v1/personalidade/restaurar", method="POST", data={"x": 1})
+        self.assertEqual(status, 400)
+        status, _ = self.call("/api/v1/personalidade/restaurar", method="POST", data={})
+        self.assertEqual(status, 200)
+        self.assertEqual(self.runtime.personalidade_salva, [{"restaurar": True}])
 
     def test_unknown_route_and_internal_errors_are_safe(self):
         status, _ = self.call("/api/v1/unknown")

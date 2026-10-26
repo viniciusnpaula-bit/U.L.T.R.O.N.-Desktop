@@ -22,7 +22,7 @@ class FakeSecurity:
 
 
 class ConversationLogTests(unittest.TestCase):
-    """O bat-papo de voz recebe cada fala reconhecida e cada resposta do núcleo."""
+    """O bate-papo recebe cada fala, cada mensagem escrita e cada resposta."""
 
     def setUp(self):
         self.runtime = desktop_runtime.DesktopRuntime(start_voice=False)
@@ -42,7 +42,7 @@ class ConversationLogTests(unittest.TestCase):
         self.assertEqual(eventos[1]["source"], "voz")
         self.assertIsInstance(eventos[0]["at"], float)
 
-    def test_pin_e_token_nunca_chegam_ao_bat_papo(self):
+    def test_pin_e_token_nunca_chegam_ao_bate_papo(self):
         self.runtime._registrar_conversa("user", "meu pin é 2468", "voz")
         self.runtime._registrar_conversa("assistant", "A chave sk-abc123 não pode aparecer", "voz")
         texto = " ".join(turno["text"] for turno in self.runtime.conversation_turns())
@@ -60,6 +60,27 @@ class ConversationLogTests(unittest.TestCase):
         turnos = self.runtime.conversation_turns()
         self.assertEqual(len(turnos), self.runtime.MAX_TURNOS)
         self.assertEqual(turnos[-1]["text"], f"fala {self.runtime.MAX_TURNOS + 24}")
+
+    def test_as_quinze_ultimas_mensagens_misturam_voz_e_texto(self):
+        self.assertEqual(self.runtime.MAX_TURNOS, 15)
+        for indice in range(9):
+            self.runtime._registrar_conversa("user", f"voz {indice}", "voz")
+            self.runtime._registrar_conversa("assistant", f"texto {indice}", "texto")
+        turnos = self.runtime.conversation_turns()
+        self.assertEqual(len(turnos), 15)
+        # 18 mensagens registradas: sobram da 4ª em diante
+        self.assertEqual(turnos[0]["text"], "texto 1")
+        self.assertEqual(turnos[-1]["text"], "texto 8")
+        self.assertEqual({turno["role"] for turno in turnos}, {"user", "assistant"})
+        self.assertEqual({turno["source"] for turno in turnos}, {"voz", "texto"})
+
+    def test_limpar_a_sessao_esvazia_o_bate_papo(self):
+        self.runtime._registrar_conversa("user", "voz", "voz")
+        self.runtime._registrar_conversa("assistant", "texto", "texto")
+        self.assertEqual(self.runtime.limpar_conversa(), 2)
+        self.assertEqual(self.runtime.conversation_turns(), [])
+        self.runtime._registrar_conversa("user", "depois", "voz")
+        self.assertEqual([turno["text"] for turno in self.runtime.conversation_turns()], ["depois"])
 
 
 class VoiceBridgeTests(unittest.TestCase):

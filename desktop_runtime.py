@@ -115,10 +115,16 @@ class DesktopRuntime:
             self._error = "Falha ao iniciar ou manter a escuta do ULTRON."
             self._set_voice_state("erro", self._error)
 
-    MAX_TURNOS = 80   # últimas falas mantidas na sessão (≈40 trocas)
+    MAX_TURNOS = 15   # últimas mensagens mantidas na sessão (voz e texto)
 
-    def _registrar_conversa(self, papel: str, texto: str, origem: str = "voz") -> None:
-        """Registra um turno do bat-papo de voz. Nunca guarda PIN, chave ou token."""
+    def _registrar_conversa(self, papel: str, texto: str, origem: str = "voz",
+                            emitir: bool = True) -> None:
+        """Registra um turno do bate-papo. Nunca guarda PIN, chave ou token.
+
+        `emitir=False` guarda o turno para a reconciliação do painel sem publicar
+        `conversation_turn`: no comando digitado a interface já mostrou o turno
+        na hora, e reemitir criaria duplicata.
+        """
         if papel not in {"user", "assistant"} or not texto:
             return
         try:
@@ -132,7 +138,8 @@ class DesktopRuntime:
             "source": str(origem)[:16],
             "at": time.time(),
         }
-        self._events.put(turno)
+        if emitir:
+            self._events.put(turno)
         with self._turns_lock:
             self._turns.append({key: turno[key] for key in ("role", "text", "source", "at")})
             if len(self._turns) > self.MAX_TURNOS:
@@ -239,7 +246,9 @@ class DesktopRuntime:
 
     def personalidade_info(self) -> dict:
         import personalidade
-        return {"atual": personalidade.carregar(), "perfis": personalidade.perfis_disponiveis()}
+        return {"atual": personalidade.carregar(),
+                "perfis": personalidade.perfis_disponiveis(),
+                "jeitos": personalidade.jeitos_disponiveis()}
 
     def personalidade_salvar(self, valores: dict) -> dict:
         import personalidade
@@ -344,6 +353,13 @@ class DesktopRuntime:
     def conversation_turns(self) -> list[dict]:
         with self._turns_lock:
             return list(self._turns)
+
+    def limpar_conversa(self) -> int:
+        """Esvazia o bate-papo da sessão. Devolve quantas mensagens saíram."""
+        with self._turns_lock:
+            removidas = len(self._turns)
+            self._turns.clear()
+        return removidas
 
     def _set_voice_state(self, state: str, error: str | None = None) -> None:
         self._voice_state = str(state)[:40]
@@ -569,6 +585,12 @@ class DesktopRuntime:
             }
         except Exception:
             pass
+        palco_atual = None
+        try:
+            import palco
+            palco_atual = palco.estado()
+        except Exception:
+            palco_atual = None
         return {
             **metrics,
             "core_running": bool(self._started and not self._stop.is_set()),
@@ -585,7 +607,13 @@ class DesktopRuntime:
             "autostart_installed": autostart,
             "shutdown_requested": self._shutdown_requested,
             "error": self._error,
+            "palco": palco_atual,
         }
+
+    def fechar_palco(self) -> dict:
+        """Fecha o palco da interface e limpa o estado compartilhado."""
+        import palco
+        return palco.fechar()
 
     def _notify(self, text: str) -> None:
         try:
@@ -600,7 +628,13 @@ class DesktopRuntime:
             try:
                 events.append(self._events.get_nowait())
             except queue.Empty:
-                return events
+                break
+        try:
+            import palco
+            events.extend(palco.eventos())
+        except Exception:
+            pass
+        return events
 
     def answer_confirmation(self, request_id: str, approved: bool, pin: str | None = None) -> bool:
         if not isinstance(request_id, str) or type(approved) is not bool:
@@ -666,6 +700,24 @@ class DesktopRuntime:
                 return False
         return True
 
+    def _falar_resposta(self, texto: str) -> None:
+        """Fala uma resposta digitada; roda em segundo plano para o painel não esperar o áudio."""
+        try:
+            import voz
+            voz.falar(texto)
+        except Exception as erro:
+            try:
+                self._security.log.warning(f"Voz da resposta digitada falhou: {type(erro).__name__}")
+            except Exception:
+                pass
+
+    def _agendar_fala(self, texto) -> None:
+        """Só fala texto de verdade (confirmações devolvem True/False/None)."""
+        if not isinstance(texto, str) or not texto.strip() or self._stop.is_set():
+            return
+        threading.Thread(target=self._falar_resposta, args=(texto,),
+                         name="ultron-desktop-fala", daemon=True).start()
+
     def _command_loop(self) -> None:
         while True:
             item = self._commands.get()
@@ -684,6 +736,11 @@ class DesktopRuntime:
                     except Exception:
                         pass
                     response = self._error
+            # O painel já mostrou estes turnos ao digitar; guardamos para a
+            # reconciliação periódica não apagar a conversa digitada.
+            self._registrar_conversa("user", text, "texto", emitir=False)
+            self._registrar_conversa("assistant", response, "texto", emitir=False)
             self._events.put({"type": "command_result", "operation_id": operation_id,
                               "response": response})
+            self._agendar_fala(response)
 

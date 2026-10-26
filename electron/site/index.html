@@ -5,8 +5,8 @@
 <meta name="color-scheme" content="dark"><title>U.L.T.R.O.N.</title>
 <link rel="icon" type="image/png" href="icons/ULTRON-Logo.png"><link rel="stylesheet" href="style.css">
 <script src="zoom-lock.js"></script>
-<meta http-equiv="Content-Security-Policy" content="default-src 'self'; script-src 'self'; style-src 'self' 'unsafe-inline'; img-src 'self' data:; connect-src 'none'; object-src 'none'; base-uri 'none'; form-action 'none'">
-<meta name="ultron-version" content="1.14.0">
+<meta http-equiv="Content-Security-Policy" content="default-src 'self'; script-src 'self'; style-src 'self' 'unsafe-inline'; img-src 'self' data: ultron-palco: https: http:; media-src 'self' ultron-palco: https: http:; frame-src ultron-palco: https: http:; connect-src 'none'; object-src 'none'; base-uri 'none'; form-action 'none'">
+<meta name="ultron-version" content="1.15.0">
 </head>
 <body>
 <canvas id="field" aria-hidden="true"></canvas>
@@ -31,6 +31,10 @@
       <b id="clockTime">--:--</b>
       <span id="clockDate">—</span>
     </div>
+    <button class="ghost icon" id="toggleChat" aria-expanded="true" aria-controls="drawerChat"
+            aria-label="Abrir ou recolher o bate-papo" title="Recolher bate-papo (Ctrl+1)">
+      <svg viewBox="0 0 24 24" aria-hidden="true"><rect x="3" y="4.5" width="7.5" height="15" rx="2"/><path d="M15 8.5h5M15 12h5M15 15.5h3"/></svg>
+    </button>
     <button class="ghost icon" id="openSettings" aria-label="Ajustes do sistema" title="Ajustes do sistema (Ctrl+,)">
       <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M4 7.5h5.2M15.8 7.5H20M4 12h8.2M16.8 12H20M4 16.5h3.2M13.8 16.5H20"/><circle cx="12.5" cy="7.5" r="1.9"/><circle cx="14.5" cy="12" r="1.9"/><circle cx="11.5" cy="16.5" r="1.9"/></svg>
     </button>
@@ -39,31 +43,54 @@
   <!-- ── corpo: conversa + câmara ─────────────────────────────────────── -->
   <div class="chamber-row">
 
-      <!-- bate-papo de voz: o que foi dito e o que o núcleo respondeu -->
-      <section class="comms" id="drawerChat" aria-label="Conversa de voz">
+      <!-- bate-papo: as últimas 15 mensagens, por voz ou texto, dos dois lados -->
+      <section class="comms" id="drawerChat" aria-label="Bate-papo">
         <header class="comms-head">
-          <span class="eyebrow">conversa</span>
+          <div class="comms-tabs" role="tablist" aria-label="Painéis do bate-papo">
+            <button type="button" class="comms-tab" id="chatTab" role="tab"
+                    aria-selected="true" aria-controls="commsList">bate-papo</button>
+          </div>
           <span class="comms-live" id="commsLive" title="Escuta ativa">ao vivo</span>
-          <button class="ghost tiny rail-mini" id="collapseChat" title="Recolher conversa (Ctrl+1)" aria-label="Recolher conversa de voz">
+          <button class="ghost tiny rail-mini" id="collapseChat" title="Recolher bate-papo (Ctrl+1)" aria-label="Recolher bate-papo">
             <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M15 5l-7 7 7 7"/></svg>
           </button>
           <button class="ghost tiny" id="clearHistory" title="Limpar a sessão">limpar</button>
-          <button class="ghost tiny" id="scrollLatest" title="Ir para a última fala" aria-label="Ir para a última fala">↓</button>
+          <button class="ghost tiny" id="scrollLatest" title="Ir para a última mensagem" aria-label="Ir para a última mensagem">↓</button>
         </header>
-        <div class="comms-list" id="commsList" aria-live="polite" aria-label="Mensagens da conversa">
+        <div class="comms-list" id="commsList" role="tabpanel" aria-labelledby="chatTab"
+             aria-live="polite" aria-label="Mensagens do bate-papo">
           <div class="comms-empty" id="commsEmpty">
-            <b>Ainda não há conversa.</b>
-            <span>Diga “Ei, Ultron” — cada fala reconhecida e cada resposta aparecem aqui.</span>
+            <b>Ainda não há mensagens.</b>
+            <span>Diga “Ei, Ultron” ou escreva abaixo — cada mensagem, de voz ou texto, aparece aqui.</span>
           </div>
         </div>
         <div class="comms-foot">
-          <span class="comms-count" id="commsCount">0 falas</span>
+          <span class="comms-count" id="commsCount">0 mensagens</span>
           <span class="tape-sep" aria-hidden="true"></span>
-          <span class="comms-note">só voz</span>
+          <span class="comms-note">voz e texto · últimas 15</span>
         </div>
       </section>
 
     <main class="chamber" id="chamber" data-state="connecting" aria-label="Câmara do núcleo">
+
+      <!-- palco: ocupa o lugar do núcleo quando há algo para ver -->
+      <section class="palco" id="palco" aria-label="Palco do ULTRON" hidden>
+        <header class="palco-head">
+          <div class="palco-id">
+            <span class="eyebrow" id="palcoKind">palco</span>
+            <h2 id="palcoTitle">—</h2>
+          </div>
+          <div class="palco-actions">
+            <button type="button" class="ghost tiny" id="palcoExternal" hidden>abrir no navegador</button>
+            <button type="button" class="ghost tiny" id="palcoClose" title="Fechar o palco (Esc)">fechar</button>
+          </div>
+        </header>
+        <div class="palco-body" id="palcoBody"></div>
+        <footer class="palco-foot">
+          <span id="palcoNote">—</span>
+          <span id="palcoSource" class="micro nano"></span>
+        </footer>
+      </section>
 
       <div class="core" id="core" data-state="connecting">
         <canvas id="orbCanvas" role="img" aria-label="Núcleo animado do ULTRON"></canvas>
@@ -100,7 +127,7 @@
         </button>
         <div class="mic-meter" id="micMeter" aria-hidden="true"><i id="micLevelBar"></i></div>
       </form>
-      <div class="console-hint" id="consoleHint">Enter para enviar · Esc para limpar · Ctrl+, ajustes</div>
+      <div class="console-hint" id="consoleHint">Enter para enviar · Esc para limpar · Esc Esc para parar tudo · Ctrl+, ajustes</div>
     </main>
   </div>
 </div>
@@ -127,31 +154,102 @@
       </div>
     </section>
 
-    <section class="block">
-      <h3>Voz</h3>
-      <p class="muted">A captura é do núcleo; aqui você só escolhe a entrada e pausa a escuta.</p>
-      <div class="field-row">
-        <label class="sr-only" for="microphoneSelect">Microfone</label>
-        <select id="microphoneSelect"><option value="">carregando…</option></select>
-        <button class="ghost" id="refreshMicrophones">atualizar</button>
+    <section class="block" id="voiceStyleBlock">
+      <h3>Voz e Jeito</h3>
+      <p class="muted">Escolha como o ULTRON fala e como ele se comporta. O jeito muda o tom; as regras de segurança não mudam.</p>
+      <div class="seg-tabs" role="tablist" aria-label="Voz, jeito, microfone e sobre você">
+        <button type="button" class="seg-tab" id="tabVoice" role="tab" aria-selected="true" aria-controls="paneVoice">voz</button>
+        <button type="button" class="seg-tab" id="tabStyle" role="tab" aria-selected="false" aria-controls="paneStyle">jeito</button>
+        <button type="button" class="seg-tab" id="tabMic" role="tab" aria-selected="false" aria-controls="paneMic">microfone</button>
+        <button type="button" class="seg-tab" id="tabAbout" role="tab" aria-selected="false" aria-controls="paneAbout">sobre você</button>
       </div>
-      <p class="micro nano" id="microphoneDeviceStatus" role="status">aguardando lista</p>
-      <div class="field-row">
-        <button class="solid" id="saveMicrophone">usar este microfone</button>
-        <button class="ghost" id="voiceStart">pausar escuta</button>
-      </div>
-      <p class="muted nano" id="voicePageStatus">—</p>
-      <div class="field-row">
-        <button class="ghost" id="testMic">testar microfone</button>
-        <button class="ghost" id="testVoice">testar voz</button>
-      </div>
-      <p class="micro nano" id="testResult" role="status">—</p>
-      <div class="field-row">
+
+      <div class="seg-pane" id="paneVoice" role="tabpanel" aria-labelledby="tabVoice">
+        <p class="micro nano" id="voiceActive">voz ativa: —</p>
+        <div class="choice-grid" id="voiceCards" role="radiogroup" aria-label="Voz do ULTRON"></div>
         <label class="sr-only" for="voiceSelect">Voz</label>
-        <select id="voiceSelect"><option value="">voz padrão</option></select>
-        <button class="ghost" id="saveVoice">usar esta voz</button>
+        <select id="voiceSelect" hidden><option value="">voz padrão</option></select>
+        <div class="field-row">
+          <button class="ghost" id="testVoice">testar voz</button>
+          <button class="ghost" id="saveVoice">usar esta voz</button>
+        </div>
+        <p class="micro nano" id="testResult" role="status">—</p>
       </div>
-      <p class="muted nano" id="voiceActive">voz ativa: —</p>
+
+      <div class="seg-pane" id="paneStyle" role="tabpanel" aria-labelledby="tabStyle" hidden>
+        <p class="micro nano">identidade</p>
+        <div class="swatches" id="profileSwatches" role="radiogroup" aria-label="Perfil de personalidade">
+          <button role="radio" class="swatch" data-profile="ultron" aria-label="ULTRON"><i></i><span>ULTRON</span></button>
+          <button role="radio" class="swatch" data-profile="jarvis" aria-label="JARVIS"><i></i><span>JARVIS</span></button>
+          <button role="radio" class="swatch" data-profile="visao" aria-label="VISÃO"><i></i><span>VISÃO</span></button>
+          <button role="radio" class="swatch" data-profile="edith" aria-label="EDITH"><i></i><span>EDITH</span></button>
+        </div>
+        <p class="micro nano">jeito de falar</p>
+        <div class="choice-grid" id="styleCards" role="radiogroup" aria-label="Jeito de falar"></div>
+      </div>
+
+      <div class="seg-pane" id="paneMic" role="tabpanel" aria-labelledby="tabMic" hidden>
+        <p class="muted">A captura é do núcleo; aqui você escolhe a entrada e pausa a escuta.</p>
+        <div class="field-row">
+          <label class="sr-only" for="microphoneSelect">Microfone</label>
+          <select id="microphoneSelect"><option value="">carregando…</option></select>
+          <button class="ghost" id="refreshMicrophones">atualizar</button>
+        </div>
+        <p class="micro nano" id="microphoneDeviceStatus" role="status">aguardando lista</p>
+        <div class="field-row">
+          <button class="solid" id="saveMicrophone">usar este microfone</button>
+          <button class="ghost" id="voiceStart">pausar escuta</button>
+        </div>
+        <p class="muted nano" id="voicePageStatus">—</p>
+        <div class="field-row">
+          <button class="ghost" id="testMic">testar microfone</button>
+        </div>
+      </div>
+
+      <div class="seg-pane" id="paneAbout" role="tabpanel" aria-labelledby="tabAbout" hidden>
+        <p class="muted">Opcional. Serve para o ULTRON te chamar pelo nome e lembrar do contexto certo.</p>
+        <div class="field-col">
+          <label for="tratamentoInput">como devo te chamar</label>
+          <input id="tratamentoInput" maxlength="40" placeholder="senhor, Pedro, doutor…">
+        </div>
+        <div class="field-col">
+          <label for="userName">seu nome</label>
+          <input id="userName" maxlength="60" placeholder="como você se chama">
+        </div>
+        <div class="field-col">
+          <label for="userNickname">apelido</label>
+          <input id="userNickname" maxlength="40" placeholder="como seus amigos te chamam">
+        </div>
+        <div class="field-row">
+          <div class="field-col grow">
+            <label for="userAge">idade</label>
+            <input id="userAge" type="number" min="1" max="120" inputmode="numeric" placeholder="opcional">
+          </div>
+          <div class="field-col grow">
+            <label for="userGender">gênero</label>
+            <select id="userGender">
+              <option value="">prefiro não dizer</option>
+              <option value="homem">homem</option>
+              <option value="mulher">mulher</option>
+              <option value="outro">outro</option>
+            </select>
+          </div>
+        </div>
+        <div class="field-col">
+          <label for="userAbout">algo que devo saber sobre você</label>
+          <input id="userAbout" maxlength="300" placeholder="ex.: trabalho com design, prefiro respostas curtas">
+        </div>
+        <div class="field-row">
+          <button class="ghost" id="greetingToggle" role="switch" aria-checked="true">saudação ao abrir: ligada</button>
+        </div>
+      </div>
+
+      <div class="field-row panel-actions">
+        <button class="solid" id="savePersonality">aplicar</button>
+        <button class="ghost" id="previewPersonality">ver instrução</button>
+        <button class="ghost" id="resetPersonality">padrão</button>
+      </div>
+      <p class="micro nano" id="profileNote" role="status">—</p>
     </section>
 
     <section class="block">
@@ -208,27 +306,6 @@
     </section>
 
     <section class="block">
-      <h3>Personalidade</h3>
-      <p class="muted"><b>Um perfil por vez.</b> Escolha o tom; as regras de segurança do ULTRON não mudam com ele. A prévia mostra só a frase de abertura.</p>
-      <div class="swatches" id="profileSwatches" role="radiogroup" aria-label="Perfil de personalidade">
-        <button role="radio" class="swatch" data-profile="ultron" aria-label="ULTRON"><i></i><span>ULTRON</span></button>
-        <button role="radio" class="swatch" data-profile="jarvis" aria-label="JARVIS"><i></i><span>JARVIS</span></button>
-        <button role="radio" class="swatch" data-profile="visao" aria-label="VISÃO"><i></i><span>VISÃO</span></button>
-        <button role="radio" class="swatch" data-profile="edith" aria-label="EDITH"><i></i><span>EDITH</span></button>
-      </div>
-      <div class="field-row">
-        <label class="sr-only" for="tratamentoInput">Como o ULTRON deve te chamar</label>
-        <input id="tratamentoInput" maxlength="40" placeholder="como devo te chamar (ex.: senhor, Pedro)">
-      </div>
-      <div class="field-row">
-        <button class="solid" id="savePersonality">aplicar</button>
-        <button class="ghost" id="previewPersonality">ver frase de abertura</button>
-        <button class="ghost" id="resetPersonality">padrão</button>
-      </div>
-      <p class="micro nano" id="profileNote" role="status">—</p>
-    </section>
-
-    <section class="block">
       <h3>Canal local</h3>
       <div class="kv"><span>núcleo</span><b id="coreVal">—</b></div>
       <div class="kv"><span>api local</span><b id="apiServiceVal">—</b></div>
@@ -250,7 +327,7 @@
       <button class="ghost" id="updateRollback" hidden title="Voltar para a versão anterior">desfazer</button>
     </div>
     <div class="update-progress" id="updateProgress" hidden><i id="updateProgressBar"></i></div>
-    <p class="update-line" id="updateLine" role="status" aria-live="polite">versão <b id="updateVersion">1.14.0</b> · <span id="updateState">não verificado</span></p>
+    <p class="update-line" id="updateLine" role="status" aria-live="polite">versão <b id="updateVersion">1.15.0</b> · <span id="updateState">não verificado</span></p>
     <p class="update-notes" id="updateNotes" hidden></p>
     <span class="update-note">Fechar a janela encerra a API e libera o microfone.</span>
   </footer>

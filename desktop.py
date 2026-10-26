@@ -34,7 +34,7 @@ def _electron_paths() -> tuple[Path, Path]:
     return package / "node_modules" / "electron" / "dist" / "electron.exe", package
 
 
-def _launch_electron(executable: Path, app_dir: Path, api_url: str, token: str) -> int:
+def _launch_electron(executable: Path, app_dir: Path, api_url: str, token: str, root: Path) -> int:
     if not executable.is_file():
         raise FileNotFoundError("Electron não instalado. Execute ULTRON-Setup.exe para instalar o Desktop.")
     if not all((app_dir / name).is_file() for name in ("package.json", "main.js", "site/index.html")):
@@ -45,7 +45,8 @@ def _launch_electron(executable: Path, app_dir: Path, api_url: str, token: str) 
     }
     child_env = {key: value for key, value in os.environ.items()
                  if key.upper() in required_environment}
-    child_env.update(ULTRON_API_URL=api_url, ULTRON_API_TOKEN=token)
+    child_env.update(ULTRON_API_URL=api_url, ULTRON_API_TOKEN=token,
+                     ULTRON_ROOT=str(Path(root).resolve()))
     return subprocess.run([str(executable), str(app_dir)], cwd=app_dir, env=child_env,
                           check=False).returncode
 
@@ -126,7 +127,7 @@ def main() -> int:
         runtime.set_api_running(True)
 
         executable, ui_dir = _electron_paths()
-        return _launch_electron(executable, ui_dir, api_url, token)
+        return _launch_electron(executable, ui_dir, api_url, token, config.BASE)
     except Exception as exc:
         try:
             seguranca.log.error(f"Inicialização do Desktop falhou ({type(exc).__name__}).")

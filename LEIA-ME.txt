@@ -19,7 +19,7 @@ PRIMEIRO USO
 O QUE MUDOU NO INSTALADOR (por que não é mais um .bat)
 - setup.bat foi removido. Um .bat que chama python, pip e npm é o padrão que mais
   antivírus marca como suspeito, e ele não tinha ícone, versão nem assinatura.
-- Agora existe um único programa: ULTRON-Setup.exe (ícone oficial, versão 1.14.0,
+- Agora existe um único programa: ULTRON-Setup.exe (ícone oficial, versão 1.15.0,
   descrição, log em logs\setup.log). Ele não usa %TEMP%, não pede elevação,
   não escreve no registro e não baixa nada além das dependências listadas.
 - Reexecutar o instalador conserta (repair) e atualiza sem refazer tudo.
@@ -35,15 +35,46 @@ INTERFACE E VOZ
 - Diga "Ei, Ultron" seguido do comando — ou segure Ctrl+Alt+Espaço (HOTKEY_FALAR),
 fale e solte: o comando é enviado sem precisar da palavra de ativação.
 - Ações rápidas na tela inicial: navegador, Spotify, música, volume, Rocket League, modo jogo.
-- A conversa é uma só: o que você fala e o que você escreve aparecem no mesmo lugar.
-  "limpar" no cabeçalho da conversa apaga o histórico da sessão.
+- O bate-papo é uma só aba: o que você fala e o que você escreve aparecem no mesmo
+  lugar. Ele guarda as 15 últimas mensagens, suas e do ULTRON. "limpar" no cabeçalho
+  apaga o histórico da sessão.
+- A memória entre sessões fica em dados\ultron.db: "limpar" apaga só a tela e a
+  sessão atual, não o histórico. O ULTRON relembra conversas antigas pelo assunto,
+  sem enviar o banco para a nuvem.
+- O tom da resposta se adapta a sinais do seu texto (frustração, pressa, confusão,
+  gratidão), lidos localmente.
+- Reconhecimento de voz: Google por padrão. Se houver um motor de fala pt-BR do
+  Windows instalado, ele serve de reserva offline quando o Google falha
+  (VOZ_NATIVA=auto) ou pode ser preferido (VOZ_NATIVA=sempre).
+- Em Ajustes › Voz e Jeito você escolhe a voz (15 timbres pt-BR), o jeito de falar
+  (13 estilos, independentes da identidade), o microfone e seus dados opcionais
+  (nome, apelido, idade, gênero, como quer ser chamado e um texto livre). Também
+  liga ou desliga a saudação falada ao abrir. O jeito muda só o tom; as regras de
+  segurança continuam iguais.
+- Peça para mostrar vídeo, imagem, PDF, site ou texto: o palco ocupa o lugar do
+  núcleo, sem abrir outra janela. PDF abre no visualizador do Windows; Esc fecha.
 - Fechar o painel encerra a API e o núcleo.
+
+O QUE ELE FAZ NO PC
+- Abre programas, sites e pastas; clica, digita, rola e usa o navegador controlado
+  (lê a página, clica, preenche formulários e envia).
+- Ajusta volume, brilho, janelas, zoom e modo escuro.
+- Organiza, compacta, descompacta, cria, move e apaga arquivos (vai para a lixeira).
+- Diga "desfazer" para voltar a última operação de arquivo. Ele confirma antes,
+  recusa se o item mudou e restaura o que foi apagado pela Lixeira do Windows.
+- Analisa o PC: CPU, memória, GPU (modelo e driver) e discos.
+- Webcam: tira foto, detecta objetos e lê gestos da mão (punho, indica, dois dedos,
+  três dedos, mão aberta). Com o gesto "indica", o ponteiro segue a mão. Tudo local,
+  com confirmação antes de abrir a câmera.
+- Escreve e roda código Python ou Node em um sandbox, sem as chaves de API do ULTRON
+  no ambiente, e cria sites de uma página em pastas autorizadas.
+- Marca na tela onde está o botão que você procura e lê o texto visível com OCR local.
 
 SEGURANÇA
 - Ações críticas pedem PIN (ULTRON_PIN no .env), digitado no teclado ou no Telegram, nunca por voz.
 - Comandos passam pelo núcleo e seguem permissoes.json.
 - Não exponha a API na rede. Proteja o .env e não compartilhe suas chaves.
-- Parada de emergência: Ctrl+Alt+X.
+- Parada de emergência: Ctrl+Alt+X ou Esc Esc na janela do ULTRON.
 
 AJUDA
 - Se algo falhar, envie logs\setup.log (instalação) ou logs\ultron.log (execução).

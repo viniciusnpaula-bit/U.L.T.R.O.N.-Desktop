@@ -44,6 +44,9 @@ REQUIRED_FILES = (
     "requirements.txt",
     "electron/package.json",
     "electron/main.js",
+    "electron/preload.js",
+    "electron/links.js",
+    "electron/palco-protocol.js",
     "electron/site/index.html",
 )
 

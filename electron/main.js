@@ -1,7 +1,19 @@
 const path = require('node:path');
 const { pathToFileURL } = require('node:url');
-const { app, BrowserWindow, ipcMain, screen, shell } = require('electron');
+const { app, BrowserWindow, ipcMain, protocol, screen, shell } = require('electron');
 const { createApiClient } = require('./api');
+const { validarUrlExterna } = require('./links');
+const { criarRespostaPalco, abrirPdfPalco } = require('./palco-protocol');
+
+// O palco entrega mídia por um esquema próprio: a interface recebe um id
+// opaco, nunca o caminho absoluto do arquivo nem o token da API.
+protocol.registerSchemesAsPrivileged([{
+  scheme: 'ultron-palco',
+  privileges: { standard: true, secure: true, supportFetchAPI: true, stream: true, bypassCSP: false },
+}]);
+
+const ULTRON_ROOT = path.resolve(process.env.ULTRON_ROOT || path.join(__dirname, '..'));
+const responderPalco = criarRespostaPalco({ root: ULTRON_ROOT });
 
 const api = createApiClient({ baseUrl: process.env.ULTRON_API_URL, token: process.env.ULTRON_API_TOKEN });
 // Só estes domínios oficiais podem ser abertos pelo botão "obter chave".
@@ -32,6 +44,7 @@ function registerApiHandlers() {
   const methods = {
     'api:health': () => api.health(), 'api:status': () => api.status(), 'api:events': () => api.events(),
     'api:conversation': () => api.conversation(),
+    'api:conversation-clear': () => api.clearConversation(),
     'api:command': (_event, text) => api.command(text), 'api:microphone': (_event, paused) => api.microphone(paused),
     'api:confirmation': (_event, requestId, approved, pin) => api.confirmation(requestId, approved, pin),
     'api:emergency-stop': () => api.emergencyStop(), 'api:shutdown': () => api.shutdown(),
@@ -87,6 +100,29 @@ function registerApiHandlers() {
     if (!LINK_HOSTS.includes(parsed.hostname)) return false;
     await shell.openExternal(parsed.href);
     return true;
+  });
+
+  // "abrir no navegador" do palco: segunda validação antes de sair do app.
+  ipcMain.handle('link:externo', async (event, url) => {
+    if (!isSender(event, mainWindow)) return false;
+    const destino = await validarUrlExterna(url);
+    if (!destino) return false;
+    await shell.openExternal(destino);
+    return true;
+  });
+
+  ipcMain.handle('palco:fechar', event => {
+    if (!isSender(event, mainWindow)) return null;
+    return api.palcoFechar();
+  });
+
+  // O visualizador de PDF embutido do Electron não abre o esquema do palco.
+  // Em vez de expor o caminho para a interface, ela manda o id opaco e o
+  // processo principal abre o arquivo no visualizador do sistema. Só PDF,
+  // só com id válido e só enquanto a entrada do manifesto não expirou.
+  ipcMain.handle('palco:abrir', async (event, id) => {
+    if (!isSender(event, mainWindow) || typeof id !== 'string') return false;
+    return abrirPdfPalco({ root: ULTRON_ROOT, id, abrir: arquivo => shell.openPath(arquivo) });
   });
 
   ipcMain.handle('mem:fatos', event => {
@@ -259,6 +295,13 @@ function createWindow() {
 
 app.whenReady().then(() => {
   app.setAppUserModelId('com.ultron.desktop');
+  protocol.handle('ultron-palco', async request => {
+    try {
+      return await responderPalco(request);
+    } catch {
+      return new Response(null, { status: 500 });
+    }
+  });
   registerApiHandlers();
   createWindow();
   app.on('before-quit', () => { quitting = true; });

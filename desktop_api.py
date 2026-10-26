@@ -100,7 +100,7 @@ def create_server(runtime, token: str, host: str = "127.0.0.1", port: int = PREF
             path = self._path()
             try:
                 if path == _PREFIX + "health":
-                    self._send(200, {"ok": True, "version": "1.14.0"})
+                    self._send(200, {"ok": True, "version": "1.15.0"})
                 elif path == _PREFIX + "status":
                     self._send(200, runtime.get_snapshot())
                 elif path == _PREFIX + "events":
@@ -109,50 +109,14 @@ def create_server(runtime, token: str, host: str = "127.0.0.1", port: int = PREF
                     self._send(200, runtime.list_microphones())
                 elif path == _PREFIX + "voz":
                     self._send(200, runtime.voz_info())
-                elif path == _PREFIX + "lembretes/cancelar":
-                    if not set(body) <= {"numero", "trecho"} or not body:
-                        self._send(400, {"error": "invalid_lembrete_payload"})
-                        return
-                    numero = body.get("numero")
-                    if numero is not None and not isinstance(numero, int):
-                        self._send(400, {"error": "invalid_lembrete_payload"})
-                        return
-                    self._send(200, runtime.lembrete_cancelar(numero, str(body.get("trecho") or "")))
                 elif path == _PREFIX + "cofre":
                     self._send(200, runtime.cofre_status())
-                elif path == _PREFIX + "cofre":
-                    if set(body) - {"nome", "valor"} or not isinstance(body.get("nome"), str):
-                        self._send(400, {"error": "invalid_cofre_payload"})
-                        return
-                    try:
-                        self._send(200, runtime.cofre_guardar(body["nome"], str(body.get("valor") or "")))
-                    except ValueError:
-                        self._send(400, {"error": "invalid_credential"})
-                elif path == _PREFIX + "cofre/remover":
-                    if set(body) != {"nome"} or not isinstance(body.get("nome"), str):
-                        self._send(400, {"error": "invalid_cofre_payload"})
-                        return
-                    self._send(200, runtime.cofre_remover(body["nome"]))
-                elif path == _PREFIX + "cofre/testar":
-                    if set(body) != {"nome"} or not isinstance(body.get("nome"), str):
-                        self._send(400, {"error": "invalid_cofre_payload"})
-                        return
-                    self._send(200, runtime.cofre_testar(body["nome"]))
                 elif path == _PREFIX + "fatos":
                     self._send(200, runtime.fatos_listar())
                 elif path == _PREFIX + "fluxos":
                     self._send(200, runtime.fluxos_listar())
                 elif path == _PREFIX + "lembretes":
                     self._send(200, runtime.lembretes_listar())
-                elif path == _PREFIX + "fatos":
-                    permitido = {"id", "texto", "trecho"}
-                    if not set(body) <= permitido or not ({"id"} & set(body)):
-                        self._send(400, {"error": "invalid_fato_payload"})
-                        return
-                    if "texto" in body:
-                        self._send(200, runtime.fatos_corrigir(body["id"], str(body["texto"])[:300]))
-                    else:
-                        self._send(200, runtime.fatos_apagar(body.get("id")))
                 elif path == _PREFIX + "personalidade":
                     self._send(200, runtime.personalidade_info())
                 elif path == _PREFIX + "personalidade/previa":
@@ -162,7 +126,7 @@ def create_server(runtime, token: str, host: str = "127.0.0.1", port: int = PREF
                 elif path == _PREFIX + "update/check":
                     self._send(200, runtime.check_update())
                 elif path == _PREFIX + "conversation":
-                    # Bat-papo de voz: turnos da sessão (texto já redigido pelo runtime).
+                    # Bate-papo: turnos da sessão (texto já redigido pelo runtime).
                     self._send(200, {"turns": runtime.conversation_turns()})
                 else:
                     self._send(404, {"error": "not_found"})
@@ -231,6 +195,11 @@ def create_server(runtime, token: str, host: str = "127.0.0.1", port: int = PREF
                     import seguranca
                     seguranca.parar_tudo()
                     self._send(200, {"stopped": True})
+                elif path == _PREFIX + "palco/fechar":
+                    if body:
+                        self._send(400, {"error": "empty_payload_required"})
+                        return
+                    self._send(200, runtime.fechar_palco())
                 elif path == _PREFIX + "voz":
                     if set(body) - {"voz", "pitch", "rate"}:
                         self._send(400, {"error": "invalid_voz_payload"})
@@ -251,8 +220,6 @@ def create_server(runtime, token: str, host: str = "127.0.0.1", port: int = PREF
                         self._send(400, {"error": "empty_payload_required"})
                         return
                     self._send(200, runtime.microfone_testar())
-                elif path == _PREFIX + "fatos":
-                    self._send(200, runtime.fatos_listar())
                 elif path == _PREFIX + "fluxos":
                     self._send(200, runtime.fluxos_listar())
                 elif path == _PREFIX + "lembretes":
@@ -267,7 +234,18 @@ def create_server(runtime, token: str, host: str = "127.0.0.1", port: int = PREF
                     else:
                         self._send(200, runtime.fatos_apagar(body.get("id")))
                 elif path == _PREFIX + "personalidade":
-                    if set(body) - {"perfil", "ton", "tamanho", "tratamento", "tratamentos", "extras"}:
+                    permitido = {"perfil", "ton", "tamanho", "tratamento", "tratamentos",
+                                 "extras", "jeito", "usuario", "saudacao"}
+                    if set(body) - permitido:
+                        self._send(400, {"error": "invalid_personalidade_payload"})
+                        return
+                    if "usuario" in body and not isinstance(body["usuario"], dict):
+                        self._send(400, {"error": "invalid_personalidade_payload"})
+                        return
+                    if "saudacao" in body and type(body["saudacao"]) is not bool:
+                        self._send(400, {"error": "invalid_personalidade_payload"})
+                        return
+                    if "jeito" in body and not isinstance(body["jeito"], str):
                         self._send(400, {"error": "invalid_personalidade_payload"})
                         return
                     self._send(200, runtime.personalidade_salvar(body))
@@ -297,6 +275,11 @@ def create_server(runtime, token: str, host: str = "127.0.0.1", port: int = PREF
                         self._send(409, {"error": "no_backup_available"})
                         return
                     self._send(200, {"rolled_back": True})
+                elif path == _PREFIX + "conversation/clear":
+                    if body:
+                        self._send(400, {"error": "empty_payload_required"})
+                        return
+                    self._send(200, {"cleared": runtime.limpar_conversa()})
                 elif path == _PREFIX + "shutdown":
                     if body:
                         self._send(400, {"error": "empty_payload_required"})

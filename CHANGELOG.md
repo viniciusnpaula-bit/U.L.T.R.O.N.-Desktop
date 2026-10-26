@@ -1,5 +1,64 @@
+ULTRON Desktop 1.15.0 — memória, voz nativa e Voz e Jeito
+
+- Memória entre sessões em SQLite local (`dados/ultron.db`): recall determinístico
+  por palavras dos últimos 120 dias, até 4 trechos, sem embeddings e sem nuvem.
+  Não repete o histórico da sessão, redige chaves/tokens/PIN e sobrevive ao
+  "limpar" (que apaga só a conversa exibida).
+- Voz nativa opcional do Windows (SAPI): entra como reserva quando o Google falha
+  (`VOZ_NATIVA=auto`) ou como preferência (`VOZ_NATIVA=sempre`); `nunca` desliga.
+  Sem o pacote de fala pt-BR, o Google segue como padrão.
+- Ajustes › Voz e Jeito: painel único com abas **voz**, **jeito**, **microfone** e
+  **sobre você**; 15 timbres Edge TTS, 13 estilos independentes da identidade,
+  dados opcionais do usuário e saudação ao abrir.
+- Jeito com regra obrigatória: todo estilo não neutro leva ao topo do prompt um
+  bloco “MODO DE FALA OBRIGATÓRIO — <estilo>”, com instrução e exemplos, válido
+  em toda resposta. Corrige o caso em que “ignorante” respondia no tom normal.
+- Correção: alternar a saudação não apaga mais os campos de “sobre você” ainda
+  não aplicados; a saudação salva apenas a si mesma.
+- Dependências atualizadas (grupo Python via dependabot) e lock alinhado ao
+  ambiente testado.
+- Testes: 307 Python e 30 Node.
+
 ULTRON Desktop 1.14.0 — a interface vira instrumento
 
+- Memória entre sessões: a cada resposta o ULTRON procura, no SQLite local,
+  trechos de conversas dos últimos 120 dias que tenham a ver com o pedido e os
+  usa como contexto. É recall determinístico por palavras (sem embeddings e sem
+  nuvem), não repete o que já está no histórico e redige chaves/tokens/PIN antes
+  de montar o prompt. "limpar" continua apagando só a sessão, não a memória.
+- Nuances: leitura local de frustração, irritação, ansiedade, tristeza, confusão,
+  animação e gratidão por léxico, negação, intensificadores, caixa e pontuação.
+  O tom da resposta se ajusta; urgência é sinalizada sem virar diagnóstico.
+- Precisão: o prompt passa a pedir pergunta curta quando o pedido tem duas
+  leituras que mudam o resultado, e a fala atual sempre vence um trecho antigo.
+- Voz nativa opcional: quando o Windows tem reconhecedor pt-BR (SAPI), ele entra
+  como reserva se o Google falhar (`VOZ_NATIVA=auto`) ou como preferência
+  (`VOZ_NATIVA=sempre`); `nunca` desliga. Sem o pacote de fala, nada muda e o
+  Google segue como padrão. O áudio vira WAV temporário e é apagado.
+- Novas variáveis: `RECALL_MSGS` (padrão 4), `RECALL_DIAS` (120) e `VOZ_NATIVA`
+  (auto). `HISTORICO_MSGS` passa a 12 por padrão no exemplo.
+- Ajustes › Voz e Jeito: um painel só, com quatro abas. **voz** mostra os 15
+  timbres reais do Edge TTS em cartões; clicar salva, aplica e fala uma amostra.
+  **jeito** oferece 13 estilos independentes da identidade (equilibrado,
+  brincalhão, profissional, mordomo, amigo, direto, motivador, narrador, amoroso,
+  sarcástico, malandro, ignorante, rigoroso) — nenhum altera as regras de
+  segurança. **microfone** mantém a escolha da entrada e a pausa da escuta.
+  **sobre você** guarda nome, apelido, idade, gênero, tratamento e um texto livre
+  em `dados/personalidade.json`, além do interruptor de saudação ao abrir.
+- Jeito com regra, não adjetivo: cada estilo não neutro agora leva ao topo do
+  system prompt um bloco “MODO DE FALA OBRIGATÓRIO — <estilo>”, com instrução
+  concreta, exemplos de abertura e a ordem de valer em toda resposta, com
+  prioridade sobre o tom do perfil. Corrige o caso em que o jeito “ignorante”
+  era salvo mas a resposta saía no tom normal. O bloco é só de fala e não altera
+  nenhuma regra de segurança.
+- Testes: 37 novos cobrindo nuances, recall (inclusive exclusão do histórico e
+  redação de segredo) e o fallback de voz; 13 novos no painel Voz e Jeito
+  (persistência de jeito, dados do usuário, saudação e validação da API) e 4
+  novos no modo de fala obrigatório; suíte em 307 testes Python e 30 Node.
+- Bate-papo: a barra de conversa virou uma aba com as 15 últimas mensagens, por
+  voz ou texto, do usuário e do ULTRON. A contagem e os rótulos passam a falar
+  em "mensagens" e "voz e texto"; "limpar" esvazia também a sessão do núcleo,
+  sem as mensagens voltarem pela reconciliação de 20 s.
 - Redesenho da superfície: fundo quase preto, fios de 1px no lugar de caixas,
   três níveis de texto e um único acento vivo. Os controles são texto; a
   moldura só aparece no hover e no foco.
@@ -16,6 +75,39 @@ ULTRON Desktop 1.14.0 — a interface vira instrumento
   o tratamento do outro; arquivos antigos migram o valor para o perfil ativo.
 - Contraste revisado: texto secundário em 5,08:1 e anel de foco sólido de 2px.
   Com "menos movimento", o que desliza para de deslizar e a leitura continua.
+- Palco: vídeo, imagem, PDF, site ou texto aparecem no lugar do núcleo, sem
+  abrir outra janela. Arquivo local é servido por um esquema próprio e a
+  interface recebe só um id temporário, nunca o caminho. PDF abre no
+  visualizador do Windows; YouTube e Vimeo rodam em modo de privacidade.
+- A ferramenta mostrar_na_interface entra no portão ferramentas.executar:
+  texto, arquivo da allowlist e YouTube/Vimeo são risco baixo; site externo e
+  mídia fora dos hosts conhecidos pedem confirmação.
+- Desfazer: criar, mover, apagar, compactar, descompactar, organizar e criar
+  site deixam uma inversa em um diário local (`dados/desfazer/`). O comando
+  "desfazer" funciona sem IA, sempre pede confirmação e desfaz uma operação por
+  vez.
+- O desfazer confere o estado antes de agir: se o arquivo mudou, se o destino
+  está ocupado ou se a pasta extraída ganhou conteúdo, ele recusa em vez de
+  apagar o que o usuário editou. Item apagado volta pela Lixeira do Windows,
+  casando pasta original, nome, tamanho e data. Caminhos protegidos e caminhos
+  fora da pasta do usuário/allowlist nunca são tocados.
+- O diário é atômico, tem trava, expira em 7 dias, guarda até 50 operações e
+  não sai do computador. `pywin32` passa a ser dependência explícita no Windows
+  para a restauração da Lixeira.
+- Interface: o segundo comando digitado não era enviado. O objeto de reserva
+  usado quando um elemento não existe não tinha `remove`, e a falha virava uma
+  rejeição silenciosa ao adicionar a fala; corrigido e coberto por teste.
+- Interface: a conversa digitada não é mais apagada pela reconciliação de 20 s;
+  os turnos digitados passam a ser guardados na sessão do painel.
+- Respostas a comandos digitados agora são faladas em segundo plano: o painel
+  recebe o texto na hora e o áudio não trava o próximo comando.
+- Palco: uma pasta também é aceita; o ULTRON mostra o arquivo mais recente do
+  tipo pedido (vídeo, imagem ou PDF) e explica qual escolheu. Caminhos
+  `file:///` são normalizados, sem abrir programa nem repetir a chamada.
+- O laço de ferramentas passou de 4 para 6 passos, dando folga para pedidos que
+  exigem listar a pasta, confirmar e mostrar a mídia na mesma tarefa.
+- API local: as rotas de correção/exclusão de fatos e as de cofre voltaram a
+  responder; ramos de POST duplicados dentro do GET foram removidos.
 
 ULTRON Desktop 1.13.0 — uma interface só, sem painel duplicado
 

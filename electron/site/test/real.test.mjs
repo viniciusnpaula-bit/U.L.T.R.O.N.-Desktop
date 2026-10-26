@@ -16,6 +16,8 @@ function makeBridge() {
     selectMicrophone: async deviceId => (calls.push(['selectMicrophone', deviceId]), { selected_name: 'Webcam Mic' }),
     confirmation: async (...args) => (calls.push(['confirmation', ...args]), { accepted: true }),
     emergencyStop: async () => ({ stopped: true }),
+    palcoFechar: async () => (calls.push(['palcoFechar']), { ok: true }),
+    palcoAbrir: async id => (calls.push(['palcoAbrir', id]), true),
     shutdown: async () => ({ shutdown_requested: true }),
   };
   return { bridge, calls };
@@ -38,6 +40,16 @@ test('transport uses only the named API bridge and maps current runtime events',
   transport.disconnect();
 });
 
+test('bate-papo: limpar a sessão usa a ponte segura', async () => {
+  const { bridge, calls } = makeBridge();
+  bridge.clearConversation = async () => (calls.push(['clearConversation']), { cleared: 2 });
+  const transport = new RealTransport({ bridge, onEvent: () => {} });
+  await transport.connect({ poll: false });
+  assert.deepEqual(await transport.clearConversation(), { cleared: 2 });
+  assert.deepEqual(calls, [['clearConversation']]);
+  transport.disconnect();
+});
+
 test('microphone settings reuse the secured core bridge and never create renderer capture', async () => {
   const site = new URL('../', import.meta.url);
   const app = await readFile(fileURLToPath(new URL('app.js', site)), 'utf8');
@@ -52,6 +64,59 @@ test('microphone settings reuse the secured core bridge and never create rendere
   assert.doesNotMatch(app, /getUserMedia|SpeechRecognition/);
   assert.match(main, /isSender\(event, mainWindow\).*api\.selectMicrophone/s);
   assert.match(preload, /selectMicrophone: deviceId => ipcRenderer\.invoke\('api:microphone-device', deviceId\)/);
+});
+
+test('palco: transporte mapeia mostrar/fechar e usa a ponte segura', async () => {
+  const { bridge, calls } = makeBridge();
+  bridge.events = async () => ({ events: [
+    { type: 'palco_show', palco: { id: 'a'.repeat(32), tipo: 'video', fonte: 'ultron-palco://media/x' } },
+    { type: 'palco_hide' },
+  ] });
+  const events = [];
+  const transport = new RealTransport({ bridge, onEvent: event => events.push(event) });
+  await transport.connect({ poll: false });
+  assert.deepEqual(events.filter(event => event.event.startsWith('PALCO')), [
+    { event: 'PALCO_SHOW', data: { id: 'a'.repeat(32), tipo: 'video', fonte: 'ultron-palco://media/x' } },
+    { event: 'PALCO_HIDE', data: {} },
+  ]);
+  await transport.palcoFechar();
+  await transport.palcoAbrir('a'.repeat(32));
+  assert.deepEqual(calls, [['palcoFechar'], ['palcoAbrir', 'a'.repeat(32)]]);
+  transport.disconnect();
+});
+
+test('palco: interface usa textContent, CSP própria e protocolo privilegiado', async () => {
+  const site = new URL('../', import.meta.url);
+  const app = await readFile(fileURLToPath(new URL('app.js', site)), 'utf8');
+  const html = await readFile(fileURLToPath(new URL('index.html', site)), 'utf8');
+  const css = await readFile(fileURLToPath(new URL('style.css', site)), 'utf8');
+  const main = await readFile(fileURLToPath(new URL('../main.js', site)), 'utf8');
+  const preload = await readFile(fileURLToPath(new URL('../preload.js', site)), 'utf8');
+  const protocol = await readFile(fileURLToPath(new URL('../palco-protocol.js', site)), 'utf8');
+  assert.match(html, /id="palco"/);
+  assert.match(html, /img-src[^"]*ultron-palco:/);
+  assert.match(html, /media-src[^"]*ultron-palco:/);
+  assert.match(html, /frame-src[^"]*ultron-palco:/);
+  assert.match(app, /pre\.textContent = String\(dados\.conteudo/);
+  assert.match(app, /ultron-palco:\/\/media\//);
+  assert.doesNotMatch(app, /palcoBody[^\n]*innerHTML/);
+  assert.match(css, /\.palco\[hidden\]/);
+  assert.match(main, /registerSchemesAsPrivileged/);
+  assert.match(main, /protocol\.handle\('ultron-palco'/);
+  assert.match(preload, /palcoFechar: \(\) => ipcRenderer\.invoke\('palco:fechar'\)/);
+  assert.match(preload, /abrirExterno: url => ipcRenderer\.invoke\('link:externo', url\)/);
+  // PDF não usa iframe (o visualizador embutido não abre o esquema do palco):
+  // mostra um cartão e abre pelo id opaco no visualizador do sistema.
+  const pdfBranch = app.slice(app.indexOf("tipo === 'pdf'"), app.indexOf("tipo === 'site'"));
+  assert.ok(pdfBranch.length > 0);
+  assert.match(pdfBranch, /palco-doc/);
+  assert.doesNotMatch(pdfBranch, /iframe/);
+  assert.match(app, /transport\.palcoAbrir\(id\)/);
+  assert.match(main, /ipcMain\.handle\('palco:abrir'/);
+  assert.match(main, /abrirPdfPalco/);
+  assert.match(main, /shell\.openPath\(arquivo\)/);
+  assert.match(protocol, /entrada\.mime !== 'application\/pdf'/);
+  assert.match(preload, /palcoAbrir: id => ipcRenderer\.invoke\('palco:abrir', id\)/);
 });
 
 test('health failure stays offline and never enables a mock transport', async () => {
@@ -101,4 +166,46 @@ test('trocar de tema muda a cor viva sem recolorir a logo', async () => {
   // o núcleo lê a cor viva do tema (não um valor fixo)
   const orb = await readFile(fileURLToPath(new URL('src/orb.js', site)), 'utf8');
   assert.match(orb, /getPropertyValue\('--core'\)/);
+});
+
+test('voz e jeito: um painel só, com abas, cartões e persistência', async () => {
+  const site = new URL('../', import.meta.url);
+  const html = await readFile(fileURLToPath(new URL('index.html', site)), 'utf8');
+  const app = await readFile(fileURLToPath(new URL('app.js', site)), 'utf8');
+  const css = await readFile(fileURLToPath(new URL('style.css', site)), 'utf8');
+
+  // o bloco antigo de personalidade não ficou duplicado
+  assert.equal((html.match(/id="profileSwatches"/g) || []).length, 1);
+  assert.equal((html.match(/id="voiceSelect"/g) || []).length, 1);
+  assert.match(html, /id="voiceStyleBlock"/);
+
+  // quatro abas reais, cada uma com o seu painel
+  for (const [aba, painel] of [
+    ['tabVoice', 'paneVoice'], ['tabStyle', 'paneStyle'],
+    ['tabMic', 'paneMic'], ['tabAbout', 'paneAbout'],
+  ]) {
+    assert.match(html, new RegExp(`id="${aba}"[^>]*aria-controls="${painel}"`));
+    assert.match(html, new RegExp(`id="${painel}"[^>]*aria-labelledby="${aba}"`));
+  }
+
+  // “sobre você” e saudação fazem parte do mesmo painel
+  assert.match(html, /id="userName"/);
+  assert.match(html, /id="greetingToggle"[^>]*role="switch"/);
+  assert.match(app, /function renderVoiceCards/);
+  assert.match(app, /function escolherVoz/);
+  assert.match(app, /function renderStyleCards/);
+  assert.match(app, /function escolherJeito/);
+  assert.match(app, /function alternarSaudacao/);
+  assert.match(app, /personalidadeSalvar\(dados\)/);
+  assert.match(app, /dados\.usuario = dadosDoUsuario\(\)/);
+  assert.match(app, /dados\.saudacao = saudacaoLigada/);
+  // alternar a saudação não pode repintar/apagar os campos ainda não aplicados
+  assert.match(app, /personalidadeSalvar\(\{ saudacao: saudacaoLigada \}\)/);
+  assert.match(app, /if \(usuario && salvo\.usuario\) preencherUsuario/);
+
+  // o estilo novo existe e marca a escolha sem recolorir o resto
+  assert.match(css, /\.seg-tabs\s*\{/);
+  assert.match(css, /\.seg-tab\[aria-selected="true"\]/);
+  assert.match(css, /\.choice-card\[aria-checked="true"\]/);
+  assert.match(css, /\.field-col\s*\{/);
 });

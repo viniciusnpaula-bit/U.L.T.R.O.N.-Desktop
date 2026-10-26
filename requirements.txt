@@ -13,8 +13,10 @@ pyautogui>=0.9.54,<1
 pyperclip>=1.11.0,<2
 psutil>=7.2.2,<8
 send2trash>=2.1.0,<3
+pywin32>=305; sys_platform == "win32"
 keyboard>=0.13.5,<1
 python-telegram-bot>=22.8,<23
 pillow>=13.0.0,<14
 pystray>=0.19.5,<1
 cryptography>=50.0.2,<51
+opencv-python-headless>=4.8,<6

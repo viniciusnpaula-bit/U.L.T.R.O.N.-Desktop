@@ -86,8 +86,17 @@ class RuntimeTests(unittest.TestCase):
                     self.active -= 1
 
         self.brain = types.SimpleNamespace(processar=processar, NOTIFICADORES=[])
+        self.spoken = []
+        self.spoken_event = threading.Event()
+
+        def falar(texto, eco=0.5):
+            self.spoken.append(texto)
+            self.spoken_event.set()
+
+        self.voz = types.SimpleNamespace(falar=falar)
         self.modules = patch.dict(sys.modules, {
             "main": self.main, "cerebro": self.brain, "seguranca": self.security,
+            "voz": self.voz,
         })
         self.modules.start()
         self.runtime = DesktopRuntime()
@@ -128,6 +137,42 @@ class RuntimeTests(unittest.TestCase):
         self.assertTrue(all(origin == "desktop" for text, origin in self.calls))
         self.assertEqual({e["response"] for e in results}, {"resposta um", "resposta dois"})
 
+    def test_typed_command_is_kept_in_conversation_without_duplicate_event(self):
+        self.runtime.submit_command("hora")
+        events = self.events_until(lambda items: any(e.get("type") == "command_result" for e in items))
+        self.assertFalse([e for e in events if e.get("type") == "conversation_turn"])
+        turns = self.runtime.conversation_turns()
+        self.assertEqual([t["role"] for t in turns], ["user", "assistant"])
+        self.assertEqual(turns[0]["text"], "hora")
+        self.assertEqual(turns[0]["source"], "texto")
+        self.assertEqual(turns[1]["text"], "resposta hora")
+        self.assertEqual(turns[1]["source"], "texto")
+
+    def test_typed_response_is_spoken_without_blocking_command_result(self):
+        release = threading.Event()
+        started = threading.Event()
+
+        def falar(texto, eco=0.5):
+            self.spoken.append(texto)
+            started.set()
+            release.wait(1)
+
+        self.voz.falar = falar
+        self.addCleanup(release.set)
+        self.runtime.submit_command("hora")
+        events = self.events_until(lambda items: any(e.get("type") == "command_result" for e in items))
+        self.assertTrue(any(e.get("type") == "command_result" for e in events))
+        self.assertTrue(started.wait(0.5))
+        self.assertEqual(self.spoken, ["resposta hora"])
+        self.assertFalse(release.is_set())
+
+    def test_confirmation_result_that_is_not_text_is_not_spoken(self):
+        self.runtime.submit_command("high")
+        events = self.events_until(lambda items: any(e.get("type") == "command_result" for e in items))
+        result = next(e for e in events if e.get("type") == "command_result")
+        self.assertIsNone(result["response"])
+        self.assertEqual(self.spoken, [])
+
     def test_pause_waits_for_active_capture_to_release_and_can_resume(self):
         self.assertTrue(self.main.ouvido.capturando.wait(0.5))
         self.assertTrue(self.runtime.set_microphone_paused(True))
@@ -155,6 +200,8 @@ class RuntimeTests(unittest.TestCase):
             self.assertFalse(self.main.pausado.is_set())
 
     def test_core_notifications_are_forwarded_to_desktop_events(self):
+        import palco
+        palco.eventos()  # a fila do palco é global e não pertence a este teste
         self.brain.NOTIFICADORES[0]("Lembrete para o usuário")
         events = self.runtime.poll_events()
         self.assertEqual(events, [{"type": "notification", "message": "Lembrete para o usuário"}])

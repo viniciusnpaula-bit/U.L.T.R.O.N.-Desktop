@@ -46,6 +46,10 @@ export class RealTransport {
         } else if (event.type === 'confirmation_request') {
           this.onEvent({ event: 'CONFIRMATION_REQUIRED', request_id: event.request_id,
             data: { message: event.message, risk: event.risk, requires_pin: event.requires_pin } });
+        } else if (event.type === 'palco_show') {
+          this.onEvent({ event: 'PALCO_SHOW', data: event.palco || null });
+        } else if (event.type === 'palco_hide') {
+          this.onEvent({ event: 'PALCO_HIDE', data: {} });
         }
       }
     } catch {
@@ -60,9 +64,12 @@ export class RealTransport {
   setMicrophonePaused(paused) { return this.bridge.microphone(paused); }
   listMicrophones() { return this.bridge.microphones(); }
   conversation() { return this.bridge.conversation(); }
+  clearConversation() { return this.bridge.clearConversation(); }
   selectMicrophone(deviceId) { return this.bridge.selectMicrophone(deviceId); }
   confirm(requestId, approved, pin) { return this.bridge.confirmation(requestId, approved, pin); }
   emergencyStop() { return this.bridge.emergencyStop(); }
+  palcoFechar() { return this.bridge.palcoFechar(); }
+  palcoAbrir(id) { return this.bridge.palcoAbrir(id); }
   shutdown() { return this.bridge.shutdown(); }
 
   disconnect() {

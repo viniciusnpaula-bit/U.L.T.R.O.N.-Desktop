@@ -90,6 +90,7 @@ function createApiClient({ baseUrl, token, fetchImpl = fetch }) {
       return request('POST', '/microphone', { paused });
     },
     conversation: () => request('GET', '/conversation'),
+    clearConversation: () => request('POST', '/conversation/clear', {}),
     microphones: () => request('GET', '/microphones'),
     selectMicrophone: deviceId => {
       if (deviceId !== null && (typeof deviceId !== 'string' || deviceId.length > 512)) {
@@ -107,6 +108,7 @@ function createApiClient({ baseUrl, token, fetchImpl = fetch }) {
       return request('POST', '/confirmations', body);
     },
     emergencyStop: () => request('POST', '/emergency-stop', {}),
+    palcoFechar: () => request('POST', '/palco/fechar', {}),
     shutdown: () => request('POST', '/shutdown', {}),
   });
 }

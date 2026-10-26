@@ -73,9 +73,21 @@ SILENCIO_FIM = float(_env("SILENCIO_FIM", "0.5") or 0.5)   # segundos de silênc
 REASONING = _env("REASONING_EFFORT", "low").lower()        # "low" = IA mais rápida; vazio desliga
 # Quantas mensagens do histórico entram em cada resposta (menos = resposta mais rápida).
 try:
-    HISTORICO_MSGS = max(2, int(_env("HISTORICO_MSGS", "8") or 8))
+    HISTORICO_MSGS = max(2, int(_env("HISTORICO_MSGS", "12") or 12))
 except ValueError:
-    HISTORICO_MSGS = 8
+    HISTORICO_MSGS = 12
+# Memória de sessões anteriores: quantos trechos relevantes entram no contexto.
+try:
+    RECALL_MSGS = max(0, int(_env("RECALL_MSGS", "4") or 4))
+except ValueError:
+    RECALL_MSGS = 4
+try:
+    RECALL_DIAS = max(1, int(_env("RECALL_DIAS", "120") or 120))
+except ValueError:
+    RECALL_DIAS = 120
+# Reconhecimento de voz: "auto" (Google e, se falhar, o nativo do Windows),
+# "sempre" (nativo primeiro) ou "nunca" (só Google).
+VOZ_NATIVA = (_env("VOZ_NATIVA", "auto") or "auto").lower()
 HOTKEY_PARAR = _env("HOTKEY_PARAR", "ctrl+alt+x")
 # Segurar para falar: grava enquanto a combinação está pressionada, envia ao soltar
 HOTKEY_FALAR = _env("HOTKEY_FALAR", "ctrl+alt+espaco") or ""

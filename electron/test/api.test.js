@@ -17,21 +17,27 @@ test('named API actions call only the current ULTRON routes with the run token',
   await api.health();
   await api.status();
   await api.events();
+  await api.conversation();
+  await api.clearConversation();
   await api.command('olá');
   await api.microphone(true);
   await api.confirmation('request-1', true, '1234');
   await api.emergencyStop();
+  await api.palcoFechar();
   await api.shutdown();
 
   assert.deepEqual(calls.map(({ url, init }) => [url, init.method, init.body || null]), [
     ['http://127.0.0.1:43873/api/v1/health', 'GET', null],
     ['http://127.0.0.1:43873/api/v1/status', 'GET', null],
     ['http://127.0.0.1:43873/api/v1/events', 'GET', null],
+    ['http://127.0.0.1:43873/api/v1/conversation', 'GET', null],
+    ['http://127.0.0.1:43873/api/v1/conversation/clear', 'POST', '{}'],
     ['http://127.0.0.1:43873/api/v1/commands', 'POST', '{"text":"olá"}'],
     ['http://127.0.0.1:43873/api/v1/microphone', 'POST', '{"paused":true}'],
     ['http://127.0.0.1:43873/api/v1/confirmations', 'POST',
       '{"request_id":"request-1","approved":true,"pin":"1234"}'],
     ['http://127.0.0.1:43873/api/v1/emergency-stop', 'POST', '{}'],
+    ['http://127.0.0.1:43873/api/v1/palco/fechar', 'POST', '{}'],
     ['http://127.0.0.1:43873/api/v1/shutdown', 'POST', '{}'],
   ]);
   for (const { init } of calls) {

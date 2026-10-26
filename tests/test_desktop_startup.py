@@ -25,7 +25,8 @@ class StartupHarness:
 
     def _modules(self):
         harness = self
-        fake_config = types.SimpleNamespace(PROVEDORES=["gemini", "groq"], CHAVES=self.keys)
+        fake_config = types.SimpleNamespace(
+            PROVEDORES=["gemini", "groq"], CHAVES=self.keys, BASE=Path.cwd())
         fake_core = types.SimpleNamespace(
             instancia_unica=lambda: harness.events.append("instance-check") or True,
             preparar_windows=lambda: harness.events.append("prepare-windows"),
@@ -69,9 +70,9 @@ class StartupHarness:
             harness.tokens.append(token)
             return Server(), "http://127.0.0.1:50000"
 
-        def launch(executable, app_dir, api_url, token):
+        def launch(executable, app_dir, api_url, token, root):
             harness.events.append("electron-start")
-            harness.electron = (executable, app_dir, api_url, token)
+            harness.electron = (executable, app_dir, api_url, token, root)
             return harness.exit_code
 
         fake_tk = types.ModuleType("tkinter")
@@ -142,15 +143,17 @@ class DesktopStartupTests(unittest.TestCase):
             (app_dir / "site" / "index.html").write_text("<html>", encoding="utf-8")
             with patch.dict(os.environ, {"ULTRON_TEST_SECRET": "do-not-forward"}):
                 with patch.object(desktop.subprocess, "run", return_value=subprocess.CompletedProcess([], 7)) as run:
-                    self.assertEqual(desktop._launch_electron(exe, app_dir, "http://127.0.0.1:50000", "x" * 43), 7)
+                    self.assertEqual(desktop._launch_electron(
+                        exe, app_dir, "http://127.0.0.1:50000", "x" * 43, root), 7)
             args, kwargs = run.call_args
             self.assertEqual(args[0], [str(exe), str(app_dir)])
             self.assertEqual(kwargs["cwd"], app_dir)
             self.assertEqual(kwargs["env"]["ULTRON_API_URL"], "http://127.0.0.1:50000")
             self.assertEqual(kwargs["env"]["ULTRON_API_TOKEN"], "x" * 43)
+            self.assertEqual(kwargs["env"]["ULTRON_ROOT"], str(root.resolve()))
             self.assertNotIn("ULTRON_TEST_SECRET", kwargs["env"])
             with self.assertRaises(FileNotFoundError):
-                desktop._launch_electron(root / "missing.exe", app_dir, "http://127.0.0.1:1", "x" * 43)
+                desktop._launch_electron(root / "missing.exe", app_dir, "http://127.0.0.1:1", "x" * 43, root)
 
     def test_startup_entry_install_and_remove_are_scoped_to_injected_appdata(self):
         test_root = Path(__file__).resolve().parent / "tmp_autostart"

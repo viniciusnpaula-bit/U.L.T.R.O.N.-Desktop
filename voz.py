@@ -22,6 +22,11 @@ import config
 import seguranca
 from microphone_devices import resolve_input_device
 
+try:
+    import voz_nativa
+except Exception:      # o Windows pode não ter PowerShell/System.Speech
+    voz_nativa = None
+
 _lock_fala = threading.RLock()
 _parar = threading.Event()
 falando = threading.Event()   # ligado enquanto o ULTRON está falando (a interface mostra no orbe)
@@ -335,6 +340,8 @@ class Ouvido:
         self.device_index = device_index
         self.device_id = device_id
         self.device_generation = 0
+        self.nativo_tentado = False
+        self.nativo_ok = False
         self.rec.operation_timeout = 15
 
     def set_device(self, device_index, device_id=None):
@@ -351,6 +358,38 @@ class Ouvido:
         if self.device_index == -1:
             raise RuntimeError("O microfone selecionado não está disponível. Escolha outra entrada de áudio.")
         return self.device_index
+
+    def _preferir_nativo(self):
+        """“sempre”: tenta o motor do Windows antes do Google."""
+        return str(getattr(config, "VOZ_NATIVA", "auto")).lower() in ("sempre", "on", "1")
+
+    def _nativo_disponivel(self):
+        modo = str(getattr(config, "VOZ_NATIVA", "auto")).lower()
+        if voz_nativa is None or modo in ("nunca", "off", "0"):
+            return False
+        if not getattr(self, "nativo_tentado", False):
+            self.nativo_tentado = True
+            try:
+                self.nativo_ok = bool(voz_nativa.disponivel())
+            except Exception:
+                self.nativo_ok = False
+            if self.nativo_ok:
+                seguranca.log.info("Reconhecimento nativo do Windows disponível.")
+        return bool(getattr(self, "nativo_ok", False))
+
+    def _tentar_nativo(self, pcm):
+        """Transcreve pelo motor do Windows. None quando não há motor ou fala."""
+        if not pcm or not self._nativo_disponivel():
+            return None
+        try:
+            texto = voz_nativa.reconhecer(pcm, self.FS)
+        except Exception:
+            return None
+        if texto:
+            self.ultimo_erro = None
+            seguranca.log.info("[voz] reconhecimento nativo")
+            return texto.strip() or None
+        return None
 
     def calibrar(self):
         self.capturando.set()
@@ -436,6 +475,10 @@ class Ouvido:
         pcm = self._gravar(0.2, max_seg=limite, silencio=limite, min_voz=1, gatilho=gatilho)
         if not pcm:
             return None
+        if self._preferir_nativo():
+            nativo = self._tentar_nativo(pcm)
+            if nativo:
+                return nativo
         audio = sr.AudioData(pcm, self.FS, 2)
         t0 = time.perf_counter()
         try:
@@ -444,6 +487,9 @@ class Ouvido:
             seguranca.log.info(f"[tempo] reconhecimento de voz {time.perf_counter() - t0:.1f}s")
             return (texto or "").strip() or None
         except Exception as e:
+            nativo = self._tentar_nativo(pcm)
+            if nativo:
+                return nativo
             self.ultimo_erro = str(e)[:180]
             seguranca.log.warning(f"Reconhecimento manual falhou ({type(e).__name__})")
             return None
@@ -457,6 +503,10 @@ class Ouvido:
         pcm = self._gravar(espera)
         if not pcm:
             return {"texto": None, "alternativas": [], "erro": None}
+        if self._preferir_nativo():
+            nativo = self._tentar_nativo(pcm)
+            if nativo:
+                return {"texto": nativo, "alternativas": [nativo], "erro": None}
         audio = sr.AudioData(pcm, self.FS, 2)
         try:
             r = self.rec.recognize_google(audio, language="pt-BR", show_all=True)
@@ -473,6 +523,9 @@ class Ouvido:
             self.ultimo_erro = None
             return {"texto": None, "alternativas": [], "erro": ERROS["nao_entendi"]}
         except sr.RequestError:
+            nativo = self._tentar_nativo(pcm)
+            if nativo:
+                return {"texto": nativo, "alternativas": [nativo], "erro": None}
             self.ultimo_erro = ERROS["sem_internet"]
             return {"texto": None, "alternativas": [], "erro": ERROS["sem_internet"]}
 
@@ -485,6 +538,10 @@ class Ouvido:
             pcm = self._gravar(espera)
         if not pcm:
             return None
+        if self._preferir_nativo():
+            nativo = self._tentar_nativo(pcm)
+            if nativo:
+                return [nativo] if curto else nativo
         audio = sr.AudioData(pcm, self.FS, 2)
         t0 = time.perf_counter()
         try:
@@ -501,6 +558,9 @@ class Ouvido:
             self.ultimo_erro = None
             return None
         except sr.RequestError as e:
+            nativo = self._tentar_nativo(pcm)
+            if nativo:
+                return [nativo] if curto else nativo
             self.ultimo_erro = f"Reconhecimento de voz indisponível: {e}"
             seguranca.log.warning(f"Reconhecimento de voz falhou: {e}")
             print("[voz] Falha no reconhecimento (internet?)")

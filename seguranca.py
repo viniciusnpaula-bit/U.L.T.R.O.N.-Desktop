@@ -62,7 +62,7 @@ _hseg.addFilter(_Redator())
 _log_seg.addHandler(_hseg)
 
 _SENSIVEIS = re.compile(r"(key|token|senha|password|pin|secret|segredo)", re.I)
-_SO_TAMANHO = {"texto", "conteudo", "consulta", "busca", "url", "caminho", "nome", "cidade", "tema", "pergunta", "comando", "fato", "trecho", "origem", "destino"}  # conteúdo livre: só registra o tamanho
+_SO_TAMANHO = {"texto", "conteudo", "consulta", "busca", "url", "caminho", "nome", "cidade", "tema", "pergunta", "comando", "fato", "trecho", "origem", "destino", "valor", "campo"}  # conteúdo livre: só registra o tamanho
 
 
 def sanitizar_args(args):
@@ -98,9 +98,9 @@ _RASTREIO_ACOES = {
     "digitar_texto", "pressionar_tecla", "clicar", "ver_tela", "ajustar_volume",
     "controlar_midia", "info_sistema", "bloquear_tela", "executar_comando", "desligar_pc",
     "reiniciar_pc", "cancelar_desligamento", "lembrar_fato", "esquecer_fato",
-    "criar_lembrete", "listar_lembretes",
+    "criar_lembrete", "listar_lembretes", "desfazer",
 }
-_RASTREIO_ETAPAS = {"-", "intent", "tool_call", "rocket_league", "spotify", "minimizar_janelas"}
+_RASTREIO_ETAPAS = {"-", "intent", "tool_call", "rocket_league", "spotify", "minimizar_janelas", "desfazer"}
 _RASTREIO_ESTADOS = {"selected", "started", "success", "failure", "denied", "cancelled", "returned"}
 
 
@@ -173,7 +173,7 @@ _PADRAO = {
         "programas": {},
         "aceitar_apps_instalados": True,
         "diretorios": [],
-        "operacoes": ["arquivo.criar", "pasta.criar", "arquivo.mover"],
+        "operacoes": ["arquivo.criar", "pasta.criar", "arquivo.mover", "arquivo.compactar", "site.criar"],
         "teclas_seguras": ["playpause", "nexttrack", "prevtrack", "volumemute", "volumeup", "volumedown",
                            "up", "down", "left", "right", "pageup", "pagedown", "home", "end", "esc"],
         "comandos": ["ipconfig", "ping", "tasklist", "systeminfo", "whoami", "hostname",

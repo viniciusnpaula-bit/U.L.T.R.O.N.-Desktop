@@ -22,7 +22,9 @@ if sys.stdout is None or sys.stderr is None or "--bandeja" in sys.argv:
 
 import cerebro
 import confirmacao
+import fala
 import memoria
+import personalidade
 import seguranca
 import teclado
 
@@ -259,7 +261,8 @@ def modo_voz(bandeja=False, entrada_teclado=True, stop_event=None,
                     ouvido.calibrar()
                     calibrado = True
                     erro_audio = None
-                    voz.falar(f"Ultron online. À sua disposição, {config.NOME}.")
+                    if personalidade.saudacao_ao_abrir():
+                        voz.falar(personalidade.frase_saudacao())
                     print("Diga 'Ei, Ultron' seguido do comando.")
                 if falar_agora.is_set() and not pausado.is_set():
                     # "segurar para falar": grava só enquanto a tecla está pressionada
@@ -309,7 +312,11 @@ def modo_voz(bandeja=False, entrada_teclado=True, stop_event=None,
                 cmd = texto
             else:
                 continue
-            incerteza = cerebro.interpretacao_incerta(cmd, detalhe.get("alternativas") or [])
+            cmd, correcoes = fala.corrigir(cmd)
+            if correcoes:
+                seguranca.log.info("[fala] " + ", ".join(f"{a}->{b}" for a, b in correcoes))
+            alternativas = [fala.corrigir(a)[0] for a in (detalhe.get("alternativas") or [])]
+            incerteza = cerebro.interpretacao_incerta(cmd, alternativas)
             if incerteza.get("confirmar") and converter_confirmacao:
                 publicar_conversa("user", cmd)
                 if not converter_confirmacao(cmd, incerteza):

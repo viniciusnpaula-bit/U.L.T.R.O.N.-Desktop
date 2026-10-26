@@ -8,11 +8,15 @@ contextBridge.exposeInMainWorld('ultron', Object.freeze({
   microphone: paused => ipcRenderer.invoke('api:microphone', paused),
   microphones: () => ipcRenderer.invoke('api:microphones'),
   conversation: () => ipcRenderer.invoke('api:conversation'),
+  clearConversation: () => ipcRenderer.invoke('api:conversation-clear'),
   cofreStatus: () => ipcRenderer.invoke('cofre:status'),
   cofreGuardar: (nome, valor) => ipcRenderer.invoke('cofre:guardar', nome, valor),
   cofreRemover: nome => ipcRenderer.invoke('cofre:remover', nome),
   cofreTestar: nome => ipcRenderer.invoke('cofre:testar', nome),
   abrirLink: url => ipcRenderer.invoke('link:abrir', url),
+  abrirExterno: url => ipcRenderer.invoke('link:externo', url),
+  palcoFechar: () => ipcRenderer.invoke('palco:fechar'),
+  palcoAbrir: id => ipcRenderer.invoke('palco:abrir', id),
   fatosListar: busca => ipcRenderer.invoke('mem:fatos', busca),
   fatoCorrigir: (id, texto) => ipcRenderer.invoke('mem:fato-corrigir', id, texto),
   fatoApagar: id => ipcRenderer.invoke('mem:fato-apagar', id),
@@ -51,5 +55,5 @@ contextBridge.exposeInMainWorld('ultron', Object.freeze({
     return () => ipcRenderer.removeListener('hud:run-action', listener);
   },
   hudActionResult: (requestId, accepted) => ipcRenderer.send('hud:action-result', requestId, accepted === true),
-  version: '1.14.0',
+  version: '1.15.0',
 }));

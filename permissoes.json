@@ -37,7 +37,7 @@
       "~/OneDrive/Desktop",
       "~/OneDrive/Documentos"
     ],
-    "operacoes": ["arquivo.criar", "pasta.criar", "arquivo.mover"],
+    "operacoes": ["arquivo.criar", "pasta.criar", "arquivo.mover", "arquivo.compactar", "site.criar"],
     "teclas_seguras": ["playpause", "nexttrack", "prevtrack", "volumemute", "volumeup", "volumedown",
                        "up", "down", "left", "right", "pageup", "pagedown", "home", "end", "esc"],
     "comandos": ["ipconfig", "ping", "tasklist", "systeminfo", "whoami", "hostname",
