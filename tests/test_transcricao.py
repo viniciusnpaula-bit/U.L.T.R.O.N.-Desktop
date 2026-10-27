@@ -199,6 +199,16 @@ class TranscreverTests(unittest.TestCase):
         self.assertIsNone(r["texto"])
         self.assertEqual(r["motivo"], "sem_fala")
 
+    def test_confianca_extrema_nao_vira_comando(self):
+        with patch.dict(config.CHAVES, {"groq": "gsk_teste"}), \
+                patch.object(transcricao.requests, "post",
+                             return_value=RespostaFalsa(
+                                 corpo=corpo_ok(texto="Aplicativos de Aplicativos",
+                                                avg=-1.25))):
+            r = transcricao.transcrever(self.pcm)
+        self.assertIsNone(r["texto"])
+        self.assertEqual(r["erro"], "baixa_confianca")
+
 
 if __name__ == "__main__":
     unittest.main()

@@ -60,6 +60,19 @@ class OuvidoGroqTests(unittest.TestCase):
         self.assertIsNone(r["confianca"])
         self.ouvido.rec.recognize_google.assert_called_once()
 
+    def test_detalhado_cai_para_google_quando_confianca_e_lixo(self):
+        falso = SimpleNamespace(transcrever=Mock(return_value={
+            "texto": None, "alternativas": [], "confianca": {"nivel": "baixa"},
+            "motor": "groq", "erro": "baixa_confianca", "motivo": None,
+            "latencia": 0.4}))
+        self.ouvido.rec.recognize_google.return_value = {
+            "alternative": [{"transcript": "abrir o chrome"}]}
+        with patch.object(voz, "transcricao", falso), \
+                patch.object(config, "VOZ_MOTOR", "auto", create=True):
+            r = self.ouvido.escutar_detalhado()
+        self.assertEqual(r["texto"], "abrir o chrome")
+        self.ouvido.rec.recognize_google.assert_called_once()
+
     def test_motor_google_nao_chama_groq(self):
         falso = SimpleNamespace(transcrever=Mock())
         self.ouvido.rec.recognize_google.return_value = {

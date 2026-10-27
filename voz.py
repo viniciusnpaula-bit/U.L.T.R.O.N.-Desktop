@@ -522,7 +522,7 @@ class Ouvido:
         if resultado.get("motivo") == "sem_fala":
             return resultado
         if resultado.get("erro"):
-            seguranca.log.warning(f"[stt] Groq indisponível ({resultado['erro']})")
+            seguranca.log.warning(f"[stt] Groq sem resultado ({resultado['erro']})")
         return None
 
     def calibrar(self):

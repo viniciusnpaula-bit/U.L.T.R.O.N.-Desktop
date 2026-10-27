@@ -7,7 +7,8 @@ ULTRON Desktop 1.18.0 — escuta com Whisper grátis e conferência na dúvida
   → WAV), sem arquivo temporário; o log guarda só motor, latência e confiança.
 - Silêncio puro não gasta requisição nem vira texto: uma checagem local de
   energia descarta áudio sem fala antes de chamar a nuvem (o Whisper chegava a
-  "inventar" palavras em silêncio).
+  "inventar" palavras em silêncio). Transcrição com confiança extrema
+  (ruído/alucinação) também é recusada e o Google tenta de novo.
 - Despertar normalizado: "EIULTRON", "EIUTRON", "E ULTRON" e variantes viram
   "Ei, ULTRON" antes da busca, então o comando não se perde quando o Whisper
   gruda as palavras.
@@ -17,7 +18,7 @@ ULTRON Desktop 1.18.0 — escuta com Whisper grátis e conferência na dúvida
   confirmação de sempre.
 - Ajustes: `VOZ_MOTOR=auto|groq|google|nativo` e
   `VOZ_CONFERIR=auto|sempre|nunca` no `.env`.
-- Testes: 410 Python e 14 Node.
+- Testes: 412 Python e 14 Node.
 
 ULTRON Desktop 1.17.0 — escuta mais precisa
 

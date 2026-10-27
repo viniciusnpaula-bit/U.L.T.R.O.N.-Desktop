@@ -29,6 +29,7 @@ IDIOMA = "pt"
 # acertos ficaram entre -0,11 e -0,43; o erro "Crono" por "Chrome" veio -0,358.
 LIMITE_MEDIA = -0.35
 LIMITE_BAIXA = -0.60
+LIMITE_DESCARTA = -1.0      # abaixo disso o texto é lixo/alucinação: não vira comando
 LIMITE_SEM_FALA = 0.60
 LIMITE_COMPRESSAO = 2.40
 
@@ -232,6 +233,11 @@ def transcrever(pcm: bytes, fs: int = 16000) -> dict:
     if (confianca.get("no_speech_prob") or 0) >= LIMITE_SEM_FALA:
         # O Whisper às vezes "inventa" texto em silêncio; não deixe isso virar ação.
         return {**_vazio(motivo="sem_fala"), "confianca": confianca, "latencia": latencia}
+    if (confianca.get("avg_logprob") is not None
+            and confianca["avg_logprob"] <= LIMITE_DESCARTA):
+        # Ruído/alucinação: melhor devolver erro e deixar o Google tentar.
+        return {**_vazio(erro="baixa_confianca"), "confianca": confianca,
+                "latencia": latencia}
 
     return {
         "texto": texto,
