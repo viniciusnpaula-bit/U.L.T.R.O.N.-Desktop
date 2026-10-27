@@ -37,7 +37,7 @@ Ele descreve o que o código faz hoje, o que a documentação promete, e as dife
 - Escuta contínua com palavra de ativação ("Ei, Ultron"), janela de seguimento (`JANELA_SEGUIMENTO`, 6 s), confirmação por voz para ações de risco.
 - Estados publicados: `iniciando`, `calibrando`, `ouvindo`, `processando`, `pausado`, `erro`, `encerrado`.
 - Streaming: `cerebro.processar_stream()` + `voz.falar_partes()` (1ª frase falada antes do fim da geração).
-- "Segurar para falar": `HOTKEY_FALAR` (padrão `ctrl+alt+espaco`) → `voz.Ouvido.escutar_manual()`.
+- "Segurar para falar": `HOTKEY_FALAR` (padrão `ctrl+alt+space`) → `voz.Ouvido.escutar_manual()`.
 - TTS: Edge TTS online com reserva local `pyttsx3`; interrupção por `voz.parar_fala`; eco tratado com pausa.
 
 ### Ferramentas (30)

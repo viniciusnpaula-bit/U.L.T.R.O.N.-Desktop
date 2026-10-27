@@ -18,6 +18,8 @@ ULTRON Desktop 1.18.0 — escuta com Whisper grátis e conferência na dúvida
   confirmação de sempre.
 - Ajustes: `VOZ_MOTOR=auto|groq|google|nativo` e
   `VOZ_CONFERIR=auto|sempre|nunca` no `.env`.
+- Atalho "segurar para falar" corrigido: o padrão era `ctrl+alt+espaco`, que a
+  biblioteca de teclado não reconhece; agora é `ctrl+alt+space`.
 - Testes: 412 Python e 14 Node.
 
 ULTRON Desktop 1.17.0 — escuta mais precisa

@@ -95,7 +95,7 @@ VOZ_MOTOR = (_env("VOZ_MOTOR", "auto") or "auto").lower()
 VOZ_CONFERIR = (_env("VOZ_CONFERIR", "auto") or "auto").lower()
 HOTKEY_PARAR = _env("HOTKEY_PARAR", "ctrl+alt+x")
 # Segurar para falar: grava enquanto a combinação está pressionada, envia ao soltar
-HOTKEY_FALAR = _env("HOTKEY_FALAR", "ctrl+alt+espaco") or ""
+HOTKEY_FALAR = _env("HOTKEY_FALAR", "ctrl+alt+space") or ""
 # Limites da memória de fatos (evita crescimento sem fim e abuso)
 try:
     FATO_MAX_CARACTERES = max(40, int(_env("FATO_MAX_CARACTERES", "300") or 300))
