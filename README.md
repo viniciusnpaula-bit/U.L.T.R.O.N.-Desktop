@@ -123,6 +123,32 @@ desliga. Sem o pacote de fala pt-BR, o caminho nativo fica inativo e o Google
 segue como padrão. Para habilitar, instale o pacote de fala em **Configurações ›
 Hora e idioma › Idioma e região**.
 
+### Escuta mais precisa
+
+Quatro ajustes trabalham juntos para o ULTRON entender melhor a sua voz:
+
+- **Recalibração automática do limiar**: além da calibração ao abrir, o limiar
+  de volume é reajustado ao ruído atual do ambiente a cada 5 minutos sem comando
+  reconhecido ou após 3 "não entendi" seguidos. Nunca recalibra enquanto o
+  ULTRON está falando, para não capturar o próprio eco.
+- **VAD (detecção de atividade de voz)**: o corte de início/fim da fala deixa de
+  ser só volume. Se o pacote `webrtcvad` estiver instalado, ele é usado; caso
+  contrário, um VAD em Python puro olha a energia nas bandas da fala humana
+  (300–3400 Hz), a taxa de cruzamento por zero e o limiar calibrado — assim uma
+  pausa natural ou um "s" final mais fraco não cortam a frase no lugar errado.
+- **Dicionário de correções pessoais**: quando você corrige ("não, eu disse
+  Rocket League"), o par (o que ele ouviu → o que você disse) é salvo em
+  `dados/correcoes_voz.json` e aplicado nas próximas transcrições parecidas. Se
+  só uma palavra mudou ("abri" → "abra"), ele aprende a palavra e a correção vale
+  em qualquer comando; se você corrigiu só um trecho ("Rocket League"), ele
+  guarda o trecho e não engole o verbo. É local, sem nuvem e só para a sua voz.
+- **Fuzzy matching generalizado**: a comparação aproximada que já existia para
+  abrir programas passa a valer para o vocabulário de comandos. Se o
+  reconhecimento distorcer uma palavra ("fexar aplicativo", "organizar
+  arquibos"), o ULTRON reconhece a intenção em vez de responder "não entendi".
+  Conjugações e plurais legítimos (desliga, toca, bloqueia, músicas) nunca são
+  reescritos.
+
 ## Voz e Jeito
 
 Ajustes (`Ctrl+,`) → **Voz e Jeito** reúne quatro abas:

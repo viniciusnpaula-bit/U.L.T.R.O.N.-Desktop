@@ -19,7 +19,7 @@ PRIMEIRO USO
 O QUE MUDOU NO INSTALADOR (por que não é mais um .bat)
 - setup.bat foi removido. Um .bat que chama python, pip e npm é o padrão que mais
   antivírus marca como suspeito, e ele não tinha ícone, versão nem assinatura.
-- Agora existe um único programa: ULTRON-Setup.exe (ícone oficial, versão 1.16.0,
+- Agora existe um único programa: ULTRON-Setup.exe (ícone oficial, versão 1.17.0,
   descrição, log em logs\setup.log). Ele não usa %TEMP%, não pede elevação,
   não escreve no registro e não baixa nada além das dependências listadas.
 - Reexecutar o instalador conserta (repair) e atualiza sem refazer tudo.
@@ -46,6 +46,11 @@ fale e solte: o comando é enviado sem precisar da palavra de ativação.
 - Reconhecimento de voz: Google por padrão. Se houver um motor de fala pt-BR do
   Windows instalado, ele serve de reserva offline quando o Google falha
   (VOZ_NATIVA=auto) ou pode ser preferido (VOZ_NATIVA=sempre).
+- Escuta mais precisa: o limiar do microfone se recalibra sozinho (a cada 5 min
+  sem comando reconhecido ou após 3 "não entendi" seguidos), o corte da fala usa
+  detecção de voz (VAD) em vez de só volume, e o ULTRON aprende suas correções
+  ("não, eu disse Rocket League") em dados\correcoes_voz.json. Comandos
+  distorcidos ("fexar aplicativo", "organizar arquibos") são reconhecidos.
 - Em Ajustes › Voz e Jeito você escolhe a voz (15 timbres pt-BR), o jeito de falar
   (13 estilos, independentes da identidade), o microfone e seus dados opcionais
   (nome, apelido, idade, gênero, como quer ser chamado e um texto livre). Também

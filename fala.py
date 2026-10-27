@@ -25,8 +25,9 @@ VERBOS_COMANDO = {
 # Erros que já foram ouvidos na prática: troca direta, sem cálculo.
 VERBOS_ERRADOS = {
     "abri": "abra", "abrir": "abrir", "fexa": "fecha", "feixa": "fecha",
-    "feichar": "fechar", "fexar": "fechar", "toke": "toca", "tokei": "toque",
-    "inicia": "inicia", "inice": "inicie", "coloke": "coloque", "ponh": "ponha",
+    "fexar": "fechar", "feichar": "fechar",
+    "toke": "toca", "tokei": "toque", "inicia": "inicia", "inice": "inicie",
+    "coloke": "coloque", "ponh": "ponha",
 }
 
 APPS_ERRADOS = {
@@ -56,6 +57,87 @@ _PARADAS = {
     "favor", "ai", "aqui", "agora", "ja", "so", "mais", "menos", "muito", "pouco",
 }
 _PALAVRA = re.compile(r"[A-Za-zÀ-ÖØ-öø-ÿ]+")
+
+# Vocabulário de comandos conhecidos: usado pelo fuzzy matching generalizado
+# (não só para nomes de aplicativo). Se o reconhecimento distorcer uma palavra
+# de um comando, ela é corrigida para a palavra canônica antes de interpretar.
+COMANDOS_CONHECIDOS = (
+    "abrir aplicativo", "fechar aplicativo", "abrir programa", "fechar programa",
+    "organizar arquivos", "organizar pasta", "desfazer",
+    "tirar print", "capturar tela", "aumentar volume", "diminuir volume", "mutar",
+    "tocar musica", "pausar musica", "proxima musica", "musica anterior",
+    "pesquisar", "abrir site", "criar pasta", "criar arquivo",
+    "mover arquivo", "compactar", "descompactar",
+    "desligar", "reiniciar", "bloquear", "que horas sao",
+    "previsao do tempo", "criar lembrete",
+)
+
+
+def _vocabulario_comandos(comandos=None) -> set[str]:
+    """Conjunto de palavras canônicas dos comandos conhecidos."""
+    frases = comandos if comandos is not None else COMANDOS_CONHECIDOS
+    palavras: set[str] = set()
+    for frase in frases:
+        palavras.update(normalizar(frase).split())
+    return palavras
+
+
+def resolver_comando(texto: str, comandos=None, corte: float = 0.80) -> tuple[str, list[tuple[str, str]]]:
+    """Corrige palavras distorcidas comparando com o vocabulário de comandos.
+
+    Devolve (texto corrigido, [(original, corrigido), ...]). Só troca palavras
+    com pelo menos 4 letras que não estão no vocabulário e que são muito
+    parecidas com uma palavra canônica; na dúvida, não mexe. Verbos de comando
+    legítimos (abre, toca, fecha...) nunca são trocados.
+    """
+    original = str(texto or "").strip()
+    if not original:
+        return original, []
+    vocabulario = _vocabulario_comandos(comandos)
+    if not vocabulario:
+        return original, []
+    protegidas = set(VERBOS_COMANDO) | set(APPS) | _PARADAS
+    palavras = list(_PALAVRA.finditer(original))
+    trocas: dict[int, str] = {}
+    for indice, palavra in enumerate(palavras):
+        normal = normalizar(palavra.group())
+        if len(normal) < 4 or normal in vocabulario or normal in protegidas:
+            continue
+        # Erros já conhecidos: troca direta, sem cálculo.
+        if normal in VERBOS_ERRADOS:
+            trocas[indice] = VERBOS_ERRADOS[normal]
+            continue
+        if normal in APPS_ERRADOS:
+            trocas[indice] = APPS_ERRADOS[normal]
+            continue
+        alvo = difflib.get_close_matches(normal, list(vocabulario), n=1, cutoff=corte)
+        if alvo and _parecido(normal, alvo[0], corte):
+            # Nunca troca uma forma que só é "pedaço" da canônica: "desliga" não
+            # vira "desligar", "toca" não vira "tocar", "musicas" não vira
+            # "musica". Isso preserva conjugações e plurais legítimos; só a
+            # distorção real (letra trocada) é corrigida.
+            if normal.startswith(alvo[0]) or alvo[0].startswith(normal):
+                continue
+            # Também não troca conjugação por infinitivo: "bloqueia", "tira",
+            # "pesquisa", "organizam" são a forma certa na frase; "bloquear" só
+            # é o nome canônico do comando.
+            if alvo[0].endswith("r") and normal[-1] in "aeiom":
+                continue
+            trocas[indice] = alvo[0]
+    if not trocas:
+        return original, []
+    partes, cursor, correcoes = [], 0, []
+    for indice, palavra in enumerate(palavras):
+        partes.append(original[cursor:palavra.start()])
+        nova = trocas.get(indice)
+        if nova is None:
+            partes.append(palavra.group())
+        else:
+            partes.append(nova)
+            correcoes.append((palavra.group(), nova))
+        cursor = palavra.end()
+    partes.append(original[cursor:])
+    return "".join(partes), correcoes
 
 
 def normalizar(texto: str) -> str:

@@ -3,6 +3,7 @@ import asyncio
 import json
 import collections
 import glob
+import math
 import os
 import queue
 import re
@@ -26,6 +27,90 @@ try:
     import voz_nativa
 except Exception:      # o Windows pode não ter PowerShell/System.Speech
     voz_nativa = None
+
+# VAD opcional: webrtcvad quando instalado; caso contrário, um VAD simples em
+# Python puro (energia nas bandas de voz humana + cruzamento por zero) que já
+# é bem mais robusto que volume RMS sozinho.
+try:
+    import webrtcvad as _webrtcvad
+    _VAD_DISPONIVEL = True
+except Exception:
+    _webrtcvad = None
+    _VAD_DISPONIVEL = False
+
+_VAD_FRAME_MS = 20          # frame de 20 ms (320 amostras a 16 kHz)
+_VAD_AGRESSIVIDADE = 2      # 0 (permissivo) a 3 (restrito)
+_VAD_VOZ_MIN_HZ = 300       # banda inferior da fala humana
+_VAD_VOZ_MAX_HZ = 3400      # banda superior da fala humana
+
+
+class _Vad:
+    """Detecção de atividade de voz.
+
+    Prefere webrtcvad quando instalado. Caso contrário, usa um VAD simples em
+    Python puro: um frame é voz quando tem energia nas bandas da fala humana
+    (300-3400 Hz) e padrão de cruzamento por zero compatível — muito mais
+    robusto que volume RMS sozinho, que confunde silêncio com voz baixa.
+    """
+
+    def __init__(self, agressividade=_VAD_AGRESSIVIDADE):
+        self.disponivel = _VAD_DISPONIVEL
+        self._vad = None
+        if self.disponivel:
+            try:
+                self._vad = _webrtcvad.Vad(agressividade)
+            except Exception:
+                self.disponivel = False
+                self._vad = None
+        self._frame = int(16000 * _VAD_FRAME_MS / 1000)  # 320 amostras
+
+    def _energia_bandas_voz(self, quadro: np.ndarray) -> float:
+        """Energia normalizada nas bandas de frequência da fala humana."""
+        if quadro.size < self._frame:
+            return 0.0
+        janela = np.hanning(quadro.size)
+        espectro = np.abs(np.fft.rfft(quadro.astype(np.float32) * janela))
+        freqs = np.fft.rfftfreq(quadro.size, d=1 / 16000)
+        mask = (freqs >= _VAD_VOZ_MIN_HZ) & (freqs <= _VAD_VOZ_MAX_HZ)
+        if not mask.any():
+            return 0.0
+        total = float(espectro.sum()) or 1.0
+        return float(espectro[mask].sum() / total)
+
+    def _taxa_cruzamento_zero(self, quadro: np.ndarray) -> float:
+        """Taxa de cruzamento por zero: voz tem padrão característico."""
+        if quadro.size < 2:
+            return 0.0
+        sinais = np.sign(quadro.astype(np.float32))
+        mudancas = np.where(sinais[:-1] * sinais[1:] < 0, 1, 0)
+        return float(mudancas.sum()) / max(quadro.size - 1, 1)
+
+    def is_speech(self, quadro: np.ndarray, sample_rate: int = 16000) -> bool:
+        """True se o quadro parece fala humana."""
+        quadro = np.asarray(quadro, dtype=np.int16).reshape(-1)
+        if quadro.size != self._frame:
+            # preenche/corta para o tamanho do frame
+            if quadro.size < self._frame:
+                quadro = np.pad(quadro, (0, self._frame - quadro.size))
+            else:
+                quadro = quadro[: self._frame]
+        if self.disponivel and self._vad is not None:
+            try:
+                return bool(self._vad.is_speech(quadro.tobytes(), sample_rate))
+            except Exception:
+                pass
+        # Fallback puro Python: energia em bandas de voz + ZCR.
+        energia = self._energia_bandas_voz(quadro)
+        zcr = self._taxa_cruzamento_zero(quadro)
+        nivel = float(np.sqrt(np.mean(quadro.astype(np.float32) ** 2)))
+        # Voz: energia nas bandas de fala, ZCR na faixa da voz (não muito baixa,
+        # não muito alta) e nível acima de um ruído mínimo.
+        return (
+            energia > 0.25
+            and 0.02 < zcr < 0.35
+            and nivel > 60
+        )
+
 
 _lock_fala = threading.RLock()
 _parar = threading.Event()
@@ -330,6 +415,13 @@ def voz_ativa():
 class Ouvido:
     FS = 16000
 
+    # Recalibração automática do limiar durante o uso.
+    # Se passar esse tempo sem um comando reconhecido, ou se vários "não entendi"
+    # seguidos acontecerem, o limiar de volume é reajustado ao ruído atual do
+    # ambiente. Nunca recalibra enquanto o ULTRON está falando (não captura eco).
+    RECALIBRAR_SEM_COMANDO_SEG = 300          # 5 minutos sem comando reconhecido
+    MAX_NAO_ENTENDI_RECALIBRAR = 3            # não-entendi seguidos que disparam recalibração
+
     def __init__(self, device_index=None, device_id=None):
         self.rec = sr.Recognizer()
         self.limiar = getattr(config, "LIMIAR_VOZ", 0) or 400.0
@@ -343,6 +435,10 @@ class Ouvido:
         self.nativo_tentado = False
         self.nativo_ok = False
         self.rec.operation_timeout = 15
+        self.vad = _Vad()
+        # Estado da recalibração automática.
+        self._ultimo_comando_ok = 0.0         # timestamp do último comando reconhecido
+        self._nao_entendi_consecutivos = 0    # contador de "não entendi" seguidos
 
     def set_device(self, device_index, device_id=None):
         self.device_index = device_index
@@ -402,6 +498,67 @@ class Ouvido:
         ambiente = float(np.sqrt(np.mean(d.astype(np.float32) ** 2)))
         self.limiar = getattr(config, "LIMIAR_VOZ", 0) or max(300.0, ambiente * 3)
         print(f"[mic] ruído ambiente {ambiente:.0f}, limiar {self.limiar:.0f}")
+        # Uma calibração (manual ou automática) sempre reinicia os gatilhos, senão
+        # o primeiro laço do uso recalibraria de novo logo após calibrar.
+        self._ultimo_comando_ok = time.time()
+        self._nao_entendi_consecutivos = 0
+
+    def notificar_comando_reconhecido(self):
+        """Chamado quando um comando é reconhecido com sucesso: reseta os gatilhos de recalibração."""
+        self._ultimo_comando_ok = time.time()
+        self._nao_entendi_consecutivos = 0
+
+    def notificar_nao_entendido(self):
+        """Chamado quando a fala não foi compreendida: após N seguidos, dispara recalibração."""
+        self._nao_entendi_consecutivos += 1
+
+    def precisa_recalibrar(self) -> bool:
+        """True se o limiar deve ser reajustado ao ambiente atual."""
+        if self._nao_entendi_consecutivos >= self.MAX_NAO_ENTENDI_RECALIBRAR:
+            return True
+        if time.time() - self._ultimo_comando_ok > self.RECALIBRAR_SEM_COMANDO_SEG:
+            return True
+        return False
+
+    def recalibrar_se_necessario(self):
+        """Recalibra o limiar se precisar, mas nunca enquanto o ULTRON está falando."""
+        import voz as _voz  # falando é um atributo de módulo
+        if _voz.falando.is_set():
+            return False
+        if not self.precisa_recalibrar():
+            return False
+        self.calibrar()
+        self._nao_entendi_consecutivos = 0
+        self._ultimo_comando_ok = time.time()
+        return True
+
+    def _eh_voz(self, dados: np.ndarray, fator: float = 1.0) -> bool:
+        """True se o bloco de áudio contém fala humana (VAD com fallback de volume)."""
+        bloco = dados.reshape(-1)
+        # 1) webrtcvad, quando instalado: detecção baseada no padrão de voz humana.
+        if self.vad.disponivel and self.vad._vad is not None:
+            frame = self.vad._frame
+            votos = 0
+            total = 0
+            for ini in range(0, len(bloco) - frame + 1, frame):
+                votos += 1 if self.vad.is_speech(bloco[ini:ini + frame]) else 0
+                total += 1
+            if total == 0:
+                return False
+            return votos >= max(1, total // 2)  # maioria dos frames de 20 ms é voz
+        # 2) Fallback puro Python: energia nas bandas da fala (300-3400 Hz) +
+        #    taxa de cruzamento por zero compatível com voz. Muito mais robusto
+        #    que volume RMS sozinho, que confunde qualquer som alto com fala.
+        #    O nível mínimo vem do limiar calibrado: é isso que faz a
+        #    recalibração automática valer alguma coisa quando a sala muda.
+        energia = self.vad._energia_bandas_voz(bloco)
+        zcr = self.vad._taxa_cruzamento_zero(bloco)
+        nivel = float(np.sqrt(np.mean(bloco.astype(np.float32) ** 2)))
+        return (
+            energia > 0.25
+            and 0.02 < zcr < 0.35
+            and nivel > max(60.0, self.limiar * 0.5) * fator
+        )
 
     def _gravar(self, espera, max_seg=15, silencio=None, min_voz=3, fator=1.0, gatilho=None):
         """Captura áudio. Com `gatilho` (Event), grava SÓ enquanto ele estiver ligado."""
@@ -441,7 +598,7 @@ class Ouvido:
                         if agora - ini > max_seg:
                             break
                         continue
-                    if nivel > self.limiar * fator:
+                    if self._eh_voz(dados, fator):
                         if not falou:
                             quadros, falou, ini_fala = list(pre), True, agora
                         sil, voz_n = 0.0, voz_n + 1

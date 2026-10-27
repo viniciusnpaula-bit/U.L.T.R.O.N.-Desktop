@@ -1,4 +1,4 @@
-# U.L.T.R.O.N. Desktop 1.16.0
+# U.L.T.R.O.N. Desktop 1.17.0
 
 The Electron shell restores the supplied 1.1.1 red-and-black interface and connects it to the Python Desktop API. Python owns the core, API, and continuous microphone loop.
 

@@ -1,3 +1,28 @@
+ULTRON Desktop 1.17.0 — escuta mais precisa
+
+- Recalibração automática do limiar de voz: além da calibração ao abrir, o
+  limiar é reajustado ao ruído atual do ambiente a cada 5 minutos sem comando
+  reconhecido ou após 3 "não entendi" seguidos. Nunca recalibra enquanto o
+  ULTRON fala (evita capturar o próprio eco).
+- VAD (detecção de atividade de voz): o corte de início/fim da fala deixa de
+  ser só volume. Usa `webrtcvad` quando instalado; caso contrário, um VAD em
+  Python puro analisa energia nas bandas da fala humana (300–3400 Hz), a taxa de
+  cruzamento por zero e o limiar calibrado. Pausas naturais e consoantes finais
+  fracas não cortam mais a frase no lugar errado, e a recalibração passa a
+  valer de verdade quando a sala fica mais silenciosa ou mais ruidosa.
+- Dicionário de correções pessoais: "não, eu disse X" grava o par (ouvido →
+  dito) em `dados/correcoes_voz.json` e o aplica nas próximas transcrições
+  parecidas. Quando só uma palavra mudou ("abri" → "abra"), aprende a palavra,
+  então a correção serve para qualquer comando; quando a frase corrigida é só
+  um trecho ("Rocket League"), guarda o trecho e não engole o verbo. Local, sem
+  nuvem e só para a voz de quem usa.
+- Fuzzy matching generalizado: a comparação aproximada que já existia para
+  abrir programas passa a valer para o vocabulário de comandos ("fexar
+  aplicativo" → "fechar aplicativo", "organizar arquibos" → "organizar
+  arquivos"). Conjugações e plurais legítimos (desliga, toca, bloqueia,
+  músicas) nunca são reescritos.
+- Testes: 364 Python e 30 Node.
+
 ULTRON Desktop 1.16.0 — autoconhecimento, vídeo no mudo e organizar arquivos
 
 - Autoconhecimento em runtime: o system prompt passa a trazer, gerado do sistema

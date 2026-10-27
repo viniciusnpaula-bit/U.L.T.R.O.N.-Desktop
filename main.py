@@ -29,6 +29,31 @@ import seguranca
 import teclado
 
 WAKE = re.compile(r"(?:\b(?:ei|hey|oi|ouça|e aí)\b[\s,]*)?\b(ultr[oa]n|ultrom|ultra on|altron)\b[\s,.!?]*")
+
+
+def _detectar_correcao_pessoal(texto: str) -> tuple[str | None, str] | None:
+    """Detecta 'não, eu disse X' (ou variantes) e devolve (ouvido_errado, dito_certo).
+
+    `ouvido_errado` é None quando o padrão não traz um par explícito (usamos
+    então o último reconhecimento do usuário).
+    """
+    t = texto.strip()
+    padroes = (
+        r"^nao,? eu disse (.+)$",
+        r"^não,? eu disse (.+)$",
+        r"^eu disse (.+)$",
+        r"^corrigir para (.+)$",
+        r"^nao foi (.+) foi (.+)$",
+        r"^não foi (.+) foi (.+)$",
+    )
+    for padrao in padroes:
+        m = re.match(padrao, t, flags=re.IGNORECASE)
+        if m:
+            grupos = m.groups()
+            if len(grupos) == 2:
+                return grupos[0].strip(), grupos[1].strip()  # (ouvido_errado, dito_certo)
+            return None, grupos[0].strip()  # só o dito_certo
+    return None
 pausado = threading.Event()   # ligado = Ultron não escuta (microfone liberado)
 _trava = None
 
@@ -209,6 +234,7 @@ def modo_voz(bandeja=False, entrada_teclado=True, stop_event=None,
             pass
 
     import voz
+    import correcoes_voz
     ouvido = voz.Ouvido(device_index=microphone_device_index, device_id=microphone_device_id)
     ouvido.pausado = pausado
     falar_agora = threading.Event()   # ligado enquanto o atalho "segurar para falar" está pressionado
@@ -232,6 +258,7 @@ def modo_voz(bandeja=False, entrada_teclado=True, stop_event=None,
         calibrado, falhas, janela, device_generation = False, 0, 0.0, -1   # janela: JANELA_SEGUIMENTO sem precisar do nome após uma resposta
         pausado_reportado = False
         erro_audio = None
+        ultimo_texto_usuario = None   # último reconhecimento do usuário (para correções pessoais)
         while stop_event is None or not stop_event.is_set():
             if pausado.is_set():
                 if not pausado_reportado:
@@ -277,9 +304,18 @@ def modo_voz(bandeja=False, entrada_teclado=True, stop_event=None,
                     continue
                 if erro_audio is None:
                     publicar_estado("ouvindo")
+                    # Recalibração automática do limiar: não captura eco enquanto o ULTRON fala.
+                    try:
+                        ouvido.recalibrar_se_necessario()
+                    except Exception:
+                        pass
                 detalhe = ouvido.escutar_detalhado() if hasattr(ouvido, "escutar_detalhado") else {"texto": ouvido.escutar(), "alternativas": [], "erro": None}
                 texto = detalhe.get("texto")
                 erro_reconhecimento = detalhe.get("erro") or getattr(ouvido, "ultimo_erro", None)
+                if erro_reconhecimento and str(erro_reconhecimento) == voz.ERROS.get("nao_entendi"):
+                    # Só conta como "não entendi" quando houve fala e ela não foi
+                    # compreendida; silêncio e falta de internet não pedem recalibração.
+                    getattr(ouvido, "notificar_nao_entendido", lambda: None)()
                 if erro_reconhecimento:
                     erro_audio = str(erro_reconhecimento)[:180]
                     publicar_estado("erro", erro_audio)
@@ -300,6 +336,21 @@ def modo_voz(bandeja=False, entrada_teclado=True, stop_event=None,
                 continue
             if not texto or pausado.is_set():
                 continue
+            # Correção pessoal: "não, eu disse X" ensina o ULTRON a trocar o que
+            # ele ouviu antes pelo que o usuário realmente quis dizer.
+            correcao = _detectar_correcao_pessoal(texto)
+            if correcao is not None:
+                ouvido_errado, dito_certo = correcao
+                origem = ouvido_errado or ultimo_texto_usuario
+                if origem:
+                    correcoes_voz.registrar_correcao(origem, dito_certo)
+                    voz.falar(f"Tudo bem. Da próxima vez entendo '{origem}' como '{dito_certo}'.", eco=0.2)
+                else:
+                    voz.falar("Não tenho o que corrigir ainda. Diga o comando primeiro.", eco=0.2)
+                ultimo_texto_usuario = texto
+                janela = time.time() + getattr(config, "JANELA_SEGUIMENTO", 6.0)
+                continue
+            ultimo_texto_usuario = texto
             m = WAKE.search(texto.lower())
             if m:
                 cmd = texto[m.end():].strip()
@@ -312,7 +363,11 @@ def modo_voz(bandeja=False, entrada_teclado=True, stop_event=None,
                 cmd = texto
             else:
                 continue
-            cmd, correcoes = fala.corrigir(cmd)
+            cmd, correcoes_pessoais = correcoes_voz.aplicar(cmd)
+            cmd, correcoes_fala = fala.corrigir(cmd)
+            cmd, correcoes_comando = fala.resolver_comando(cmd)
+            getattr(ouvido, "notificar_comando_reconhecido", lambda: None)()
+            correcoes = correcoes_pessoais + correcoes_fala + correcoes_comando
             if correcoes:
                 seguranca.log.info("[fala] " + ", ".join(f"{a}->{b}" for a, b in correcoes))
             alternativas = [fala.corrigir(a)[0] for a in (detalhe.get("alternativas") or [])]

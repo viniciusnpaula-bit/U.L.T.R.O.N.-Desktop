@@ -33,5 +33,35 @@ class CorrecaoDeFalaTests(unittest.TestCase):
         self.assertEqual(fala.normalizar("Configurações"), "configuracoes")
 
 
+class FuzzyComandoTests(unittest.TestCase):
+    """Fuzzy matching generalizado: corrige comandos distorcidos, não só apps."""
+
+    def test_corrige_palavra_distorcida_de_comando(self):
+        texto, trocas = fala.resolver_comando("fexar aplicativo")
+        self.assertEqual(texto, "fechar aplicativo")
+        self.assertEqual(trocas, [("fexar", "fechar")])
+
+    def test_corrige_arquibos_para_arquivos(self):
+        self.assertEqual(fala.resolver_comando("organizar arquibos")[0], "organizar arquivos")
+
+    def test_corrige_desfaser(self):
+        self.assertEqual(fala.resolver_comando("desfaser")[0], "desfazer")
+
+    def test_nao_mexe_em_palavra_legitima(self):
+        for frase in ("abre o chrome", "que horas são", "toca uma música"):
+            self.assertEqual(fala.resolver_comando(frase), (frase, []))
+
+    def test_palavra_curta_nao_e_corrigida(self):
+        # palavras com menos de 4 letras ficam como estão (evita "sim" -> "site")
+        self.assertEqual(fala.resolver_comando("sim")[0], "sim")
+
+    def test_conjugacao_e_plural_legitimos_ficam_como_estao(self):
+        # "desliga" é prefixo de "desligar" e "musicas" de "musica": não é erro
+        # de reconhecimento, é a forma certa da frase — não pode ser reescrita.
+        for frase in ("desliga o pc", "toca uma musica", "abre os arquivos",
+                      "aumenta o volume", "fecha a pasta"):
+            self.assertEqual(fala.resolver_comando(frase), (frase, []))
+
+
 if __name__ == "__main__":
     unittest.main()
