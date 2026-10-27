@@ -88,6 +88,11 @@ except ValueError:
 # Reconhecimento de voz: "auto" (Google e, se falhar, o nativo do Windows),
 # "sempre" (nativo primeiro) ou "nunca" (só Google).
 VOZ_NATIVA = (_env("VOZ_NATIVA", "auto") or "auto").lower()
+# Motor de escuta: "auto" = Groq grátis e, se falhar, Google e depois Windows;
+# "groq" (só Groq + reservas), "google" ou "nativo" (força um motor primeiro).
+VOZ_MOTOR = (_env("VOZ_MOTOR", "auto") or "auto").lower()
+# Conferência do que foi ouvido: "auto" (só em dúvida ou risco), "sempre" ou "nunca".
+VOZ_CONFERIR = (_env("VOZ_CONFERIR", "auto") or "auto").lower()
 HOTKEY_PARAR = _env("HOTKEY_PARAR", "ctrl+alt+x")
 # Segurar para falar: grava enquanto a combinação está pressionada, envia ao soltar
 HOTKEY_FALAR = _env("HOTKEY_FALAR", "ctrl+alt+espaco") or ""

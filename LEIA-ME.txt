@@ -19,7 +19,7 @@ PRIMEIRO USO
 O QUE MUDOU NO INSTALADOR (por que não é mais um .bat)
 - setup.bat foi removido. Um .bat que chama python, pip e npm é o padrão que mais
   antivírus marca como suspeito, e ele não tinha ícone, versão nem assinatura.
-- Agora existe um único programa: ULTRON-Setup.exe (ícone oficial, versão 1.17.0,
+- Agora existe um único programa: ULTRON-Setup.exe (ícone oficial, versão 1.18.0,
   descrição, log em logs\setup.log). Ele não usa %TEMP%, não pede elevação,
   não escreve no registro e não baixa nada além das dependências listadas.
 - Reexecutar o instalador conserta (repair) e atualiza sem refazer tudo.
@@ -43,9 +43,14 @@ fale e solte: o comando é enviado sem precisar da palavra de ativação.
   sem enviar o banco para a nuvem.
 - O tom da resposta se adapta a sinais do seu texto (frustração, pressa, confusão,
   gratidão), lidos localmente.
-- Reconhecimento de voz: Google por padrão. Se houver um motor de fala pt-BR do
-  Windows instalado, ele serve de reserva offline quando o Google falha
-  (VOZ_NATIVA=auto) ou pode ser preferido (VOZ_NATIVA=sempre).
+- Reconhecimento de voz: Groq Whisper large-v3 no plano gratuito (2.000
+  requisições/dia) por padrão; se a chave faltar, a cota estourar ou a internet
+  cair, volta sozinho para o Google e depois para o motor de fala pt-BR do
+  Windows. Nada é cobrado e nenhum áudio fica em disco. Ajuste com
+  VOZ_MOTOR=auto|groq|google|nativo no .env.
+- Conferência do que foi ouvido: em dúvida (transcrição com pouca confiança) ou
+  em comando de risco, o ULTRON repete o que entendeu antes de agir. Para mudar:
+  VOZ_CONFERIR=auto|sempre|nunca no .env.
 - Escuta mais precisa: o limiar do microfone se recalibra sozinho (a cada 5 min
   sem comando reconhecido ou após 3 "não entendi" seguidos), o corte da fala usa
   detecção de voz (VAD) em vez de só volume, e o ULTRON aprende suas correções

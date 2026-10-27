@@ -1,3 +1,21 @@
+ULTRON Desktop 1.18.0 — escuta com Whisper grátis e conferência na dúvida
+
+- Motor de escuta novo: o Groq Whisper `large-v3` no plano gratuito (2.000
+  requisições/dia) passa a ser o primeiro a ouvir; se a chave faltar, a cota
+  estourar ou a internet cair, o ULTRON volta sozinho para o Google e depois
+  para o Windows, sempre sem cobrança. Áudio vai e volta em memória (PCM 16 kHz
+  → WAV), sem arquivo temporário; o log guarda só motor, latência e confiança.
+- Despertar normalizado: "EIULTRON", "EIUTRON", "E ULTRON" e variantes viram
+  "Ei, ULTRON" antes da busca, então o comando não se perde quando o Whisper
+  gruda as palavras.
+- Conferência automática: quando a confiança da transcrição é baixa, ou média
+  com verbo de ação, o ULTRON repete o que entendeu antes de agir. Perguntas
+  simples e fala clara seguem sem atrito; ações de risco continuam com a
+  confirmação de sempre.
+- Ajustes: `VOZ_MOTOR=auto|groq|google|nativo` e
+  `VOZ_CONFERIR=auto|sempre|nunca` no `.env`.
+- Testes: 408 Python e 14 Node.
+
 ULTRON Desktop 1.17.0 — escuta mais precisa
 
 - Recalibração automática do limiar de voz: além da calibração ao abrir, o

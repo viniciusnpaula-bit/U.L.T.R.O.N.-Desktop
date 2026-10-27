@@ -24,6 +24,11 @@ import seguranca
 from microphone_devices import resolve_input_device
 
 try:
+    import transcricao
+except Exception:      # atualização parcial: sem o módulo, cai para o Google
+    transcricao = None
+
+try:
     import voz_nativa
 except Exception:      # o Windows pode não ter PowerShell/System.Speech
     voz_nativa = None
@@ -428,6 +433,7 @@ class Ouvido:
         self.pausado = None  # threading.Event: quando ligado, o microfone é liberado
         self.capturando = threading.Event()  # ligado somente enquanto InputStream está aberto
         self.ultimo_erro = None
+        self.ultimo_stt = None
         self.nivel_atual = 0.0
         self.device_index = device_index
         self.device_id = device_id
@@ -485,6 +491,38 @@ class Ouvido:
             self.ultimo_erro = None
             seguranca.log.info("[voz] reconhecimento nativo")
             return texto.strip() or None
+        return None
+
+    def _motor_escuta(self):
+        """Motor principal: auto/groq (Groq grátis), google ou nativo."""
+        motor = str(getattr(config, "VOZ_MOTOR", "auto") or "auto").strip().lower()
+        return motor if motor in ("auto", "groq", "google", "nativo") else "auto"
+
+    def _tentar_remoto(self, pcm):
+        """Transcreve pela Groq. None quando não é remoto ou falhou de verdade.
+
+        Também devolve o resultado quando a Groq conclui que não houve fala:
+        nesse caso não vale gastar uma chamada no Google nem contar como
+        "não entendi" (o silêncio não pede recalibração).
+        """
+        if transcricao is None or self._motor_escuta() not in ("auto", "groq"):
+            return None
+        try:
+            resultado = transcricao.transcrever(pcm, self.FS)
+        except Exception as erro:
+            seguranca.log.warning(f"[stt] falha inesperada ({type(erro).__name__})")
+            return None
+        self.ultimo_stt = resultado
+        if resultado.get("texto"):
+            self.ultimo_erro = None
+            confianca = (resultado.get("confianca") or {}).get("nivel") or "?"
+            seguranca.log.info(
+                f"[stt] groq {float(resultado.get('latencia') or 0):.2f}s conf={confianca}")
+            return resultado
+        if resultado.get("motivo") == "sem_fala":
+            return resultado
+        if resultado.get("erro"):
+            seguranca.log.warning(f"[stt] Groq indisponível ({resultado['erro']})")
         return None
 
     def calibrar(self):
@@ -632,10 +670,17 @@ class Ouvido:
         pcm = self._gravar(0.2, max_seg=limite, silencio=limite, min_voz=1, gatilho=gatilho)
         if not pcm:
             return None
-        if self._preferir_nativo():
+        nativo_tentado = False
+        if self._motor_escuta() == "nativo" or self._preferir_nativo():
             nativo = self._tentar_nativo(pcm)
+            nativo_tentado = True
             if nativo:
                 return nativo
+        remoto = self._tentar_remoto(pcm)
+        if remoto:
+            if not remoto.get("texto"):
+                return None
+            return remoto["texto"]
         audio = sr.AudioData(pcm, self.FS, 2)
         t0 = time.perf_counter()
         try:
@@ -644,9 +689,10 @@ class Ouvido:
             seguranca.log.info(f"[tempo] reconhecimento de voz {time.perf_counter() - t0:.1f}s")
             return (texto or "").strip() or None
         except Exception as e:
-            nativo = self._tentar_nativo(pcm)
-            if nativo:
-                return nativo
+            if not nativo_tentado:
+                nativo = self._tentar_nativo(pcm)
+                if nativo:
+                    return nativo
             self.ultimo_erro = str(e)[:180]
             seguranca.log.warning(f"Reconhecimento manual falhou ({type(e).__name__})")
             return None
@@ -654,16 +700,30 @@ class Ouvido:
     def escutar_detalhado(self, espera=60):
         """Como escutar(), mas devolve todas as interpretações (para confirmar incerteza).
 
-        Retorna {"texto": str|None, "alternativas": [str], "erro": str|None}.
-        Nada aqui executa ação: quem decide é o núcleo.
+        Retorna {"texto": str|None, "alternativas": [str], "erro": str|None,
+                 "confianca": dict|None}. Nada aqui executa ação: quem decide é o núcleo.
         """
         pcm = self._gravar(espera)
         if not pcm:
-            return {"texto": None, "alternativas": [], "erro": None}
-        if self._preferir_nativo():
+            return {"texto": None, "alternativas": [], "erro": None, "confianca": None}
+        nativo_tentado = False
+        if self._motor_escuta() == "nativo" or self._preferir_nativo():
             nativo = self._tentar_nativo(pcm)
+            nativo_tentado = True
             if nativo:
-                return {"texto": nativo, "alternativas": [nativo], "erro": None}
+                return {"texto": nativo, "alternativas": [nativo], "erro": None,
+                        "confianca": None}
+        remoto = self._tentar_remoto(pcm)
+        if remoto:
+            texto = remoto.get("texto")
+            if not texto:
+                # Silêncio confirmado pela Groq: nada para o Google acrescentar.
+                return {"texto": None, "alternativas": [], "erro": None,
+                        "confianca": remoto.get("confianca")}
+            return {"texto": texto,
+                    "alternativas": remoto.get("alternativas") or [texto],
+                    "erro": None,
+                    "confianca": remoto.get("confianca")}
         audio = sr.AudioData(pcm, self.FS, 2)
         try:
             r = self.rec.recognize_google(audio, language="pt-BR", show_all=True)
@@ -675,16 +735,20 @@ class Ouvido:
                         alternativas.append(frase)
             self.ultimo_erro = None
             return {"texto": alternativas[0] if alternativas else None,
-                    "alternativas": alternativas[:3], "erro": None}
+                    "alternativas": alternativas[:3], "erro": None, "confianca": None}
         except sr.UnknownValueError:
             self.ultimo_erro = None
-            return {"texto": None, "alternativas": [], "erro": ERROS["nao_entendi"]}
+            return {"texto": None, "alternativas": [], "erro": ERROS["nao_entendi"],
+                    "confianca": None}
         except sr.RequestError:
-            nativo = self._tentar_nativo(pcm)
-            if nativo:
-                return {"texto": nativo, "alternativas": [nativo], "erro": None}
+            if not nativo_tentado:
+                nativo = self._tentar_nativo(pcm)
+                if nativo:
+                    return {"texto": nativo, "alternativas": [nativo], "erro": None,
+                            "confianca": None}
             self.ultimo_erro = ERROS["sem_internet"]
-            return {"texto": None, "alternativas": [], "erro": ERROS["sem_internet"]}
+            return {"texto": None, "alternativas": [], "erro": ERROS["sem_internet"],
+                    "confianca": None}
 
     def escutar(self, espera=60, curto=False):
         """Espera você falar. Devolve o texto (None se nada foi entendido).
@@ -695,10 +759,18 @@ class Ouvido:
             pcm = self._gravar(espera)
         if not pcm:
             return None
-        if self._preferir_nativo():
+        nativo_tentado = False
+        if self._motor_escuta() == "nativo" or self._preferir_nativo():
             nativo = self._tentar_nativo(pcm)
+            nativo_tentado = True
             if nativo:
                 return [nativo] if curto else nativo
+        remoto = self._tentar_remoto(pcm)
+        if remoto:
+            texto = remoto.get("texto")
+            if not texto:
+                return None
+            return [texto] if curto else texto
         audio = sr.AudioData(pcm, self.FS, 2)
         t0 = time.perf_counter()
         try:
@@ -715,9 +787,10 @@ class Ouvido:
             self.ultimo_erro = None
             return None
         except sr.RequestError as e:
-            nativo = self._tentar_nativo(pcm)
-            if nativo:
-                return [nativo] if curto else nativo
+            if not nativo_tentado:
+                nativo = self._tentar_nativo(pcm)
+                if nativo:
+                    return [nativo] if curto else nativo
             self.ultimo_erro = f"Reconhecimento de voz indisponível: {e}"
             seguranca.log.warning(f"Reconhecimento de voz falhou: {e}")
             print("[voz] Falha no reconhecimento (internet?)")

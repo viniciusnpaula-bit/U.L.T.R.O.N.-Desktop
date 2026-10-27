@@ -104,6 +104,13 @@ class MotorNativoTests(unittest.TestCase):
 class FallbackDoOuvidoTests(unittest.TestCase):
     """voz.py usa o nativo só quando configurado ou quando o Google falha."""
 
+    def setUp(self):
+        import voz
+        # Estes testes cobrem a cascata Google ↔ Windows, sem tocar na rede.
+        patcher = patch.object(voz.config, "VOZ_MOTOR", "google", create=True)
+        patcher.start()
+        self.addCleanup(patcher.stop)
+
     def _ouvido(self):
         import voz
         ouvido = voz.Ouvido.__new__(voz.Ouvido)
@@ -190,7 +197,8 @@ class FallbackDoOuvidoTests(unittest.TestCase):
                 patch.object(voz, "sr", fake_sr), patch.object(voz, "seguranca"):
             resultado = ouvido.escutar_detalhado()
         self.assertEqual(resultado, {"texto": "abrir a pasta",
-                                     "alternativas": ["abrir a pasta"], "erro": None})
+                                     "alternativas": ["abrir a pasta"], "erro": None,
+                                     "confianca": None})
 
 
 if __name__ == "__main__":

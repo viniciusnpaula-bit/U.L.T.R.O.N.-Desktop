@@ -147,6 +147,39 @@ def normalizar(texto: str) -> str:
     return sem_acento.lower()
 
 
+# O Whisper às vezes devolve o despertar grudado ("EIULTRON") ou sem o "Ei"
+# ("E ULTRON"). A normalização devolve sempre a forma canônica que o main.py
+# reconhece, sem tocar no restante da frase.
+_DESPERTAR_LIMPO = re.compile(
+    r"^\s*(?:ei|hey|oi|ouça|e aí)(?:\s*,\s*|\s+)"
+    r"(?:ultr[oa]n|ultrom|ultra\s*on|altron|utron|utrom)\b", re.IGNORECASE)
+_DESPERTAR_GRUDADO = re.compile(
+    r"\b(ei|hey|oi)(ultr[oa]n|ultrom|altron|utron|utrom)\b", re.IGNORECASE)
+_DESPERTAR_VARIANTE = re.compile(
+    r"\b(?:ei|hey|oi|ouça|e aí|e)\s*[,.]?\s*"
+    r"(?:ultr[oa]n|ultrom|ultra\s*on|altron|utron|utrom)\b", re.IGNORECASE)
+_DESPERTAR_SOZINHO = re.compile(
+    r"^\s*(?:ultr[oa]n|ultrom|ultra\s*on|altron|utron|utrom)\b", re.IGNORECASE)
+
+
+def normalizar_despertar(texto: str) -> str:
+    """Deixa o despertar sempre como "Ei, ULTRON", preservando o comando.
+
+    É idempotente: uma frase que já começa com "Ei, ULTRON" ou "Ei Ultron"
+    volta exatamente como veio (inclusive maiúsculas e pontuação).
+    """
+    original = str(texto or "")
+    if not original.strip():
+        return original
+    if _DESPERTAR_LIMPO.match(original):
+        return original
+    corrigido = _DESPERTAR_GRUDADO.sub("Ei, ULTRON", original, count=1)
+    corrigido = _DESPERTAR_VARIANTE.sub("Ei, ULTRON", corrigido, count=1)
+    if corrigido == original:
+        corrigido = _DESPERTAR_SOZINHO.sub("Ei, ULTRON", corrigido, count=1)
+    return corrigido
+
+
 def _parecido(token: str, alvo: str, corte: float) -> bool:
     if abs(len(token) - len(alvo)) > 2:
         return False

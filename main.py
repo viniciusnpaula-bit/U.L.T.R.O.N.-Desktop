@@ -296,6 +296,7 @@ def modo_voz(bandeja=False, entrada_teclado=True, stop_event=None,
                     publicar_estado("ouvindo")
                     texto = ouvido.escutar_manual()
                     if texto:
+                        texto = fala.normalizar_despertar(texto)
                         publicar_conversa("user", texto)
                         publicar_estado("processando")
                         resposta = responder_com_voz(texto, confirmar_voz, "voz")
@@ -311,6 +312,9 @@ def modo_voz(bandeja=False, entrada_teclado=True, stop_event=None,
                         pass
                 detalhe = ouvido.escutar_detalhado() if hasattr(ouvido, "escutar_detalhado") else {"texto": ouvido.escutar(), "alternativas": [], "erro": None}
                 texto = detalhe.get("texto")
+                if texto:
+                    # O Whisper pode devolver "EIULTRON"/"EIUTRON"; sem isso o WAKE não acha.
+                    texto = fala.normalizar_despertar(texto)
                 erro_reconhecimento = detalhe.get("erro") or getattr(ouvido, "ultimo_erro", None)
                 if erro_reconhecimento and str(erro_reconhecimento) == voz.ERROS.get("nao_entendi"):
                     # Só conta como "não entendi" quando houve fala e ela não foi
@@ -371,7 +375,7 @@ def modo_voz(bandeja=False, entrada_teclado=True, stop_event=None,
             if correcoes:
                 seguranca.log.info("[fala] " + ", ".join(f"{a}->{b}" for a, b in correcoes))
             alternativas = [fala.corrigir(a)[0] for a in (detalhe.get("alternativas") or [])]
-            incerteza = cerebro.interpretacao_incerta(cmd, alternativas)
+            incerteza = cerebro.interpretacao_incerta(cmd, alternativas, detalhe.get("confianca"))
             if incerteza.get("confirmar") and converter_confirmacao:
                 publicar_conversa("user", cmd)
                 if not converter_confirmacao(cmd, incerteza):

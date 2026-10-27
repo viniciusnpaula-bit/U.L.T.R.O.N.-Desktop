@@ -103,16 +103,57 @@ _ESCALADA = {
 _PARECIDOS = {"apaga": ("apaga", "abaga", "apagar"), "fecha": ("fecha", "feixa", "fexa"),
               "desliga": ("desliga", "dislida"), "apagar": ("apagar", "a pagar")}
 
+# Verbos que mudam algo no PC. Usados só quando a confiança da transcrição é
+# média: uma pergunta neutra não precisa de conferência, um comando precisa.
+_VERBOS_ACAO = set(_ESCALADA) | {
+    "abre", "abra", "abrir", "toca", "toque", "tocar", "inicia", "inicie",
+    "iniciar", "coloca", "coloque", "colocar", "aumenta", "aumente",
+    "aumentar", "diminui", "diminua", "diminuir", "ativa", "ative", "ativar",
+    "desativa", "desative", "desativar", "minimiza", "minimize", "minimizar",
+    "executa", "execute", "executar", "fechar", "desligar", "reiniciar",
+    "encerrar", "enviar", "mandar", "remover",
+}
 
-def interpretacao_incerta(texto, alternativas):
+
+def _tem_verbo_de_acao(texto) -> bool:
+    palavras = set(re.findall(r"[a-zà-öø-ÿ]+", str(texto or "").lower()))
+    return bool(palavras & _VERBOS_ACAO)
+
+
+def interpretacao_incerta(texto, alternativas, confianca=None):
     """Diz se a fala ouvida deve ser confirmada antes de agir.
 
-    Critérios objetivos (nada de adivinhar): (a) a segunda interpretação do
-    reconhecimento mudou uma palavra de ação; (b) a fala contém um verbo de
-    consequência e o reconhecimento ofereceu mais de uma versão.
+    Critérios objetivos (nada de adivinhar): (a) a confiança do motor de
+    transcrição caiu; (b) a segunda interpretação do reconhecimento mudou uma
+    palavra de ação; (c) a fala contém um verbo de consequência e o
+    reconhecimento ofereceu mais de uma versão.
     Devolve {"confirmar": bool, "motivo": str, "opcoes": [str]}.
     """
     opcoes = [str(a).strip() for a in (alternativas or []) if str(a).strip()]
+    if not opcoes and str(texto or "").strip():
+        opcoes = [str(texto).strip()]
+
+    modo = str(getattr(config, "VOZ_CONFERIR", "auto") or "auto").lower()
+    if modo == "nunca":
+        return {"confirmar": False, "motivo": "", "opcoes": opcoes[:3]}
+    if modo == "sempre":
+        return {"confirmar": True, "motivo": "conferência sempre ligada",
+                "opcoes": opcoes[:3]}
+
+    nivel = ""
+    motivo_confianca = ""
+    if isinstance(confianca, dict):
+        nivel = str(confianca.get("nivel") or "").lower()
+        motivo_confianca = str(confianca.get("motivo") or "").strip()
+    if nivel == "baixa":
+        return {"confirmar": True,
+                "motivo": motivo_confianca or "a transcrição saiu com pouca confiança",
+                "opcoes": opcoes[:3]}
+    if nivel == "media" and _tem_verbo_de_acao(texto):
+        return {"confirmar": True,
+                "motivo": "a transcrição saiu com confiança média e o comando age no PC",
+                "opcoes": opcoes[:3]}
+
     if len(opcoes) < 2:
         return {"confirmar": False, "motivo": "", "opcoes": opcoes[:3]}
     primeira = opcoes[0].lower()
