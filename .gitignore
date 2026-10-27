@@ -57,6 +57,9 @@ htmlcov/
 .coverage
 .coverage.*
 
+# --- Notas e planos internos do agente (locais, não versionar) ---
+.internal/
+
 # --- Outros temporários ---
 *.tmp
 *.temp
