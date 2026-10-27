@@ -1,0 +1,7 @@
+{
+  "database": "dolt",
+  "backend": "dolt",
+  "dolt_mode": "embedded",
+  "dolt_database": "ultron_repo",
+  "project_id": "a0c52e99-c5ec-483a-afae-daad046ccdfa"
+}
