@@ -28,8 +28,9 @@ dados/cofre.json
 dados/.cofre.chave
 
 # --- Segredos e ambiente adicionais ---
-.env.local
-.env.production
+.env.*
+!.env.example
+!**/.env.example
 secrets/
 *.key
 
