@@ -37,6 +37,15 @@ def corpo_ok(texto="Ei, ULTRON, abrir o Chrome!", avg=-0.291,
     }
 
 
+def pcm_fala(amostras=1600, amplitude=8000, freq=220):
+    """Tom dentro da faixa da voz: passa pela barreira de energia."""
+    import math
+    import struct
+    return b"".join(
+        struct.pack("<h", int(amplitude * math.sin(2 * math.pi * freq * i / 16000)))
+        for i in range(amostras))
+
+
 class WavTests(unittest.TestCase):
     def test_wav_e_16k_mono_16_bits(self):
         dados = transcricao.wav(b"\x00\x00" * 1600, 16000)
@@ -97,7 +106,19 @@ class ConfiancaTests(unittest.TestCase):
 class TranscreverTests(unittest.TestCase):
     def setUp(self):
         transcricao.reiniciar_disjuntor()
-        self.pcm = b"\x00\x00" * 1600
+        self.pcm = pcm_fala()
+
+    def test_silencio_puro_nao_gasta_requisicao(self):
+        with patch.dict(config.CHAVES, {"groq": "gsk_teste"}), \
+                patch.object(transcricao.requests, "post") as post:
+            r = transcricao.transcrever(b"\x00\x00" * 1600)
+        self.assertIsNone(r["texto"])
+        self.assertEqual(r["motivo"], "sem_fala")
+        post.assert_not_called()
+
+    def test_energia_distingue_silencio_de_fala(self):
+        self.assertEqual(transcricao.energia(b"\x00\x00" * 1600), 0.0)
+        self.assertGreater(transcricao.energia(pcm_fala()), 1000.0)
 
     def test_sem_chave_nao_chama_api(self):
         with patch.dict(config.CHAVES, {"groq": ""}), \

@@ -15,6 +15,7 @@ import io
 import threading
 import time
 import wave
+from array import array
 
 import requests
 
@@ -34,6 +35,9 @@ LIMITE_COMPRESSAO = 2.40
 TIMEOUT = (3.05, 10.0)
 MAX_FALHAS = 2
 DESCANSO = 300.0
+# RMS mínimo (int16) para valer uma requisição. Fala normal fica acima de 150;
+# silêncio digital fica em 0. Evita gastar cota e evita alucinação do Whisper.
+LIMITE_ENERGIA = 50.0
 
 _trava = threading.Lock()
 _falhas = 0
@@ -85,6 +89,15 @@ def wav(pcm: bytes, fs: int = 16000) -> bytes:
         arquivo.setframerate(int(fs) or 16000)
         arquivo.writeframes(pcm)
     return buffer.getvalue()
+
+
+def energia(pcm: bytes) -> float:
+    """RMS do PCM int16. Barato e suficiente para separar silêncio de fala."""
+    amostras = array("h")
+    amostras.frombytes(pcm[:len(pcm) - len(pcm) % 2])
+    if not amostras:
+        return 0.0
+    return (sum(a * a for a in amostras) / len(amostras)) ** 0.5
 
 
 def montar_prompt() -> str:
@@ -178,6 +191,9 @@ def transcrever(pcm: bytes, fs: int = 16000) -> dict:
         return _vazio("sem_chave")
     if _disjuntor_aberto():
         return _vazio("disjuntor")
+    if energia(pcm) < LIMITE_ENERGIA:
+        # Silêncio puro: não gasta cota e evita a alucinação do Whisper.
+        return _vazio(motivo="sem_fala")
 
     dados = {
         "model": MODELO,
