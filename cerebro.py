@@ -376,11 +376,29 @@ def _stream_frases(msgs, provedor):
     extra = {}
     if config.REASONING and provedor == "groq" and "gpt-oss" in modelo and provedor not in _sem_reasoning:
         extra["extra_body"] = {"reasoning_effort": config.REASONING}
-    fluxo = _cliente(provedor).chat.completions.create(
-        model=modelo, messages=msgs, temperature=0.6, stream=True, timeout=30, **extra)
+
+    def abrir_primeiro():
+        fluxo = _cliente(provedor).chat.completions.create(
+            model=modelo, messages=msgs, temperature=0.6, stream=True, timeout=30, **extra)
+        try:
+            return fluxo, next(fluxo, None)
+        except Exception:
+            getattr(fluxo, "close", lambda: None)()
+            raise
+
+    # Só repete antes de qualquer texto sair; repetir no meio duplicaria a fala.
+    prazo = time.monotonic() + config.IA_TEMPO_MAX_TOTAL
+    fluxo, primeiro = _com_backoff(provedor, abrir_primeiro, prazo)
+
     acumulado = ""
     enviado = 0
-    for pedaco in fluxo:
+
+    def pedacos():
+        if primeiro is not None:
+            yield primeiro
+        yield from fluxo
+
+    for pedaco in pedacos():
         escolhas = getattr(pedaco, "choices", None) or []
         if not escolhas:
             continue

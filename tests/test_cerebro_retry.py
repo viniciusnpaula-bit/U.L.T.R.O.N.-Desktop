@@ -342,5 +342,90 @@ class VisaoTests(unittest.TestCase):
         self.assertEqual(cliente.chamadas, 2)
 
 
+def pedaco(texto):
+    return types.SimpleNamespace(
+        choices=[types.SimpleNamespace(delta=types.SimpleNamespace(content=texto))])
+
+
+class StreamTests(unittest.TestCase):
+    def setUp(self):
+        cerebro.esquecer_clientes()
+
+    def _config(self):
+        return patch.multiple(
+            cerebro.config,
+            IA_TENTATIVAS=4,
+            IA_BACKOFF_BASE=1.0,
+            IA_BACKOFF_TETO=16.0,
+            IA_BACKOFF_JITTER=0.0,
+            IA_TEMPO_MAX_PROVEDOR=45.0,
+            IA_TEMPO_MAX_TOTAL=60.0,
+            REASONING="",
+        )
+
+    def _cliente(self, abrir):
+        return types.SimpleNamespace(
+            chat=types.SimpleNamespace(
+                completions=types.SimpleNamespace(create=abrir)))
+
+    def test_repete_quando_falha_antes_do_primeiro_pedaco(self):
+        chamadas = []
+
+        def abrir(**_kwargs):
+            chamadas.append(1)
+            if len(chamadas) == 1:
+                raise TimeoutError()
+            return iter([pedaco("Oi, senhor. ")])
+
+        with self._config(), \
+                patch.object(cerebro, "_cliente", return_value=self._cliente(abrir)), \
+                patch.object(cerebro.time, "sleep", lambda _s: None):
+            frases = list(cerebro._stream_frases([], "gemini"))
+
+        self.assertEqual(chamadas, [1, 1])
+        self.assertEqual(frases, ["Oi, senhor."])
+
+    def test_prazo_total_impede_retry_do_stream(self):
+        chamadas = []
+
+        def abrir(**_kwargs):
+            chamadas.append(1)
+            raise TimeoutError()
+
+        with patch.multiple(
+                cerebro.config,
+                IA_TENTATIVAS=4, IA_BACKOFF_BASE=1.0, IA_BACKOFF_TETO=16.0,
+                IA_BACKOFF_JITTER=0.0, IA_TEMPO_MAX_PROVEDOR=45.0,
+                IA_TEMPO_MAX_TOTAL=0.0, REASONING=""), \
+                patch.object(cerebro, "_cliente", return_value=self._cliente(abrir)), \
+                patch.object(cerebro.time, "sleep") as dormir:
+            with self.assertRaises(TimeoutError):
+                list(cerebro._stream_frases([], "gemini"))
+
+        self.assertEqual(chamadas, [1])
+        self.assertEqual(dormir.call_count, 0)
+
+    def test_nao_repete_depois_do_primeiro_pedaco(self):
+        chamadas = []
+
+        def fluxo():
+            yield pedaco("Um. ")
+            raise TimeoutError()
+
+        def abrir(**_kwargs):
+            chamadas.append(1)
+            return fluxo()
+
+        with self._config(), \
+                patch.object(cerebro, "_cliente", return_value=self._cliente(abrir)), \
+                patch.object(cerebro.time, "sleep", lambda _s: None):
+            gerador = cerebro._stream_frases([], "gemini")
+            self.assertEqual(next(gerador), "Um.")
+            with self.assertRaises(TimeoutError):
+                next(gerador)
+
+        self.assertEqual(chamadas, [1])
+
+
 if __name__ == "__main__":
     unittest.main()
