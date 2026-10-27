@@ -323,35 +323,44 @@ def _modelo_inexistente(e):
 
 def _chamar(msgs):
     erros = []
+    prazo = time.monotonic() + config.IA_TEMPO_MAX_TOTAL
     for p in _provedores_com_chave():
-        for tentativa in range(2):
+        if not (_escolhido.get(p) or config.MODELOS.get(p)):
+            continue
+        if time.monotonic() >= prazo:
+            erros.append(f"{p}: orçamento total de {config.IA_TEMPO_MAX_TOTAL:.0f}s esgotado")
+            break
+        # Duas rodadas: a segunda só acontece se a primeira revelou um ajuste
+        # necessário (modelo renomeado ou reasoning_effort recusado).
+        for _ in range(2):
             modelo = _escolhido.get(p) or config.MODELOS.get(p)
-            if not modelo:
-                break
             extra = {}
             if config.REASONING and p == "groq" and "gpt-oss" in modelo and p not in _sem_reasoning:
                 extra["extra_body"] = {"reasoning_effort": config.REASONING}   # raciocinar menos = responder mais rápido
-            try:
-                r = _cliente(p).chat.completions.create(
+
+            def tentar(p=p, modelo=modelo, extra=extra):
+                return _cliente(p).chat.completions.create(
                     model=modelo, messages=msgs, tools=ferramentas.schemas(),
                     tool_choice="auto", temperature=0.6, **extra)
-                return r.choices[0].message
+
+            try:
+                return _com_backoff(p, tentar, prazo).choices[0].message
             except Exception as e:
-                seguranca.log.warning(f"Provedor {p} (modelo {modelo}) falhou: {e}")
+                seguranca.log.warning(f"Provedor {p} (modelo {modelo}) falhou: {_resumo_erro(e)}")
                 if extra and "reasoning" in str(e).lower():
                     _sem_reasoning.add(p)    # a API não aceitou: tenta de novo sem o parâmetro
                     continue
-                if tentativa == 0 and _modelo_inexistente(e):
+                if _modelo_inexistente(e):
                     try:
                         achado = _descobrir_modelo(p)
                     except Exception as e2:
-                        seguranca.log.warning(f"Não consegui listar modelos de {p}: {e2}")
+                        seguranca.log.warning(f"Não consegui listar modelos de {p}: {_resumo_erro(e2)}")
                         achado = None
                     if achado and achado != modelo:
                         seguranca.log.info(f"Usando automaticamente o modelo {achado} em {p}")
                         _escolhido[p] = achado
                         continue
-                erros.append(f"{p}: {e}")
+                erros.append(f"{p}: {_resumo_erro(e)}")
                 break
     raise RuntimeError(" | ".join(erros) or "Nenhuma chave de API configurada.")
 

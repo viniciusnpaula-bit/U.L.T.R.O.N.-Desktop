@@ -178,5 +178,126 @@ class BackoffTests(unittest.TestCase):
         self.assertEqual(construtor.call_args.kwargs["max_retries"], 0)
 
 
+def resposta(texto="ok"):
+    return types.SimpleNamespace(choices=[types.SimpleNamespace(
+        message=types.SimpleNamespace(content=texto, tool_calls=[]))])
+
+
+class ClienteFalso:
+    def __init__(self, efeitos):
+        self.efeitos = list(efeitos)
+        self.chamadas = 0
+        self.chat = types.SimpleNamespace(
+            completions=types.SimpleNamespace(create=self.create))
+
+    def create(self, **_kwargs):
+        self.chamadas += 1
+        efeito = self.efeitos.pop(0)
+        if isinstance(efeito, Exception):
+            raise efeito
+        return resposta(efeito)
+
+
+class ChamarTests(unittest.TestCase):
+    def setUp(self):
+        cerebro.esquecer_clientes()
+
+    def _config(self):
+        return patch.multiple(
+            cerebro.config,
+            IA_TENTATIVAS=4,
+            IA_BACKOFF_BASE=1.0,
+            IA_BACKOFF_TETO=16.0,
+            IA_BACKOFF_JITTER=0.0,
+            IA_TEMPO_MAX_PROVEDOR=45.0,
+            IA_TEMPO_MAX_TOTAL=60.0,
+            REASONING="",
+        )
+
+    def test_429_repete_no_mesmo_provedor_antes_de_trocar(self):
+        cliente = ClienteFalso([ErroHTTP(429), ErroHTTP(500), "ok"])
+        usados = []
+
+        def obter(p):
+            usados.append(p)
+            return cliente
+
+        with self._config(), \
+                patch.object(cerebro, "_provedores_com_chave", return_value=["groq", "gemini"]), \
+                patch.object(cerebro, "_cliente", side_effect=obter), \
+                patch.object(cerebro.ferramentas, "schemas", return_value=[]), \
+                patch.object(cerebro.time, "sleep", lambda _s: None):
+            msg = cerebro._chamar([])
+
+        self.assertEqual(msg.content, "ok")
+        self.assertEqual(cliente.chamadas, 3)
+        self.assertEqual(usados, ["groq", "groq", "groq"])
+
+    def test_erro_permanente_troca_de_provedor(self):
+        groq = ClienteFalso([ErroHTTP(401)])
+        gemini = ClienteFalso(["ok"])
+        mapa = {"groq": groq, "gemini": gemini}
+
+        with self._config(), \
+                patch.object(cerebro, "_provedores_com_chave", return_value=["groq", "gemini"]), \
+                patch.object(cerebro, "_cliente", side_effect=lambda p: mapa[p]), \
+                patch.object(cerebro.ferramentas, "schemas", return_value=[]), \
+                patch.object(cerebro.time, "sleep", lambda _s: None):
+            msg = cerebro._chamar([])
+
+        self.assertEqual(msg.content, "ok")
+        self.assertEqual(groq.chamadas, 1)
+        self.assertEqual(gemini.chamadas, 1)
+
+    def test_orcamento_total_impede_novo_provedor(self):
+        cliente = ClienteFalso([])
+
+        with patch.multiple(
+                cerebro.config,
+                IA_TENTATIVAS=4, IA_BACKOFF_BASE=1.0, IA_BACKOFF_TETO=16.0,
+                IA_BACKOFF_JITTER=0.0, IA_TEMPO_MAX_PROVEDOR=45.0,
+                IA_TEMPO_MAX_TOTAL=0.0, REASONING=""), \
+                patch.object(cerebro, "_provedores_com_chave", return_value=["groq", "gemini"]), \
+                patch.object(cerebro, "_cliente", return_value=cliente), \
+                patch.object(cerebro.ferramentas, "schemas", return_value=[]):
+            with self.assertRaises(RuntimeError):
+                cerebro._chamar([])
+
+        self.assertEqual(cliente.chamadas, 0)
+
+    def test_404_de_modelo_descobre_e_repete(self):
+        cliente = ClienteFalso([ErroHTTP(404, texto="404 model not found"), "ok"])
+
+        with self._config(), \
+                patch.object(cerebro, "_provedores_com_chave", return_value=["groq"]), \
+                patch.object(cerebro, "_cliente", return_value=cliente), \
+                patch.object(cerebro, "_descobrir_modelo", return_value="modelo-novo") as descobrir, \
+                patch.object(cerebro.ferramentas, "schemas", return_value=[]):
+            msg = cerebro._chamar([])
+
+        self.assertEqual(msg.content, "ok")
+        self.assertEqual(descobrir.call_count, 1)
+        self.assertEqual(cerebro._escolhido["groq"], "modelo-novo")
+        self.assertEqual(cliente.chamadas, 2)
+
+    def test_reasoning_recusado_repete_sem_o_parametro(self):
+        cliente = ClienteFalso([ErroHTTP(400, texto="reasoning_effort not supported"), "ok"])
+
+        with patch.multiple(
+                cerebro.config,
+                IA_TENTATIVAS=4, IA_BACKOFF_BASE=1.0, IA_BACKOFF_TETO=16.0,
+                IA_BACKOFF_JITTER=0.0, IA_TEMPO_MAX_PROVEDOR=45.0,
+                IA_TEMPO_MAX_TOTAL=60.0,
+                REASONING="low", MODELOS={"groq": "openai/gpt-oss-120b"}), \
+                patch.object(cerebro, "_provedores_com_chave", return_value=["groq"]), \
+                patch.object(cerebro, "_cliente", return_value=cliente), \
+                patch.object(cerebro.ferramentas, "schemas", return_value=[]):
+            msg = cerebro._chamar([])
+
+        self.assertEqual(msg.content, "ok")
+        self.assertIn("groq", cerebro._sem_reasoning)
+        self.assertEqual(cliente.chamadas, 2)
+
+
 if __name__ == "__main__":
     unittest.main()
