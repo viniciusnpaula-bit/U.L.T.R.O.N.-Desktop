@@ -299,5 +299,48 @@ class ChamarTests(unittest.TestCase):
         self.assertEqual(cliente.chamadas, 2)
 
 
+class VisaoTests(unittest.TestCase):
+    def setUp(self):
+        cerebro.esquecer_clientes()
+
+    def _config(self):
+        return patch.multiple(
+            cerebro.config,
+            IA_TENTATIVAS=4,
+            IA_BACKOFF_BASE=1.0,
+            IA_BACKOFF_TETO=16.0,
+            IA_BACKOFF_JITTER=0.0,
+            IA_TEMPO_MAX_PROVEDOR=45.0,
+            IA_TEMPO_MAX_TOTAL=60.0,
+            MODELOS_VISAO={"gemini": "gemini-2.0-flash"},
+        )
+
+    def test_429_repete_no_mesmo_provedor_de_visao(self):
+        cliente = ClienteFalso([ErroHTTP(429), "uma xícara"])
+
+        with self._config(), \
+                patch.object(cerebro, "_provedores_com_chave", return_value=["gemini"]), \
+                patch.object(cerebro, "_cliente", return_value=cliente), \
+                patch.object(cerebro.time, "sleep", lambda _s: None):
+            texto = cerebro.descrever_imagem(b"jpeg", "o que é isto?")
+
+        self.assertEqual(texto, "uma xícara")
+        self.assertEqual(cliente.chamadas, 2)
+
+    def test_404_de_modelo_de_visao_descobre_e_repete(self):
+        cliente = ClienteFalso([ErroHTTP(404, texto="404 model not found"), "ok"])
+
+        with self._config(), \
+                patch.object(cerebro, "_provedores_com_chave", return_value=["gemini"]), \
+                patch.object(cerebro, "_cliente", return_value=cliente), \
+                patch.object(cerebro, "_descobrir_visao", return_value="visao-nova") as descobrir:
+            texto = cerebro.descrever_imagem(b"jpeg", "o que é isto?")
+
+        self.assertEqual(texto, "ok")
+        self.assertEqual(descobrir.call_count, 1)
+        self.assertEqual(cerebro._visao_escolhido["gemini"], "visao-nova")
+        self.assertEqual(cliente.chamadas, 2)
+
+
 if __name__ == "__main__":
     unittest.main()
