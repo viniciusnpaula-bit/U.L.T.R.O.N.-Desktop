@@ -11,9 +11,11 @@ import java.net.URL
 /**
  * Calls the protected ULTRON backend. No provider credential is stored in the Android app.
  * Configure the HTTPS base URL with -PULTRON_AI_BASE_URL=https://your-service.example
+ * and the shared token with -PULTRON_AI_TOKEN=...
  */
 class ProtectedBackendAIProvider(
     private val baseUrl: String,
+    private val token: String,
     private val connectTimeoutMillis: Int = 5_000,
     private val readTimeoutMillis: Int = 25_000
 ) : AIProvider {
@@ -22,6 +24,7 @@ class ProtectedBackendAIProvider(
     override suspend fun generateReply(input: String, context: List<String>): Result<String> =
         runCatching {
             require(input.isNotBlank() && input.length <= 4_000) { "Mensagem inválida." }
+            require(token.isNotBlank()) { "O token do serviço de IA não foi configurado." }
             val normalized = baseUrl.trim().trimEnd('/')
             require(normalized.isNotEmpty()) { "A URL do serviço de IA não foi configurada." }
             val uri = URI(normalized)
@@ -36,6 +39,7 @@ class ProtectedBackendAIProvider(
                     doOutput = true
                     setRequestProperty("Content-Type", "application/json; charset=utf-8")
                     setRequestProperty("Accept", "application/json")
+                    setRequestProperty("X-Ultron-Token", token)
                 }
                 try {
                     val history = JSONArray()

@@ -2,6 +2,7 @@
 from __future__ import annotations
 
 import os
+import secrets
 import time
 from collections import defaultdict, deque
 from typing import Literal
@@ -12,6 +13,7 @@ from pydantic import BaseModel, Field
 
 GROQ_API_KEY = os.getenv("GROQ_API_KEY", "").strip()
 GROQ_MODEL = os.getenv("GROQ_MODEL", "openai/gpt-oss-120b").strip()
+ULTRON_API_TOKEN = os.getenv("ULTRON_API_TOKEN", "").strip()
 MAX_HISTORY = 12
 MAX_MESSAGE_CHARS = 4000
 MAX_CONTEXT_CHARS = 12000
@@ -38,6 +40,13 @@ def health() -> dict[str, str]:
     # Never expose secrets or upstream account details in health responses.
     return {"status": "ok", "ai_configured": str(bool(GROQ_API_KEY)).lower()}
 
+def _authorize(request: Request) -> None:
+    # Fail closed: sem token configurado no servidor, ninguém entra.
+    if not ULTRON_API_TOKEN:
+        raise HTTPException(status_code=503, detail="Serviço de IA não configurado no servidor.")
+    if not secrets.compare_digest(request.headers.get("x-ultron-token", ""), ULTRON_API_TOKEN):
+        raise HTTPException(status_code=401, detail="Não autorizado.")
+
 def _rate_limit(request: Request) -> None:
     # Only trust a direct peer address. Do not trust caller-controlled X-Forwarded-For here.
     peer = request.client.host if request.client else "unknown"
@@ -52,6 +61,7 @@ def _rate_limit(request: Request) -> None:
 @app.post("/v1/chat", response_model=ChatResponse)
 async def chat(payload: ChatRequest, request: Request) -> ChatResponse:
     _rate_limit(request)
+    _authorize(request)
     if not GROQ_API_KEY:
         raise HTTPException(status_code=503, detail="Serviço de IA não configurado no servidor.")
 

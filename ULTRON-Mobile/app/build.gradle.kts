@@ -10,6 +10,12 @@ val ultronAiBaseUrl = providers.gradleProperty("ULTRON_AI_BASE_URL")
     .replace("\\", "\\\\")
     .replace("\"", "\\\"")
 
+val ultronAiToken = providers.gradleProperty("ULTRON_AI_TOKEN")
+    .orElse(providers.environmentVariable("ULTRON_AI_TOKEN"))
+    .getOrElse("")
+    .replace("\\", "\\\\")
+    .replace("\"", "\\\"")
+
 android {
     namespace = "br.com.ultron.mobile"
     compileSdk = 35
@@ -22,6 +28,7 @@ android {
         versionName = "0.1.0"
         testInstrumentationRunner = "androidx.test.runner.AndroidJUnitRunner"
         buildConfigField("String", "ULTRON_AI_BASE_URL", "\"$ultronAiBaseUrl\"")
+        buildConfigField("String", "ULTRON_AI_TOKEN", "\"$ultronAiToken\"")
     }
 
     buildFeatures {

@@ -37,14 +37,14 @@ data class ChatUiState(
     ),
     val input: String = "",
     val isProcessing: Boolean = false,
-    val notice: String? = if (BuildConfig.ULTRON_AI_BASE_URL.isBlank()) "IA online pendente: configure a URL HTTPS do backend. Comandos locais funcionam sem o PC." else "Backend de IA configurado."
+    val notice: String? = if (BuildConfig.ULTRON_AI_BASE_URL.isBlank() || BuildConfig.ULTRON_AI_TOKEN.isBlank()) "IA online pendente: configure a URL HTTPS e o token do backend. Comandos locais funcionam sem o PC." else "Backend de IA configurado."
 )
 
 class UltronViewModel(application: Application) : AndroidViewModel(application) {
     private val engine: ConversationEngine = DefaultConversationEngine(
         localRouter = BasicLocalCommandRouter(),
         connectivity = AndroidConnectivityMonitor(application),
-        aiProvider = ProtectedBackendAIProvider(BuildConfig.ULTRON_AI_BASE_URL)
+        aiProvider = ProtectedBackendAIProvider(BuildConfig.ULTRON_AI_BASE_URL, BuildConfig.ULTRON_AI_TOKEN)
     )
 
     private val _state = MutableStateFlow(ChatUiState())
