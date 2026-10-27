@@ -71,6 +71,20 @@ VOZ_RATE = _env("VOZ_RATE", "+0%")
 LIMIAR_VOZ = float(_env("LIMIAR_VOZ", "0") or 0)
 SILENCIO_FIM = float(_env("SILENCIO_FIM", "0.5") or 0.5)   # segundos de silêncio que encerram sua fala
 REASONING = _env("REASONING_EFFORT", "low").lower()        # "low" = IA mais rápida; vazio desliga
+# Retry das chamadas de IA: tentativas por provedor, backoff exponencial com
+# jitter e um teto de tempo total por provedor (o Ultron responde por voz).
+def _num_env(nome, padrao, tipo=float):
+    try:
+        return tipo(_env(nome, str(padrao)) or padrao)
+    except ValueError:
+        return padrao
+
+IA_TENTATIVAS = max(1, _num_env("IA_TENTATIVAS", 4, int))
+IA_BACKOFF_BASE = max(0.0, _num_env("IA_BACKOFF_BASE", 1.0))
+IA_BACKOFF_TETO = max(0.0, _num_env("IA_BACKOFF_TETO", 16.0))
+IA_BACKOFF_JITTER = min(1.0, max(0.0, _num_env("IA_BACKOFF_JITTER", 0.5)))
+IA_TEMPO_MAX_PROVEDOR = max(1.0, _num_env("IA_TEMPO_MAX_PROVEDOR", 45.0))
+IA_TEMPO_MAX_TOTAL = max(1.0, _num_env("IA_TEMPO_MAX_TOTAL", 60.0))
 # Quantas mensagens do histórico entram em cada resposta (menos = resposta mais rápida).
 try:
     HISTORICO_MSGS = max(2, int(_env("HISTORICO_MSGS", "12") or 12))

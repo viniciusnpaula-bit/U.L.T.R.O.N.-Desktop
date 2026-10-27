@@ -2,10 +2,14 @@
 import base64
 import datetime
 import json
+import random
 import re
 import threading
+import time
 
-from openai import OpenAI
+from openai import (
+    APIConnectionError, APITimeoutError, InternalServerError, OpenAI, RateLimitError,
+)
 
 import autoconhecimento
 import config
@@ -87,9 +91,69 @@ def _cliente(p):
     cliente = _clientes.get(p)
     if cliente is None:
         cliente = OpenAI(api_key=config.CHAVES.get(p, ""), base_url=config.URLS[p],
-                         timeout=15, max_retries=1)
+                         timeout=15, max_retries=0)
         _clientes[p] = cliente
     return cliente
+
+
+def _transitorio(erro):
+    """Diz se repetir a mesma chamada pode resolver (429, 5xx, timeout, conexão)."""
+    if isinstance(erro, (RateLimitError, APITimeoutError, APIConnectionError,
+                         InternalServerError, TimeoutError, ConnectionError)):
+        return True
+    status = getattr(erro, "status_code", None)
+    return isinstance(status, int) and (status in (408, 409, 429) or 500 <= status < 600)
+
+
+def _retry_after(erro):
+    """Segundos pedidos pelo provedor no cabeçalho Retry-After, se houver."""
+    try:
+        return float(erro.response.headers.get("retry-after"))
+    except (AttributeError, TypeError, ValueError):
+        return None
+
+
+def _resumo_erro(erro):
+    """Identificação segura para log: tipo + status, nunca o corpo da resposta."""
+    status = getattr(erro, "status_code", None)
+    return f"{type(erro).__name__} {status}" if status else type(erro).__name__
+
+
+def _espera(tentativa, retry_after=None):
+    """Espera exponencial: base * 2^tentativa, com jitter e teto."""
+    teto = config.IA_BACKOFF_TETO
+    if retry_after is not None:
+        return max(0.0, min(retry_after, teto))
+    atraso = config.IA_BACKOFF_BASE * (2 ** tentativa)
+    return min(teto, atraso + random.uniform(0, atraso * config.IA_BACKOFF_JITTER))
+
+
+def _com_backoff(provedor, tentar, prazo=None):
+    """Chama `tentar()` repetindo erros transitórios com backoff exponencial.
+
+    `prazo` é o limite total da chamada (todos os provedores); sem ele, vale só
+    o orçamento por provedor.
+    """
+    agora = time.monotonic()
+    limite = agora + config.IA_TEMPO_MAX_PROVEDOR
+    if prazo is not None:
+        limite = min(limite, prazo)
+    for tentativa in range(config.IA_TENTATIVAS):
+        try:
+            return tentar()
+        except Exception as e:
+            if seguranca.parada.is_set():
+                raise
+            if not _transitorio(e) or tentativa + 1 >= config.IA_TENTATIVAS:
+                raise
+            espera = _espera(tentativa, _retry_after(e))
+            if time.monotonic() + espera > limite:
+                raise
+            seguranca.log.warning(
+                f"{provedor}: tentativa {tentativa + 1}/{config.IA_TENTATIVAS} falhou "
+                f"({_resumo_erro(e)}); repetindo em {espera:.1f}s")
+            time.sleep(espera)
+    raise RuntimeError(f"{provedor}: nenhuma tentativa executada")
 
 
 # Palavras que mudam o resultado de uma ação: se a fala tem homófono provável aqui,
