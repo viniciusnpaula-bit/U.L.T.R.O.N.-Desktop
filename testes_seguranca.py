@@ -13,6 +13,7 @@ import config
 import confirmacao
 import ferramentas
 import seguranca
+import sessao
 import teclado
 import telegram_bot
 
@@ -69,6 +70,7 @@ class Base(unittest.TestCase):
         CHAMADAS.clear()
         escrever_config()
         config.PIN = ""
+        sessao.bloquear()          # a ordem dos testes nunca deixa uma sessão aberta vazar
 
     def rodar(self, nome, args, conf, origem="teste"):
         return ferramentas.executar(nome, args, conf, origem)
@@ -489,6 +491,76 @@ class T15_Logs(Base):
             self.assertNotIn(chave, txt)
             self.assertNotIn(pin, txt)
         config.CHAVES["groq"], config.PIN = "", ""
+
+
+class T17_SessaoDesbloqueada(Base):
+    def setUp(self):
+        super().setUp()
+        config.PIN = "2468"
+        sessao.desbloquear("pin")
+
+    def tearDown(self):
+        sessao.bloquear()
+        config.PIN = ""
+
+    def test_alto_local_reversivel_executa_sem_confirmacao(self):
+        c = Conf(False)
+        self.rodar("pressionar_tecla", {"teclas": "alt+f4"}, c, origem="desktop")
+        self.assertEqual(c.pedidos, [])
+        self.assertTrue(self.executou("pressionar_tecla"))
+
+    def test_alto_de_outra_origem_continua_confirmando(self):
+        for origem in ("telegram", "fluxo", "teste", "desconhecida"):
+            c = Conf(False)
+            self.rodar("pressionar_tecla", {"teclas": "alt+f4"}, c, origem=origem)
+            self.assertEqual(len(c.pedidos), 1, origem)
+            self.assertFalse(self.executou("pressionar_tecla"), origem)
+            CHAMADAS.clear()
+
+    def test_irreversiveis_confirmam_sem_pin(self):
+        casos = (("desligar_pc", {}), ("reiniciar_pc", {}),
+                 ("apagar_arquivo", {"caminho": str(PERMITIDO / "x.txt")}))
+        for nome, args in casos:
+            c = Conf(True)
+            self.rodar(nome, args, c, origem="desktop")
+            self.assertEqual(len(c.pedidos), 1, nome)
+            self.assertFalse(c.pedidos[0]["exige_pin"], nome)
+            self.assertTrue(self.executou(nome), nome)
+            CHAMADAS.clear()
+
+    def test_privacidade_continua_confirmando_mesmo_desbloqueado(self):
+        for nome in sorted(seguranca.SEMPRE_CONFIRMAR):
+            cls = seguranca.Classificacao(seguranca.ALTO)
+            self.assertEqual(seguranca.autorizar(cls, nome, "desktop"),
+                             (seguranca.CONFIRM, "high_risk_action"), nome)
+
+    def test_critico_confirma_e_nao_pede_pin(self):
+        c = Conf(True)
+        self.rodar("executar_comando", {"comando": "ipconfig /all"}, c, origem="desktop")
+        self.assertEqual(len(c.pedidos), 1)
+        self.assertEqual(c.pedidos[0]["risco"], "CRITICO")
+        self.assertFalse(c.pedidos[0]["exige_pin"])
+
+    def test_allowlist_e_comando_bloqueado_continuam_valendo(self):
+        r = self.rodar("apagar_arquivo", {"caminho": "C:\\Windows\\x"}, Conf(True), origem="desktop")
+        self.assertIn("NEGADA", r)
+        r = self.rodar("executar_comando", {"comando": "powershell -Command dir"}, Conf(True), origem="desktop")
+        self.assertIn("NEGADA", r)
+
+    def test_bloqueado_volta_a_confirmar(self):
+        sessao.bloquear()
+        c = Conf(False)
+        self.rodar("pressionar_tecla", {"teclas": "alt+f4"}, c, origem="desktop")
+        self.assertEqual(len(c.pedidos), 1)
+
+    def test_novo_pedido_desconta_pin_so_nas_origens_locais(self):
+        cls = seguranca.Classificacao(seguranca.CRITICO)
+        for origem in ("desktop", "voz", "terminal"):
+            pedido = seguranca.novo_pedido("executar_comando", {}, cls, origem)
+            self.assertFalse(pedido["exige_pin"], origem)
+        for origem in ("telegram", "fluxo", "teste", "desconhecida"):
+            pedido = seguranca.novo_pedido("executar_comando", {}, cls, origem)
+            self.assertTrue(pedido["exige_pin"], origem)
 
 
 if __name__ == "__main__":

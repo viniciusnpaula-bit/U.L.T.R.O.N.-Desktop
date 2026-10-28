@@ -13,6 +13,10 @@ sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
 
 from desktop_runtime import DesktopRuntime
 
+import config
+import sessao
+import desktop_runtime
+
 
 class FakeMain:
     def __init__(self):
@@ -52,7 +56,17 @@ class RuntimeTests(unittest.TestCase):
             redigir=lambda text: text,
             parada=threading.Event(),
             parar_tudo=lambda: None,
+            IRREVERSIVEIS=frozenset({"executar_comando", "apagar_arquivo"}),
         )
+        self.ocupado = type("Ocupado", (Exception,), {})
+        self.biometria = types.SimpleNamespace(
+            Ocupado=self.ocupado,
+            disponivel=lambda: {"disponivel": False, "motivo": "Nenhum sensor de Windows Hello neste PC"},
+            verificar=lambda: False,
+        )
+        self.memoria = types.SimpleNamespace(
+            status_criptografia=lambda: {"cifrado": True, "algoritmo": "AES-256-GCM",
+                                         "chave": "DPAPI", "migrado": True})
         self.calls = []
         self.active = 0
         self.max_active = 0
@@ -96,13 +110,14 @@ class RuntimeTests(unittest.TestCase):
         self.voz = types.SimpleNamespace(falar=falar)
         self.modules = patch.dict(sys.modules, {
             "main": self.main, "cerebro": self.brain, "seguranca": self.security,
-            "voz": self.voz,
+            "voz": self.voz, "biometria": self.biometria, "memoria": self.memoria,
         })
         self.modules.start()
         self.runtime = DesktopRuntime()
         self.runtime.start()
 
     def tearDown(self):
+        sessao.bloquear()
         self.runtime.shutdown()
         self.modules.stop()
 
@@ -249,6 +264,104 @@ class RuntimeTests(unittest.TestCase):
         results = self.events_until(lambda items: any(e.get("type") == "command_result" for e in items))
         result = next(e for e in results if e.get("type") == "command_result")
         self.assertFalse(result["response"])
+
+    def test_snapshot_reports_locked_session(self):
+        self.assertFalse(self.runtime.get_snapshot()["session_desbloqueada"])
+        sessao.desbloquear("pin")
+        self.assertTrue(self.runtime.get_snapshot()["session_desbloqueada"])
+
+    def test_unlock_info_reports_real_state_without_raising(self):
+        info = self.runtime.unlock_info()
+        self.assertFalse(info["session"]["desbloqueada"])
+        self.assertFalse(info["hello"]["disponivel"])
+        self.assertFalse(info["pin_configurado"])
+        self.assertEqual(info["irreversiveis"], ["apagar_arquivo", "executar_comando"])
+        self.assertEqual(info["historico"]["algoritmo"], "AES-256-GCM")
+        self.assertIn("versao", info)
+
+    def test_unlock_info_omits_history_when_memoria_is_unavailable(self):
+        self.memoria.status_criptografia = lambda: (_ for _ in ()).throw(RuntimeError("sem chave"))
+        self.assertNotIn("historico", self.runtime.unlock_info())
+
+    def test_undo_list_returns_only_safe_diary_fields(self):
+        diario = types.SimpleNamespace(listar=lambda limite: [{
+            "id": "a" * 12,
+            "operacao": "arquivo.apagar",
+            "resumo": "apagar C:\\tmp\\a.txt",
+            "desfeito": False,
+            "criado": 1.0,
+        }])
+        with patch.dict(sys.modules, {"desfazer": diario}):
+            resultado = self.runtime.undo_list()
+        self.assertEqual(resultado["limite"], 10)
+        self.assertEqual(resultado["itens"][0]["resumo"], "apagar C:\\tmp\\a.txt")
+        self.assertNotIn("inversa", resultado["itens"][0])
+
+    def test_undo_list_degrades_when_diary_is_unavailable(self):
+        def explodir(_limite):
+            raise RuntimeError("diário corrompido")
+
+        with patch.dict(sys.modules, {"desfazer": types.SimpleNamespace(listar=explodir)}):
+            resultado = self.runtime.undo_list()
+        self.assertEqual(resultado, {"itens": [], "limite": 10, "indisponivel": True})
+
+    def test_hello_unavailable_does_not_open_prompt(self):
+        resultado = self.runtime.unlock_hello()
+        self.assertEqual(resultado, {"unlocked": False, "error": "hello_unavailable"})
+        self.assertFalse(sessao.estado()["desbloqueada"])
+
+    def test_hello_verified_unlocks_session(self):
+        self.biometria.disponivel = lambda: {"disponivel": True, "motivo": "Windows Hello pronto"}
+        self.biometria.verificar = lambda: True
+        resultado = self.runtime.unlock_hello()
+        self.assertTrue(resultado["unlocked"])
+        self.assertEqual(resultado["method"], "hello")
+        self.assertEqual(sessao.estado()["metodo"], "hello")
+
+    def test_hello_not_verified_and_busy_are_reported(self):
+        self.biometria.disponivel = lambda: {"disponivel": True, "motivo": "pronto"}
+        self.assertEqual(self.runtime.unlock_hello()["error"], "not_verified")
+
+        def ocupado():
+            raise self.ocupado("em andamento")
+
+        self.biometria.verificar = ocupado
+        self.assertEqual(self.runtime.unlock_hello()["error"], "busy")
+
+    def test_pin_unlock_requires_configured_pin(self):
+        self.assertEqual(self.runtime.unlock_pin("2468")["error"], "no_method_configured")
+        with patch.object(config, "PIN", "2468"):
+            self.assertEqual(self.runtime.unlock_pin("0000")["error"], "pin_invalid")
+            resultado = self.runtime.unlock_pin("2468")
+        self.assertTrue(resultado["unlocked"])
+        self.assertEqual(resultado["method"], "pin")
+        self.assertTrue(sessao.estado()["desbloqueada"])
+
+    def test_five_wrong_pins_lock_for_the_wait_window(self):
+        with patch.object(config, "PIN", "2468"), \
+                patch.object(desktop_runtime, "UNLOCK_ESPERA_S", 0.05):
+            for _ in range(4):
+                self.assertEqual(self.runtime.unlock_pin("0000")["error"], "pin_invalid")
+            self.assertEqual(self.runtime.unlock_pin("0000")["error"], "too_many_attempts")
+            # durante a espera, nem o PIN certo passa
+            self.assertEqual(self.runtime.unlock_pin("2468")["error"], "too_many_attempts")
+            time.sleep(0.06)
+            self.assertTrue(self.runtime.unlock_pin("2468")["unlocked"])
+
+    def test_lock_ends_the_session(self):
+        sessao.desbloquear("pin")
+        self.assertEqual(self.runtime.lock(), {"locked": True})
+        self.assertFalse(sessao.estado()["desbloqueada"])
+
+    def test_unlocked_critical_action_does_not_ask_for_pin(self):
+        sessao.desbloquear("pin")
+        self.runtime.submit_command("confirm")
+        events = self.events_until(lambda items: any(e.get("type") == "confirmation_request" for e in items))
+        request = next(e for e in events if e.get("type") == "confirmation_request")
+        self.assertFalse(request["requires_pin"])
+        self.assertTrue(self.runtime.answer_confirmation(request["request_id"], True))
+        results = self.events_until(lambda items: any(e.get("type") == "command_result" for e in items))
+        self.assertIs(next(e for e in results if e.get("type") == "command_result")["response"], True)
 
 
 class VoiceCaptureTests(unittest.TestCase):

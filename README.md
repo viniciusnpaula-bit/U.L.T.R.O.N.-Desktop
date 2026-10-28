@@ -230,10 +230,29 @@ Estrutura:
 | `voz_nativa.py` | reconhecimento de voz opcional do Windows (SAPI), offline |
 | `seguranca.py`, `permissoes.json` | riscos, confirmações, PIN, allowlist |
 | `installer/`, `tools/` | instalador e build |
-| `ULTRON-Mobile/` | app Android (projeto anterior, independente) |
 
 ## Segurança
 
 Nenhuma saída da IA autoriza ação: intenções passam pela política local, ações críticas
 pedem PIN (nunca por voz), e o gateway falha fechado. A chave de IA fica só no `.env`
-local — nunca no código, no histórico ou no APK.
+local — nunca no código ou no histórico.
+
+### Sessão local (1.19.0)
+
+O Desktop abre bloqueado. A tela de desbloqueio usa o Windows Hello quando o PC
+tem sensor; sem ele, use o `ULTRON_PIN` do `.env`. A sessão fica só em memória:
+fechar o app ou bloquear/suspender o Windows volta ao estado bloqueado. Com a
+sessão liberada, ações de risco ALTO locais e reversíveis rodam sem confirmação;
+as irreversíveis e as que capturam tela/webcam ou tomam o mouse continuam
+pedindo confirmação. Allowlist, comandos bloqueados, `DENY`, parada de
+emergência e logs não mudam. O Telegram continua pedindo PIN.
+
+### Histórico cifrado (1.19.0)
+
+O conteúdo de `dados/ultron.db` (mensagens, fatos e lembretes) é cifrado com
+AES-256-GCM usando a chave que o cofre protege com DPAPI. A migração do texto
+antigo é automática na primeira operação de memória.
+
+**Backup:** copie `dados/ultron.db` **e** `dados/.cofre.chave` juntos, na mesma
+conta Windows do mesmo PC. Sem a chave, o histórico fica ilegível; o ULTRON não
+gera outra por cima. Em outra conta ou outro PC, a DPAPI não decifra a chave.

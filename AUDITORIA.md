@@ -52,10 +52,18 @@ comando de diagnóstico, desligar/reiniciar/cancelar, lembrar/esquecer fato, cri
 - Toda ferramenta passa por `ferramentas.executar`; não há caminho alternativo.
 - Logs em `logs/ultron.log` e `logs/seguranca.log`, com redação de chaves/PIN.
 - Parada de emergência: `Ctrl+Alt+X` e comando de parada.
+- Sessão local (`sessao.py`, `biometria.py`): Windows Hello via WinRT com import
+  preguiçoso, trava de prompt e prazo de 60 s; PIN de reserva com 5 falhas → 30 s
+  em memória. O desbloqueio só remove confirmações de ALTO local/reversível.
 
 ### Memória
 - `mensagens` (histórico 16), `fatos` (limite 50 × 300 chars), `lembretes`.
-- `LIKE` escapado (`ESCAPE '\'`), mínimo de 3 caracteres úteis para apagar.
+- Busca de fatos por substring em Python (casefold), mínimo de 3 caracteres úteis
+  para apagar; `%` e `_` são texto comum.
+- Histórico cifrado em repouso (`cofre.cifrar_dados` + `memoria._garantir_migracao`):
+  AES-256-GCM por campo, AAD `ultron-memoria-v1`, prefixo `v1:`, chave DPAPI do
+  cofre, `PRAGMA user_version=1`, `secure_delete=ON` e `VACUUM`. Backup exige o
+  banco **e** `dados/.cofre.chave`.
 
 ### API local
 `GET /health`, `/status`, `/events`, `/conversation`, `/microphones`, `/update`, `/update/check`;
@@ -64,7 +72,7 @@ comando de diagnóstico, desligar/reiniciar/cancelar, lembrar/esquecer fato, cri
 
 ### Empacotamento
 - `tools/build_setup.py` gera `ULTRON.exe` (launcher windowed), `ULTRON-Setup.exe` e o ZIP; o ícone vem só de `electron/assets/ULTRON.ico`.
-- ZIP inclui código, assets e binários; exclui `.env`, `dados/`, `logs/`, `venv/`, `node_modules/`, `__pycache__`, `ULTRON-Mobile/` e a prévia.
+- ZIP inclui código, assets e binários; exclui `.env`, `dados/`, `logs/`, `venv/`, `node_modules/`, `__pycache__` e a prévia.
 - Release assinado: `SHA256SUMS.txt` + `SHA256SUMS.txt.sig` (Ed25519, chave pública embutida).
 
 ---

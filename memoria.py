@@ -1,15 +1,26 @@
-"""Memória do Ultron em SQLite: conversas, fatos sobre o usuário e lembretes."""
+"""Memória do Ultron em SQLite: conversas, fatos e lembretes.
+
+O conteúdo de `mensagens`, `fatos` e `lembretes` é cifrado em repouso com
+AES-256-GCM (prefixo `v1:`) usando a chave que o cofre protege com DPAPI.
+Metadados (id, ts, papel, due, feito) continuam visíveis.
+"""
 import datetime
+import functools
 import re
 import sqlite3
 import threading
 import time
 import unicodedata
 
+import cofre
 from config import BASE
 
-_lock = threading.Lock()
+_lock = threading.RLock()
+_migracao_lock = threading.Lock()
+_aviso_chave = False
 _db = sqlite3.connect(str(BASE / "dados" / "ultron.db"), check_same_thread=False)
+_db.isolation_level = None          # transações explícitas (migração usa BEGIN IMMEDIATE)
+_db.execute("PRAGMA secure_delete=ON")
 _db.executescript("""
 CREATE TABLE IF NOT EXISTS mensagens(id INTEGER PRIMARY KEY, ts REAL, papel TEXT, texto TEXT);
 CREATE TABLE IF NOT EXISTS fatos(id INTEGER PRIMARY KEY, texto TEXT UNIQUE);
@@ -24,13 +35,105 @@ def _x(sql, args=(), buscar=False):
         return cur.fetchall() if buscar else cur.lastrowid
 
 
+def _log_ilegivel(tabela, id_):
+    print(f"[MEMORIA] registro ilegivel (tabela={tabela}, id={id_})")
+
+
+def _texto(tabela, id_, guardado):
+    """Conteúdo decifrado; None para linha ilegível (nunca devolve ciphertext)."""
+    try:
+        if not cofre.parece_cifrado(guardado):
+            raise ValueError("registro sem prefixo v1")
+        return cofre.decifrar_dados(guardado)
+    except cofre.ChaveIndisponivel:
+        raise                   # chave ilegível: o decorator loga uma vez e degrada
+    except Exception:
+        _log_ilegivel(tabela, id_)
+        return None
+
+
+def _avisar_chave():
+    global _aviso_chave
+    if not _aviso_chave:
+        _aviso_chave = True
+        print("[MEMORIA] historico indisponivel: chave ilegivel")
+
+
+def _historico(vazio):
+    """Migra antes da operação; sem chave, degrada e nunca grava em claro."""
+    def decorador(funcao):
+        @functools.wraps(funcao)
+        def envoltorio(*args, **kwargs):
+            try:
+                _garantir_migracao()
+                return funcao(*args, **kwargs)
+            except cofre.ChaveIndisponivel:
+                _avisar_chave()
+                return vazio
+        return envoltorio
+    return decorador
+
+
+def _garantir_migracao():
+    with _lock:
+        if _db.execute("PRAGMA user_version").fetchone()[0] >= 1:
+            return
+    with _lock, _migracao_lock:
+        if _db.execute("PRAGMA user_version").fetchone()[0] >= 1:
+            return
+        _db.execute("PRAGMA secure_delete=ON")
+        _db.execute("PRAGMA temp_store=MEMORY")
+        try:
+            _db.commit()                # fecha transação implícita de conexões de teste
+        except sqlite3.Error:
+            pass
+        _db.execute("BEGIN IMMEDIATE")
+        try:
+            if _db.execute("PRAGMA user_version").fetchone()[0] >= 1:
+                _db.rollback()
+                return
+            tabelas = ("mensagens", "fatos", "lembretes")
+            linhas = {tabela: _db.execute(f"SELECT id, texto FROM {tabela}").fetchall()
+                      for tabela in tabelas}
+            tem_cifrado = any(
+                isinstance(texto, str) and texto.startswith(cofre.PREFIXO_DADOS)
+                for pares in linhas.values() for _id, texto in pares)
+            if tem_cifrado and not cofre.chave_disponivel():
+                raise cofre.ChaveIndisponivel(
+                    "Historico cifrado sem chave legivel: restaure dados/.cofre.chave.")
+            for tabela, pares in linhas.items():
+                for id_, texto in pares:
+                    if not isinstance(texto, str) or texto.startswith(cofre.PREFIXO_DADOS):
+                        continue
+                    _db.execute(f"UPDATE {tabela} SET texto = ? WHERE id = ? AND texto = ?",
+                                (cofre.cifrar_dados(texto), id_, texto))
+            _db.commit()
+        except Exception:
+            _db.rollback()
+            raise
+        try:
+            _db.execute("VACUUM")
+        except sqlite3.Error as erro:
+            print(f"[MEMORIA] VACUUM adiado ({type(erro).__name__}); "
+                  "secure_delete ja zerou as paginas antigas")
+        _db.execute("PRAGMA user_version=1")
+        _db.commit()
+
+
+@_historico(None)
 def salvar_msg(papel, texto):
-    _x("INSERT INTO mensagens(ts, papel, texto) VALUES(?,?,?)", (time.time(), papel, texto))
+    _x("INSERT INTO mensagens(ts, papel, texto) VALUES(?,?,?)",
+       (time.time(), papel, cofre.cifrar_dados(str(texto))))
 
 
+@_historico([])
 def historico(n=16):
-    linhas = _x("SELECT papel, texto FROM mensagens ORDER BY id DESC LIMIT ?", (n,), True)
-    msgs = [{"role": p, "content": t} for p, t in reversed(linhas)]
+    linhas = _x("SELECT id, papel, texto FROM mensagens ORDER BY id DESC LIMIT ?", (n,), True)
+    msgs = []
+    for id_, papel, guardado in reversed(linhas):
+        texto = _texto("mensagens", id_, guardado)
+        if texto is not None:
+            msgs.append({"role": papel, "content": texto})
     while msgs and msgs[0]["role"] != "user":
         msgs.pop(0)
     return msgs
@@ -65,6 +168,7 @@ def _chave(texto):
     return unicodedata.normalize("NFD", str(texto or "").lower())[:80]
 
 
+@_historico([])
 def recordar(texto, limite=4, dias=120, pular=0, excluir=None):
     """Trechos de conversas anteriores que têm a ver com o texto atual.
 
@@ -86,9 +190,10 @@ def recordar(texto, limite=4, dias=120, pular=0, excluir=None):
     excluidas = set(excluir or ())
     achados = []
     for id_, ts, papel, guardado in linhas:
-        if papel not in ("user", "assistant") or not guardado:
+        if papel not in ("user", "assistant"):
             continue
-        if _chave(guardado) in excluidas:
+        guardado = _texto("mensagens", id_, guardado)
+        if not guardado or _chave(guardado) in excluidas:
             continue
         comuns = alvo & set(_tokens(guardado))
         if not comuns:
@@ -162,6 +267,17 @@ def escapar_like(trecho: str) -> str:
             .replace("%", "\\%").replace("_", "\\_"))
 
 
+def _fatos():
+    linhas = _x("SELECT id, texto FROM fatos ORDER BY id", (), True)
+    fatos = []
+    for id_, guardado in linhas:
+        texto = _texto("fatos", id_, guardado)
+        if texto is not None:
+            fatos.append({"id": id_, "texto": texto})
+    return fatos
+
+
+@_historico(None)
 def salvar_fato(texto):
     maximo, total_max, _ = _limites()
     limpo = " ".join(str(texto or "").split())
@@ -169,34 +285,46 @@ def salvar_fato(texto):
         raise MemoriaLimite("Não guardei nada: o fato estava vazio.")
     if len(limpo) > maximo:
         raise MemoriaLimite(f"O fato tem {len(limpo)} caracteres; o limite é {maximo}.")
-    if len(listar_fatos()) >= total_max and limpo not in listar_fatos():
-        raise MemoriaLimite(f"A memória já tem {total_max} fatos. Apague algum antes de guardar outro.")
-    _x("INSERT OR IGNORE INTO fatos(texto) VALUES(?)", (limpo,))
+    with _lock:
+        atuais = [fato["texto"] for fato in _fatos()]
+        if limpo in atuais:
+            return
+        if len(atuais) >= total_max:
+            raise MemoriaLimite(f"A memória já tem {total_max} fatos. Apague algum antes de guardar outro.")
+        _x("INSERT OR IGNORE INTO fatos(texto) VALUES(?)", (cofre.cifrar_dados(limpo),))
 
 
+@_historico([])
 def listar_fatos():
-    return [r[0] for r in _x("SELECT texto FROM fatos ORDER BY id", (), True)]
+    return [fato["texto"] for fato in _fatos()]
 
 
+@_historico([])
 def buscar_fatos(termo, limite=10):
-    """Busca literal (sem curinga) entre os fatos guardados."""
+    """Busca literal em Python (sem LIKE): % e _ continuam texto comum."""
     limpo = str(termo or "").strip()
-    if not limpo:
-        return listar_fatos()[:limite]
-    padrao = f"%{escapar_like(limpo)}%"
-    linhas = _x("SELECT id, texto FROM fatos WHERE texto LIKE ? ESCAPE '\\' ORDER BY id LIMIT ?",
-                (padrao, int(limite)), True)
-    return [{"id": linhas_id, "texto": texto} for linhas_id, texto in linhas]
+    fatos = _fatos()
+    if limpo:
+        alvo = limpo.casefold()
+        fatos = [fato for fato in fatos if alvo in fato["texto"].casefold()]
+    return fatos[:int(limite)]
 
 
+@_historico([])
+def fatos_com_id(limite=50):
+    return _fatos()[:int(limite)]
+
+
+@_historico([])
 def fatos_centrais(limite=8):
     """Poucos fatos para o contexto curto: os mais recentes e os mais curtos
     (fatos curtos costumam ser os essenciais: nome, cidade, preferências)."""
-    linhas = _x("SELECT id, texto FROM fatos ORDER BY id DESC LIMIT ?", (int(limite) * 2,), True)
-    escolhidos = sorted(linhas, key=lambda par: (len(par[1]), -par[0]))[:limite]
-    return [texto for _, texto in sorted(escolhidos, key=lambda par: par[0])]
+    linhas = _fatos()[-int(limite) * 2:]
+    escolhidos = sorted(linhas, key=lambda fato: (len(fato["texto"]), -fato["id"]))[:limite]
+    return [fato["texto"] for fato in sorted(escolhidos, key=lambda fato: fato["id"])]
 
 
+@_historico(False)
 def corrigir_fato(id_, texto):
     maximo, _, _ = _limites()
     limpo = " ".join(str(texto or "").split())
@@ -204,47 +332,67 @@ def corrigir_fato(id_, texto):
         raise MemoriaLimite("O fato não pode ficar vazio.")
     if len(limpo) > maximo:
         raise MemoriaLimite(f"O fato tem {len(limpo)} caracteres; o limite é {maximo}.")
-    _x("UPDATE fatos SET texto = ? WHERE id = ?", (limpo, int(id_)))
+    with _lock:
+        alvo = int(id_)
+        if any(fato["id"] != alvo and fato["texto"] == limpo for fato in _fatos()):
+            raise MemoriaLimite("Esse fato já existe.")
+        _x("UPDATE fatos SET texto = ? WHERE id = ?", (cofre.cifrar_dados(limpo), alvo))
     return True
 
 
+@_historico(False)
 def apagar_fato_por_id(id_):
     antes = _x("SELECT COUNT(*) FROM fatos WHERE id = ?", (int(id_),), True)[0][0]
     _x("DELETE FROM fatos WHERE id = ?", (int(id_),))
     return antes > 0
 
 
+@_historico(0)
 def apagar_fato(trecho):
-    """Apaga fatos que contenham o trecho. Exige 3 caracteres úteis e trata % e _
-    como texto comum (antes, "%%%" apagava todos os fatos)."""
+    """Apaga fatos que contenham o trecho; compara em Python, sem curinga."""
     _, _, minimo = _limites()
     bruto = str(trecho or "")
     uteis = [c for c in bruto if c.isalnum()]
     if len(uteis) < minimo:
         raise MemoriaLimite(
             f"Preciso de pelo menos {minimo} caracteres de verdade para apagar (ex.: \"senha do wifi\").")
-    padrao = f"%{escapar_like(bruto.strip())}%"
-    antes = _x("SELECT COUNT(*) FROM fatos", (), True)[0][0]
-    _x("DELETE FROM fatos WHERE texto LIKE ? ESCAPE '\\'", (padrao,))
-    depois = _x("SELECT COUNT(*) FROM fatos", (), True)[0][0]
-    return antes - depois
+    alvo = bruto.strip().casefold()
+    with _lock:
+        ids = [fato["id"] for fato in _fatos() if alvo in fato["texto"].casefold()]
+        for id_ in ids:
+            _x("DELETE FROM fatos WHERE id = ?", (id_,))
+    return len(ids)
 
 
+@_historico(None)
 def add_lembrete(due, texto):
-    return _x("INSERT INTO lembretes(due, texto) VALUES(?,?)", (due, texto))
+    return _x("INSERT INTO lembretes(due, texto) VALUES(?,?)",
+              (due, cofre.cifrar_dados(str(texto))))
 
 
+@_historico([])
 def lembretes_vencidos():
-    return _x("SELECT id, texto FROM lembretes WHERE feito=0 AND due<=?", (time.time(),), True)
+    linhas = _x("SELECT id, texto FROM lembretes WHERE feito=0 AND due<=?",
+                (time.time(),), True)
+    return [(id_, texto) for id_, guardado in linhas
+            if (texto := _texto("lembretes", id_, guardado)) is not None]
 
 
+@_historico([])
 def lembretes_pendentes():
-    return _x("SELECT due, texto FROM lembretes WHERE feito=0 ORDER BY due", (), True)
+    linhas = _x("SELECT id, due, texto FROM lembretes WHERE feito=0 ORDER BY due", (), True)
+    return [(due, texto) for id_, due, guardado in linhas
+            if (texto := _texto("lembretes", id_, guardado)) is not None]
 
 
+@_historico("Histórico indisponível: restaure dados/.cofre.chave.")
 def cancelar_lembrete(numero=None, trecho=""):
     """Cancela um lembrete pendente. Sem alvo claro, recusa (nunca apaga todos)."""
-    pendentes = _x("SELECT id, texto FROM lembretes WHERE feito=0 ORDER BY due", (), True)
+    pendentes = []
+    for id_, guardado in _x("SELECT id, texto FROM lembretes WHERE feito=0 ORDER BY due", (), True):
+        texto = _texto("lembretes", id_, guardado)
+        if texto is not None:
+            pendentes.append((id_, texto))
     if not pendentes:
         return "Não há lembretes pendentes."
     if numero is not None:
@@ -260,9 +408,8 @@ def cancelar_lembrete(numero=None, trecho=""):
     limpo = " ".join(str(trecho or "").split())
     if len([c for c in limpo if c.isalnum()]) < 3:
         raise MemoriaLimite("Diga o número do lembrete ou um trecho com pelo menos 3 letras.")
-    padrao = f"%{escapar_like(limpo)}%"
-    alvos = _x("SELECT id, texto FROM lembretes WHERE feito=0 AND texto LIKE ? ESCAPE '\\'",
-               (padrao,), True)
+    alvo = limpo.casefold()
+    alvos = [(id_, texto) for id_, texto in pendentes if alvo in texto.casefold()]
     if not alvos:
         return "Não achei lembrete com esse trecho."
     if len(alvos) > 1:
@@ -272,16 +419,38 @@ def cancelar_lembrete(numero=None, trecho=""):
     return f"Lembrete cancelado: {alvos[0][1]}"
 
 
+@_historico([])
 def lembretes_numerados():
     """Lista com número, hora local e texto — a base para cancelar por número."""
     import datetime as _dt
     itens = []
-    for indice, (due, texto) in enumerate(_x(
-            "SELECT due, texto FROM lembretes WHERE feito=0 ORDER BY due", (), True), start=1):
+    for id_, due, guardado in _x(
+            "SELECT id, due, texto FROM lembretes WHERE feito=0 ORDER BY due", (), True):
+        texto = _texto("lembretes", id_, guardado)
+        if texto is None:
+            continue
         quando = _dt.datetime.fromtimestamp(due).strftime("%d/%m %H:%M")
-        itens.append({"numero": indice, "quando": due, "hora_local": quando, "texto": texto})
+        itens.append({"numero": len(itens) + 1, "quando": due,
+                      "hora_local": quando, "texto": texto})
     return itens
 
 
+@_historico(None)
 def marcar_feito(id_):
     _x("UPDATE lembretes SET feito=1 WHERE id=?", (id_,))
+
+
+def status_criptografia() -> dict:
+    """Estado honesto para a tela de desbloqueio; nunca levanta e não migra."""
+    migrado = False
+    try:
+        migrado = _db.execute("PRAGMA user_version").fetchone()[0] >= 1
+    except Exception:
+        pass
+    try:
+        _, modo = cofre._chave_local(criar=False)
+    except cofre.ChaveIndisponivel:
+        modo = "indisponivel"
+    return {"cifrado": True, "algoritmo": "AES-256-GCM",
+            "chave": "DPAPI" if modo == "dpapi" else modo,
+            "migrado": migrado}

@@ -19,6 +19,12 @@ function makeBridge() {
     palcoFechar: async () => (calls.push(['palcoFechar']), { ok: true }),
     palcoAbrir: async id => (calls.push(['palcoAbrir', id]), true),
     shutdown: async () => ({ shutdown_requested: true }),
+    unlockInfo: async () => ({ session: { desbloqueada: false }, hello: { disponivel: false } }),
+    unlockHello: async () => (calls.push(['unlockHello']), { unlocked: false, error: 'hello_unavailable' }),
+    unlockPin: async pin => (calls.push(['unlockPin', pin]), { unlocked: true, method: 'pin' }),
+    lock: async () => (calls.push(['lock']), { locked: true }),
+    undoList: async () => (calls.push(['undoList']), { itens: [], limite: 10 }),
+    onSessionLocked: callback => (calls.push(['onSessionLocked']), () => {}),
   };
   return { bridge, calls };
 }
@@ -33,8 +39,15 @@ test('transport uses only the named API bridge and maps current runtime events',
   assert.equal((await transport.listMicrophones()).devices[0].name, 'Padrão do sistema');
   await transport.selectMicrophone('input-1');
   await transport.confirm('req-1', true, '1234');
+  assert.equal((await transport.unlockInfo()).session.desbloqueada, false);
+  await transport.unlockHello();
+  await transport.unlockPin('2468');
+  await transport.lock();
+  assert.deepEqual(await transport.undoList(), { itens: [], limite: 10 });
+  transport.onSessionLocked(() => {});
   await transport.poll();
-  assert.deepEqual(calls, [['command', 'Olá'], ['microphone', true], ['selectMicrophone', 'input-1'], ['confirmation', 'req-1', true, '1234']]);
+  assert.deepEqual(calls, [['command', 'Olá'], ['microphone', true], ['selectMicrophone', 'input-1'],
+    ['confirmation', 'req-1', true, '1234'], ['unlockHello'], ['unlockPin', '2468'], ['lock'], ['undoList'], ['onSessionLocked']]);
   assert.ok(events.some(event => event.event === 'NOTIFICATION' && event.data.message === 'Pronto'));
   assert.ok(events.some(event => event.event === 'SYSTEM_STATUS'));
   transport.disconnect();
@@ -208,4 +221,32 @@ test('voz e jeito: um painel só, com abas, cartões e persistência', async () 
   assert.match(css, /\.seg-tab\[aria-selected="true"\]/);
   assert.match(css, /\.choice-card\[aria-checked="true"\]/);
   assert.match(css, /\.field-col\s*\{/);
+});
+
+test('sessão local: IPC, powerMonitor e câmera ficam restritos à janela principal', async () => {
+  const site = new URL('../', import.meta.url);
+  const main = await readFile(fileURLToPath(new URL('../main.js', site)), 'utf8');
+  const preload = await readFile(fileURLToPath(new URL('../preload.js', site)), 'utf8');
+  const real = await readFile(fileURLToPath(new URL('src/real.js', site)), 'utf8');
+  for (const canal of ['unlock:info', 'unlock:hello', 'unlock:pin', 'unlock:lock']) {
+    assert.match(main, new RegExp(`ipcMain\\.handle\\('${canal}'`), canal);
+  }
+  assert.match(main, /powerMonitor\.on\('lock-screen'/);
+  assert.match(main, /powerMonitor\.on\('suspend'/);
+  assert.match(main, /lockPendente/);
+  assert.match(main, /session:locked/);
+  assert.match(main, /setPermissionRequestHandler/);
+  assert.match(main, /setPermissionCheckHandler/);
+  assert.match(main, /tipos\.includes\('video'\)\s*&&\s*!tipos\.includes\('audio'\)/);
+  assert.match(preload, /unlockInfo: \(\) => ipcRenderer\.invoke\('unlock:info'\)/);
+  assert.match(preload, /onSessionLocked: callback/);
+  assert.doesNotMatch(real, /getUserMedia/);
+});
+
+test('diário: IPC e transporte leem a rota /undo pela ponte segura', async () => {
+  const site = new URL('../', import.meta.url);
+  const main = await readFile(fileURLToPath(new URL('../main.js', site)), 'utf8');
+  const preload = await readFile(fileURLToPath(new URL('../preload.js', site)), 'utf8');
+  assert.match(main, /ipcMain\.handle\('undo:list', event => isSender\(event, mainWindow\) \? api\.undoList\(\) : null\)/);
+  assert.match(preload, /undoList: \(\) => ipcRenderer\.invoke\('undo:list'\)/);
 });

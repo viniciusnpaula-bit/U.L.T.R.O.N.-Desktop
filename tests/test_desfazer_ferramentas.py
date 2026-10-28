@@ -17,10 +17,12 @@ import cerebro
 import desfazer
 import ferramentas
 import seguranca
+import sessao
 
 
 class DesfazerFerramentasTests(unittest.TestCase):
     def setUp(self):
+        sessao.bloquear()
         self.temp = tempfile.TemporaryDirectory()
         self.addCleanup(self.temp.cleanup)
         self.diario_dir = Path(self.temp.name)

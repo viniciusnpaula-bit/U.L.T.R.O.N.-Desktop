@@ -1,3 +1,25 @@
+ULTRON Desktop 1.19.0 — sessão local e histórico cifrado
+
+- Windows Hello (rosto/impressão digital/PIN do Windows) desbloqueia o Desktop;
+  sem sensor, o `ULTRON_PIN` continua valendo. A sessão fica em memória e morre
+  ao fechar o app ou quando o Windows bloqueia/suspende.
+- Desbloqueado, ações de risco ALTO locais e reversíveis executam sem
+  confirmação. As irreversíveis (`executar_comando`, `rodar_codigo`,
+  `desligar_pc`, `reiniciar_pc`, `apagar_arquivo`, `enviar_formulario`) e as de
+  privacidade (`ver_tela`, `webcam_foto`, `controlar_mouse_com_gesto`) continuam
+  confirmando. CRITICO, Telegram, fluxos e origem desconhecida não mudam.
+- A tela de desbloqueio mostra câmera ao vivo (só pré-visualização, sem gravação
+  e sem áudio), o motivo real do Hello, o PIN configurado, as ações
+  irreversíveis e as tentativas da sessão. "Agora não" mantém o app bloqueado.
+- Histórico local (`mensagens`, `fatos` e `lembretes`) passa a ser cifrado em
+  repouso com AES-256-GCM e a chave DPAPI que o cofre já usava. A migração é
+  automática, transacional e sem mudar o schema; metadados (horário, papel,
+  contagem) continuam visíveis.
+- **Backup**: copie `dados/ultron.db` **e** `dados/.cofre.chave` juntos. A chave
+  é DPAPI do usuário: em outra conta Windows ou outro PC o histórico fica
+  ilegível (mas intacto), e o ULTRON não inventa uma chave nova.
+- Testes: 474 pytest + 58 em `testes_seguranca` + 37 Node, todos verdes.
+
 ULTRON Desktop 1.18.0 — escuta com Whisper grátis e conferência na dúvida
 
 - Motor de escuta novo: o Groq Whisper `large-v3` no plano gratuito (2.000

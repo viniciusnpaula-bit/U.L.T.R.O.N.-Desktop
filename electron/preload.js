@@ -4,6 +4,11 @@ contextBridge.exposeInMainWorld('ultron', Object.freeze({
   health: () => ipcRenderer.invoke('api:health'),
   status: () => ipcRenderer.invoke('api:status'),
   events: () => ipcRenderer.invoke('api:events'),
+  unlockInfo: () => ipcRenderer.invoke('unlock:info'),
+  unlockHello: () => ipcRenderer.invoke('unlock:hello'),
+  unlockPin: pin => ipcRenderer.invoke('unlock:pin', pin),
+  lock: () => ipcRenderer.invoke('unlock:lock'),
+  undoList: () => ipcRenderer.invoke('undo:list'),
   command: text => ipcRenderer.invoke('api:command', text),
   microphone: paused => ipcRenderer.invoke('api:microphone', paused),
   microphones: () => ipcRenderer.invoke('api:microphones'),
@@ -55,5 +60,10 @@ contextBridge.exposeInMainWorld('ultron', Object.freeze({
     return () => ipcRenderer.removeListener('hud:run-action', listener);
   },
   hudActionResult: (requestId, accepted) => ipcRenderer.send('hud:action-result', requestId, accepted === true),
-  version: '1.18.0',
+  version: '1.19.0',
+  onSessionLocked: callback => {
+    const listener = () => callback();
+    ipcRenderer.on('session:locked', listener);
+    return () => ipcRenderer.removeListener('session:locked', listener);
+  },
 }));

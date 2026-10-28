@@ -67,6 +67,16 @@ export class RealTransport {
   clearConversation() { return this.bridge.clearConversation(); }
   selectMicrophone(deviceId) { return this.bridge.selectMicrophone(deviceId); }
   confirm(requestId, approved, pin) { return this.bridge.confirmation(requestId, approved, pin); }
+  unlockInfo() { return this.bridge.unlockInfo(); }
+  undoList() { return this.bridge.undoList(); }
+  unlockHello() { return this.bridge.unlockHello(); }
+  unlockPin(pin) { return this.bridge.unlockPin(pin); }
+  lock() { return this.bridge.lock(); }
+  onSessionLocked(callback) {
+    return typeof this.bridge.onSessionLocked === 'function'
+      ? this.bridge.onSessionLocked(callback)
+      : () => {};
+  }
   emergencyStop() { return this.bridge.emergencyStop(); }
   palcoFechar() { return this.bridge.palcoFechar(); }
   palcoAbrir(id) { return this.bridge.palcoAbrir(id); }

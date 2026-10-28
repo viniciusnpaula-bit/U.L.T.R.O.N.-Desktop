@@ -62,6 +62,15 @@ LINKS = {
 ENTROPIA_LABEL = b"ULTRON-Cofre-v1"
 
 
+class ChaveIndisponivel(RuntimeError):
+    """A chave existe mas não pode ser lida. Nunca gerar outra por cima."""
+
+
+AAD_DADOS = b"ultron-memoria-v1"
+PREFIXO_DADOS = "v1:"
+_chave_trava = threading.Lock()
+
+
 # --------------------------------------------------------------------- DPAPI
 # CryptProtectData exige protótipos explícitos: sem eles o ctypes não encontra a
 # função com ponteiros de 64 bits (foi por isso que a primeira versão caía sempre
@@ -105,33 +114,42 @@ def _dpapi(dados: bytes, proteger: bool) -> bytes | None:
         return None
 
 
-def _chave_local() -> tuple[bytes, str]:
-    """Chave de 32 bytes: via DPAPI (recomendado) ou arquivo restrito (reserva)."""
-    cifrada = None
-    try:
-        cifrada = ARQUIVO_CHAVE.read_bytes()
-    except FileNotFoundError:
-        cifrada = None
-    if cifrada:
-        limpa = _dpapi(cifrada, proteger=False)
-        if limpa and len(limpa) == 32:
-            return limpa, "dpapi"
-        if len(cifrada) == 32:          # modo reserva (sem DPAPI)
-            return cifrada, "arquivo"
-    nova = os.urandom(32)
-    ARQUIVO_CHAVE.parent.mkdir(parents=True, exist_ok=True)
-    protegida = _dpapi(nova, proteger=True)
-    if protegida:
-        ARQUIVO_CHAVE.write_bytes(protegida)
-        modo = "dpapi"
-    else:
-        ARQUIVO_CHAVE.write_bytes(nova)
+def _chave_local(criar: bool = True) -> tuple[bytes, str]:
+    """Chave de 32 bytes: via DPAPI (recomendado) ou arquivo restrito (reserva).
+
+    `criar=False` nunca gera chave: histórico/credenciais existentes ficariam
+    ilegíveis. Arquivo existente que não decifra também não é sobrescrito.
+    """
+    with _chave_trava:
         try:
-            os.chmod(ARQUIVO_CHAVE, 0o600)
-        except OSError:
-            pass
-        modo = "arquivo"
-    return nova, modo
+            cifrada = ARQUIVO_CHAVE.read_bytes()
+        except FileNotFoundError:
+            cifrada = None
+        except OSError as erro:
+            raise ChaveIndisponivel("A chave local não pode ser lida.") from erro
+        if cifrada:
+            limpa = _dpapi(cifrada, proteger=False)
+            if limpa and len(limpa) == 32:
+                return limpa, "dpapi"
+            if len(cifrada) == 32:          # modo reserva (sem DPAPI)
+                return cifrada, "arquivo"
+            raise ChaveIndisponivel("A chave local existe mas não pode ser decifrada.")
+        if not criar:
+            raise ChaveIndisponivel("A chave local não existe.")
+        nova = os.urandom(32)
+        ARQUIVO_CHAVE.parent.mkdir(parents=True, exist_ok=True)
+        protegida = _dpapi(nova, proteger=True)
+        if protegida:
+            ARQUIVO_CHAVE.write_bytes(protegida)
+            modo = "dpapi"
+        else:
+            ARQUIVO_CHAVE.write_bytes(nova)
+            try:
+                os.chmod(ARQUIVO_CHAVE, 0o600)
+            except OSError:
+                pass
+            modo = "arquivo"
+        return nova, modo
 
 
 # ------------------------------------------------------------------- cifra
@@ -141,16 +159,47 @@ def _aesgcm():
 
 
 def _cifrar(texto: str) -> str:
-    chave, _ = _chave_local()
+    chave, _ = _chave_local(criar=True)
     iv = os.urandom(12)
     dados = _aesgcm()(chave).encrypt(iv, texto.encode("utf-8"), b"ultron-cofre")
     return base64.b64encode(iv + dados).decode("ascii")
 
 
 def _decifrar(pacote: str) -> str:
-    chave, _ = _chave_local()
+    chave, _ = _chave_local(criar=False)
     cru = base64.b64decode(pacote.encode("ascii"))
     return _aesgcm()(chave).decrypt(cru[:12], cru[12:], b"ultron-cofre").decode("utf-8")
+
+
+def cifrar_dados(texto: str) -> str:
+    """Cifra o conteúdo do histórico; o prefixo v1: identifica o formato."""
+    chave, _ = _chave_local(criar=True)
+    iv = os.urandom(12)
+    dados = _aesgcm()(chave).encrypt(iv, str(texto).encode("utf-8"), AAD_DADOS)
+    return PREFIXO_DADOS + base64.b64encode(iv + dados).decode("ascii")
+
+
+def decifrar_dados(pacote: str) -> str:
+    """Decifra um pacote v1:; qualquer erro propaga (nunca devolve ciphertext)."""
+    if not parece_cifrado(pacote):
+        raise ValueError("Pacote de dados sem o prefixo esperado.")
+    cru = base64.b64decode(pacote[len(PREFIXO_DADOS):].encode("ascii"), validate=True)
+    if len(cru) < 12 + 16:
+        raise ValueError("Pacote de dados truncado.")
+    chave, _ = _chave_local(criar=False)
+    return _aesgcm()(chave).decrypt(cru[:12], cru[12:], AAD_DADOS).decode("utf-8")
+
+
+def parece_cifrado(texto) -> bool:
+    return isinstance(texto, str) and texto.startswith(PREFIXO_DADOS)
+
+
+def chave_disponivel() -> bool:
+    try:
+        _chave_local(criar=False)
+        return True
+    except ChaveIndisponivel:
+        return False
 
 
 def _ler() -> dict:
@@ -238,7 +287,10 @@ def status() -> dict:
     """O que a interface pode saber: configurado? de onde vem? qual o final?"""
     import config
     dados = _ler()
-    _, modo = _chave_local()
+    try:
+        _, modo = _chave_local(criar=True)
+    except ChaveIndisponivel:
+        modo = "indisponivel"
     itens = []
     for nome in PROVEDORES + OUTROS:
         guardado = dados.get(nome) if isinstance(dados.get(nome), dict) else None
@@ -258,7 +310,8 @@ def status() -> dict:
     return {
         "itens": itens,
         "protecao": ("Windows DPAPI + AES-256-GCM" if modo == "dpapi"
-                     else "AES-256-GCM com chave local (sem DPAPI neste sistema)"),
+                     else "AES-256-GCM com chave local (sem DPAPI neste sistema)" if modo == "arquivo"
+                     else "indisponível — restaure dados/.cofre.chave"),
         "modo": modo,
         "arquivo": (str(ARQUIVO.relative_to(_RAIZ)) if ARQUIVO.is_relative_to(_RAIZ)
                     else ARQUIVO.name),

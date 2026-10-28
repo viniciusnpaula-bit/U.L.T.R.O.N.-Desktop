@@ -1,15 +1,12 @@
 name: Desktop (U.L.T.R.O.N.)
 
-# Só o Desktop: a pasta ULTRON-Mobile/ tem workflow próprio e não é afetada aqui.
 on:
   push:
     branches: [main]
     paths-ignore:
-      - 'ULTRON-Mobile/**'
       - '**.md'
   pull_request:
     paths-ignore:
-      - 'ULTRON-Mobile/**'
       - '**.md'
   workflow_dispatch:
 

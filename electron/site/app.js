@@ -1,5 +1,6 @@
 import { RealTransport } from './src/real.js';
-import { criarOrbe, criarCampo, estadoDoOrbe } from './src/orb.js';
+import { criarOrbe, criarCampo, estadoDoOrbe, normalizarModo } from './src/orb.js';
+import { criarDesbloqueio } from './src/unlock.js';
 
 /* Uma tela só. Nada aqui inventa estado: tudo desenhado vem do núcleo. */
 // Elemento ausente devolve um stub inerte: a interface nunca morre por causa de um id.
@@ -25,11 +26,25 @@ const state = {
   writing: 0,         // turnos que vieram do campo de texto nesta sessão
   palco: null,        // mídia exibida no lugar do núcleo
   palcoIgnorado: null, // id fechado localmente: não reabre por um status atrasado
+  undo: [], undoErro: false, undoBusy: false, // diário: só o que veio de GET /undo
 };
 const transport = new RealTransport({ onEvent: handleEvent });
+const desbloqueio = criarDesbloqueio({
+  transport,
+  aoMudarSessao: desbloqueada => {
+    const botao = $('sessionButton');
+    botao.textContent = desbloqueada ? 'liberado' : 'bloqueado';
+    botao.dataset.state = desbloqueada ? 'on' : 'off';
+  },
+});
 
 /* ── cena ────────────────────────────────────────────────────────────────── */
-const orb = criarOrbe($('orbCanvas'));
+const CHAVE_MODO = 'ultron-core';
+function lerModoNucleo() {
+  try { return normalizarModo(localStorage.getItem(CHAVE_MODO)); } catch { return '3d'; }
+}
+let modoNucleo = lerModoNucleo();
+const orb = criarOrbe($('orbCanvas'), { modo: modoNucleo });
 const campo = criarCampo($('field'));
 const orbMem = {};
 let orbTimer = null, orbBusy = false;
@@ -60,7 +75,29 @@ function applyTheme(theme) {
   document.documentElement.dataset.theme = selected;
   try { localStorage.setItem('ultron-theme', selected); } catch {}
   document.querySelectorAll('#themeSwatches .swatch').forEach(node => node.setAttribute('aria-checked', String(node.dataset.theme === selected)));
+  document.querySelectorAll('[data-theme-pill]').forEach(node => {
+    node.setAttribute('aria-pressed', String(node.dataset.themePill === selected));
+  });
   publishHudSnapshot();
+}
+
+/* ── núcleo 3D/2D ────────────────────────────────────────────────────────── */
+/* O modo vive no localStorage; chip, gaveta e orbe são derivados dele.
+   `avisar` existe para o clique: o boot não fala nada. */
+function aplicarModoNucleo(modo, { avisar = false } = {}) {
+  modoNucleo = normalizarModo(modo);
+  orb.definirModo(modoNucleo);
+  try {
+    if (localStorage.getItem(CHAVE_MODO) !== modoNucleo) localStorage.setItem(CHAVE_MODO, modoNucleo);
+  } catch {}
+  const chip = $('coreMode');
+  chip.textContent = modoNucleo.toUpperCase();
+  chip.setAttribute('aria-pressed', String(modoNucleo === '3d'));
+  chip.title = `Alternar núcleo ${modoNucleo === '3d' ? '3D' : '2D'}`;
+  document.querySelectorAll('[data-core]').forEach(node => {
+    node.setAttribute('aria-checked', String(node.dataset.core === modoNucleo));
+  });
+  if (avisar) toast(`Núcleo ${modoNucleo.toUpperCase()}`);
 }
 
 /* ── HUD flutuante ───────────────────────────────────────────────────────── */
@@ -194,6 +231,93 @@ async function carregarConversa() {
   } catch { /* a API pode não ter a rota em versões antigas: a fita ainda mostra tudo */ }
 }
 
+/* ── diário (GET /undo) ───────────────────────────────────────────────────── */
+/* Linha somente leitura: o comando do rodapé desfaz a próxima operação real,
+   não a linha clicada — por isso nenhum botão por item. */
+function linhaDesfazer(item) {
+  const linha = document.createElement('article');
+  linha.className = 'undo-row';
+  linha.dataset.done = String(item?.desfeito === true);
+  const cab = document.createElement('div');
+  cab.className = 'undo-head';
+  const op = document.createElement('b');
+  op.textContent = String(item?.operacao || 'operação');
+  op.title = op.textContent;
+  const hora = document.createElement('time');
+  hora.textContent = horaDe(item?.criado);
+  cab.append(op, hora);
+  if (item?.desfeito) {
+    const selo = document.createElement('span');
+    selo.className = 'undo-tag';
+    selo.textContent = 'desfeito';
+    cab.append(selo);
+  }
+  const resumo = document.createElement('p');
+  resumo.textContent = String(item?.resumo || '');
+  resumo.title = resumo.textContent;
+  linha.append(cab, resumo);
+  return linha;
+}
+
+function pintarDiario() {
+  const lista = $('undoList');
+  lista.replaceChildren();
+  $('undoAction').disabled = state.undo.length === 0;
+  if (state.undoErro) {
+    const aviso = document.createElement('p');
+    aviso.className = 'undo-empty err';
+    aviso.textContent = 'diário indisponível';
+    lista.append(aviso);
+  } else if (!state.undo.length) {
+    const vazio = document.createElement('p');
+    vazio.className = 'undo-empty';
+    vazio.textContent = 'nada para desfazer';
+    lista.append(vazio);
+  } else {
+    for (const item of state.undo) lista.append(linhaDesfazer(item));
+  }
+  $('undoNote').textContent = state.undoErro ? 'diário indisponível'
+    : state.undo.length ? `somente leitura · ${state.undo.length} de 10` : 'nada para desfazer';
+}
+
+function limparDiario() {
+  state.undo = [];
+  state.undoErro = false;
+  pintarDiario();
+}
+
+/* Sem timer: chamado na transição para liberado, ao abrir o dock e após cada
+   COMMAND_RESULT. A guarda de sessão é o que impede leitura com a tela travada. */
+async function carregarDiario() {
+  if (state.status.session_desbloqueada !== true || state.undoBusy) return;
+  state.undoBusy = true;
+  try {
+    const dados = await transport.undoList();
+    state.undo = Array.isArray(dados?.itens) ? dados.itens : [];
+    state.undoErro = dados?.indisponivel === true;
+  } catch {
+    state.undo = [];
+    state.undoErro = true;
+  } finally {
+    state.undoBusy = false;
+    pintarDiario();
+  }
+}
+
+async function carregarHistorico() {
+  const alvo = $('dockHistorico');
+  if (state.status.session_desbloqueada !== true) { alvo.textContent = 'histórico local'; return; }
+  try {
+    const info = await transport.unlockInfo();
+    const historico = info?.historico;
+    alvo.textContent = historico
+      ? `AES-256-GCM · ${historico.chave === 'indisponivel' ? 'chave indisponível' : 'cifrado'}`
+      : 'histórico local';
+  } catch {
+    alvo.textContent = 'histórico local';
+  }
+}
+
 /* ── relógio ─────────────────────────────────────────────────────────────── */
 function updateClock() {
   const now = new Date();
@@ -215,10 +339,15 @@ function connection(online) {
 }
 
 function updateStatus(data) {
+  const sessaoAntes = state.status.session_desbloqueada;
   data = state.status = { ...state.status, ...data };
   state.connected = data.api_running === true && data.core_running === true;
   state.paused = data.microphone_paused === true;
   sincronizarPalco(data.palco || null);
+  desbloqueio.definirSessao(data.session_desbloqueada === true);
+  const sessaoBotao = $('sessionButton');
+  sessaoBotao.textContent = data.session_desbloqueada === true ? 'liberado' : 'bloqueado';
+  sessaoBotao.dataset.state = data.session_desbloqueada === true ? 'on' : 'off';
 
   const mic = data.microphone_error ? 'erro' : state.paused ? 'pausado'
     : data.microphone_capturing ? 'capturando'
@@ -227,6 +356,10 @@ function updateStatus(data) {
   setMetric('micVal', mic);
   setMetric('coreVal', typeof data.core_running === 'boolean' ? (data.core_running ? 'Online' : 'Parado') : 'Indisponível');
   setMetric('apiServiceVal', typeof data.api_running === 'boolean' ? (data.api_running ? 'Conectada' : 'Parada') : 'Indisponível');
+  setMetric('dockCore', $('coreVal').textContent);
+  setMetric('dockApi', $('apiServiceVal').textContent);
+  setMetric('dockMic', mic);
+  $('dockSession').textContent = data.session_desbloqueada === true ? 'liberado' : 'bloqueado';
   setMetric('systemMicVal', mic);
   setMetric('coreState', data.core_running === true ? 'OPERACIONAL' : data.core_running === false ? 'NÚCLEO PARADO' : 'DESCONHECIDO');
   setMetric('signalCoreText', $('coreVal').textContent);
@@ -248,7 +381,12 @@ function updateStatus(data) {
   bar.style.width = `${percent ?? 0}%`;
   meter.classList.toggle('live', percent !== null && !state.paused);
   setMetric('micLevelVal', percent === null ? '—' : `${percent}%`);
-  if ($('micDetail')) $('micDetail').textContent = data.microphone_error || (state.paused ? 'Escuta pausada' : data.microphone_capturing ? 'Capturando áudio' : data.microphone_state || 'indisponível');
+  const detalheMic = data.microphone_error || (state.paused ? 'Escuta pausada' : data.microphone_capturing ? 'Capturando áudio' : data.microphone_state || 'indisponível');
+  if ($('micDetail')) $('micDetail').textContent = detalheMic;
+  // #voiceSubStatus vive dentro de #reply[aria-live=polite] e o status é relido
+  // a cada 750 ms: reescrever a mesma string faria o leitor reanunciar sem parar.
+  const subVoz = $('voiceSubStatus');
+  if (subVoz.textContent !== detalheMic) subVoz.textContent = detalheMic;
 
   for (const [valueId, barId, value] of [['cpuVal', 'cpuBar', data.cpu_percent], ['ramVal', 'ramBar', data.ram_percent], ['diskVal', 'diskBar', data.disk_percent]]) {
     const n = value == null || !Number.isFinite(Number(value)) ? null : Math.max(0, Math.min(100, Number(value)));
@@ -276,6 +414,13 @@ function updateStatus(data) {
   setMetric('voicePageStatus', data.microphone_error || mic);
 
   if (state.pending === null) aplicarEstado(data);
+  // sessão: o diário só é lido na transição para liberado e é limpo ao bloquear
+  if (data.session_desbloqueada === true && sessaoAntes !== true) {
+    carregarHistorico();
+    carregarDiario();
+  }
+  if (data.session_desbloqueada !== true && (state.undo.length || state.undoErro)) limparDiario();
+  if (data.session_desbloqueada !== true) $('dockHistorico').textContent = 'histórico local';
   publishHudSnapshot();
 }
 
@@ -545,6 +690,7 @@ function handleEvent(event) {
     const value = event.data?.response;
     const text = typeof value === 'string' && value ? value : 'O núcleo recebeu o comando.';
     responder(text);
+    carregarDiario();       // o comando pode ter mudado o diário; sem timer
     const escrito = state.writing > 0;
     if (escrito) state.writing -= 1;
     if (escrito) adicionarTurno({ role: 'assistant', text, source: 'texto', at: Date.now() / 1000 });
@@ -784,6 +930,7 @@ function pintarPerfil(perfil) {
   });
   const salvo = tratamentosPorPerfil[perfil];
   if (typeof salvo === 'string') $('tratamentoInput').value = salvo;
+  $('headerProfile').textContent = String(perfil || 'ultron').toUpperCase();
 }
 
 function renderStyleCards(jeitos) {
@@ -812,6 +959,7 @@ function pintarJeito(jeito) {
   document.querySelectorAll('#styleCards [data-jeito]').forEach(node => {
     node.setAttribute('aria-checked', String(node.dataset.jeito === jeitoAtual));
   });
+  $('headerStyle').textContent = jeitosCache.find(j => j.id === jeitoAtual)?.rotulo || jeitoAtual;
 }
 
 function pintarSaudacao(ligada) {
@@ -1234,6 +1382,7 @@ function mostrarVersao(info) {
   if (info.current_version) {
     updateUi.version = info.current_version;
     $('updateVersion').textContent = info.current_version;
+    $('dockVersion').textContent = info.current_version;
   }
   const check = info.last_check;
   if (check?.status === 'erro') updateLinha(check.message || 'não foi possível verificar', 'err');
@@ -1342,38 +1491,38 @@ async function desfazerAtualizacao() {
   }
 }
 
-/* ── barra recolhível (bate-papo) ─────────────────────────────────────────── */
-/* Nasce aberta, lembra a escolha e pode ser recolhida por três caminhos:
-   botão no topo, seta no próprio cabeçalho e atalho (Ctrl+1). */
+/* ── docks recolhíveis (bate-papo e diário) ───────────────────────────────── */
+/* Nascem abertos (o diário só em tela larga), lembram a escolha e podem ser
+   recolhidos por dois caminhos: botão no topo e seta no próprio cabeçalho. */
 const RAILS = {
-  chat: { chave: 'ultron-chat-aberto', attr: 'data-chat', botoes: ['collapseChat'] },
+  chat: { chave: 'ultron-chat-aberto', attr: 'data-chat', botoes: ['collapseChat'],
+    alternador: 'toggleChat', rotulo: 'bate-papo', tecla: 'Ctrl+1', painel: 'drawerChat' },
+  sys: { chave: 'ultron-sys-aberto', attr: 'data-sys', botoes: ['collapseSystem'],
+    alternador: 'toggleSystem', rotulo: 'diário', tecla: 'Ctrl+2', painel: 'sidePanel' },
 };
 
 function aplicarRail(nome, aberto) {
   const rail = RAILS[nome];
-  const tag = document.documentElement;
-  tag.setAttribute(rail.attr, aberto ? 'on' : 'off');
+  document.documentElement.setAttribute(rail.attr, aberto ? 'on' : 'off');
+  const titulo = `${aberto ? 'Recolher' : 'Abrir'} ${rail.rotulo} (${rail.tecla})`;
   for (const id of rail.botoes) {
     const botao = $(id);
-    if (!botao) continue;
     botao.setAttribute('aria-pressed', String(aberto));
     botao.setAttribute('aria-expanded', String(aberto));
-    botao.title = `${aberto ? 'Recolher' : 'Abrir'} bate-papo (Ctrl+1)`;
+    botao.title = titulo;
   }
-  const alternador = $('toggleChat');
-  if (alternador) {
-    alternador.setAttribute('aria-expanded', String(aberto));
-    alternador.title = `${aberto ? 'Recolher' : 'Abrir'} bate-papo (Ctrl+1)`;
-  }
-  const painel = $('drawerChat');
-  if (painel) painel.setAttribute('aria-hidden', String(!aberto));
+  const alternador = $(rail.alternador);
+  alternador.setAttribute('aria-expanded', String(aberto));
+  alternador.title = titulo;
+  const painel = $(rail.painel);
+  painel.setAttribute('aria-hidden', String(!aberto));
   try { localStorage.setItem(rail.chave, aberto ? '1' : '0'); } catch {}
+  if (nome === 'sys' && aberto) carregarDiario();   // abrir o dock é uma leitura, não um timer
   return aberto;
 }
 
 function railAberto(nome) {
-  const rail = RAILS[nome];
-  return document.documentElement.getAttribute(rail.attr) !== 'off';
+  return document.documentElement.getAttribute(RAILS[nome].attr) !== 'off';
 }
 
 function alternarRail(nome) {
@@ -1381,10 +1530,11 @@ function alternarRail(nome) {
 }
 
 function restaurarRails() {
+  const padrao = { chat: '1', sys: window.innerWidth >= 1280 ? '1' : '0' };
   for (const nome of Object.keys(RAILS)) {
-    let salvo = '1';
-    try { salvo = localStorage.getItem(RAILS[nome].chave) ?? '1'; } catch {}
-    aplicarRail(nome, salvo !== '0');
+    let salvo = null;
+    try { salvo = localStorage.getItem(RAILS[nome].chave); } catch {}
+    aplicarRail(nome, (salvo ?? padrao[nome]) !== '0');
   }
 }
 
@@ -1396,7 +1546,7 @@ let gavetaSaindo = 0;
 
 function posicionarBarra() {
   // a barra nasce abaixo da faixa superior e acompanha a altura real da câmara
-  const topo = document.querySelector('.topline')?.getBoundingClientRect().bottom ?? 74;
+  const topo = document.querySelector('.bridge')?.getBoundingClientRect().bottom ?? 64;
   document.documentElement.style.setProperty('--stage-top', `${Math.round(topo + 8)}px`);
 }
 
@@ -1462,7 +1612,11 @@ function fecharGaveta() {
 
 /* ── ligação dos controles ───────────────────────────────────────────────── */
 applyTheme((() => { try { return localStorage.getItem('ultron-theme') || 'ultron'; } catch { return 'ultron'; } })());
+aplicarModoNucleo(modoNucleo);
 document.querySelectorAll('#themeSwatches .swatch').forEach(node => node.onclick = () => applyTheme(node.dataset.theme));
+document.querySelectorAll('[data-theme-pill]').forEach(node => node.onclick = () => applyTheme(node.dataset.themePill));
+$('coreMode').onclick = () => aplicarModoNucleo(modoNucleo === '3d' ? '2d' : '3d', { avisar: true });
+document.querySelectorAll('[data-core]').forEach(node => node.onclick = () => aplicarModoNucleo(node.dataset.core, { avisar: true }));
 document.querySelectorAll('[data-command]').forEach(button => button.onclick = () => send(button.dataset.command));
 
 $('consoleForm').addEventListener('submit', event => {
@@ -1514,7 +1668,23 @@ $('clearHistory').onclick = async () => {
   toast(confirmado ? 'Sessão limpa.' : 'Tela limpa. O núcleo não confirmou a limpeza.');
 };
 $('toggleChat')?.addEventListener('click', () => alternarRail('chat'));
+$('toggleSystem')?.addEventListener('click', () => alternarRail('sys'));
+$('sessionButton').addEventListener('click', async () => {
+  if (state.status.session_desbloqueada === true) {
+    try { await transport.lock(); } catch { /* o polling reconcilia */ }
+    state.status.session_desbloqueada = false;
+    limparDiario();          // o diário tem caminhos do usuário: some no bloqueio
+  }
+  desbloqueio.abrir();
+});
+transport.onSessionLocked(() => desbloqueio.abrir());
 $('collapseChat').onclick = () => alternarRail('chat');
+$('collapseSystem').onclick = () => alternarRail('sys');
+$('undoAction').onclick = async () => {
+  $('undoAction').disabled = true;          // duplo clique não envia o comando duas vezes
+  await send('Desfazer a última operação');
+  pintarDiario();                           // reabilita conforme a lista real
+};
 $('openSettings').onclick = () => drawer(!gavetaAberta);
 /* fechar: seta, clique fora (o backdrop cobre o resto da tela) e Esc */
 $('closeDrawer').addEventListener('click', event => { event.preventDefault(); fecharGaveta(); });
@@ -1565,11 +1735,12 @@ async function pararTudo() {
   catch (error) { toast(`A parada de emergência falhou: ${error.message}`); }
 }
 
-/* atalhos: Ctrl+1 bate-papo · Ctrl+2 eventos · Ctrl+, sistema · Ctrl+K comando · Esc · Esc Esc para tudo */
+/* atalhos: Ctrl+1 bate-papo · Ctrl+2 diário · Ctrl+, ajustes · Ctrl+K comando · Esc · Esc Esc para tudo */
 let ultimoEsc = 0;
 function atalhos(event) {
   if (event.ctrlKey && event.key === ',') { event.preventDefault(); event.stopPropagation(); drawer(!gavetaAberta); return; }
   if (event.ctrlKey && (event.key === '1' || event.key === '!')) { event.preventDefault(); event.stopPropagation(); alternarRail('chat'); return; }
+  if (event.ctrlKey && (event.key === '2' || event.key === '@')) { event.preventDefault(); event.stopPropagation(); alternarRail('sys'); return; }
   if (event.ctrlKey && event.key.toLowerCase() === 'k') { event.preventDefault(); $('commandInput').focus(); return; }
   if (event.key === 'Escape') {
     const agora = Date.now();
@@ -1598,15 +1769,18 @@ updateClock();
 setInterval(updateClock, 1000);
 window.addEventListener('resize', () => { if (gavetaAberta) posicionarBarra(); });
 document.addEventListener('visibilitychange', () => orbLoop(!document.hidden));
-window.addEventListener('beforeunload', () => { orb.parar(); campo.parar(); transport.disconnect(); });
+window.addEventListener('beforeunload', () => { orb.parar(); campo.parar(); desbloqueio.parar(); transport.disconnect(); });
 
 (async () => {
-  // AO ABRIR: a gaveta de sistema já está aberta por padrão — a conexão com o
-  // núcleo chega depois e não deve segurar a interface vazia por 12s
-  drawer(true, { focar: false });
+  // AO ABRIR: o overlay de desbloqueio cuida da sessão; os docks já estão no
+  // lugar (restaurarRails) e a conexão com o núcleo chega sem segurar a tela
+  desbloqueio.abrir();
   try {
     await transport.connect();
     connection(true);
+    pintarDiario();                           // estado honesto: vazio até haver dado real
+    carregarPersonalidade();                  // alimenta o perfil/jeito do header
+    carregarHistorico();                      // sai cedo se a sessão ainda está bloqueada
   } catch (est) {
     if (est && typeof est.message === 'string') {
       $('updateLine').textContent = 'Aguardando o núcleo local... (abra pelo atalho ULTRON Desktop)';

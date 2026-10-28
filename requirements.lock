@@ -21,3 +21,8 @@ pillow==13.0.0
 pystray==0.19.5
 cryptography==50.0.2
 opencv-python-headless==5.0.0.93
+winrt-runtime==4.0.3
+winrt-Windows.Foundation==4!10.0.28000.2705
+winrt-Windows.Foundation.Collections==4!10.0.28000.2705
+winrt-Windows.Security.Credentials.UI==4!10.0.28000.2705
+winrt-Windows.Storage.Streams==4!10.0.28000.2705

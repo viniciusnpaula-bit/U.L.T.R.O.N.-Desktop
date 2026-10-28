@@ -25,6 +25,124 @@ export function estadoDoOrbe(s, mem, agora) {
   return { rotulo: 'À ESCUTA', dica: 'Diga “Ei, Ultron” ou escreva abaixo.', energia: 0, brilho: 0.85 };
 }
 
+const CAMERA_PADRAO = Object.freeze({ z: 7.4, foco: (45 * Math.PI) / 180 });
+
+export function normalizarModo(modo) {
+  return modo === '2d' ? '2d' : '3d';
+}
+
+// Perspectiva simples: o chamador multiplica pelo raio em pixels.
+// `z` maior = mais perto da câmera = maior escala.
+export function projetar(ponto, camera = CAMERA_PADRAO) {
+  const z = Number.isFinite(camera?.z) ? camera.z : CAMERA_PADRAO.z;
+  const foco = Number.isFinite(camera?.foco) ? camera.foco : CAMERA_PADRAO.foco;
+  const profundidade = Math.max(0.15, z - (Number(ponto?.z) || 0));
+  const escala = (1 / Math.tan(foco / 2)) / profundidade;
+  return {
+    x: (Number(ponto?.x) || 0) * escala,
+    y: (Number(ponto?.y) || 0) * escala,
+    escala,
+    z: Number(ponto?.z) || 0,
+  };
+}
+
+function icosaedro() {
+  const t = (1 + Math.sqrt(5)) / 2;
+  const base = [
+    [-1, t, 0], [1, t, 0], [-1, -t, 0], [1, -t, 0],
+    [0, -1, t], [0, 1, t], [0, -1, -t], [0, 1, -t],
+    [t, 0, -1], [t, 0, 1], [-t, 0, -1], [-t, 0, 1],
+  ];
+  // as arestas são medidas na malha regular: escalar antes muda cada
+  // comprimento e a regra de distância 2 não acha nenhuma aresta
+  const arestas = [];
+  for (let i = 0; i < base.length; i++) {
+    for (let j = i + 1; j < base.length; j++) {
+      const [ax, ay, az] = base[i], [bx, by, bz] = base[j];
+      if (Math.abs(Math.hypot(ax - bx, ay - by, az - bz) - 2) < 0.02) arestas.push([i, j]);
+    }
+  }
+  const vertices = base.map(([x, y, z]) => ({ x: x * 0.76, y: y * 1.2, z: z * 0.84 }));
+  return { vertices, arestas };
+}
+
+export function geometriaDoCristal() {
+  return icosaedro();
+}
+
+function girar(ponto, ax, ay, az) {
+  const cx = Math.cos(ax), sx = Math.sin(ax);
+  const cy = Math.cos(ay), sy = Math.sin(ay);
+  const cz = Math.cos(az), sz = Math.sin(az);
+  const y1 = ponto.y * cx - ponto.z * sx;
+  const z1 = ponto.y * sx + ponto.z * cx;
+  const x2 = ponto.x * cy + z1 * sy;
+  const z2 = -ponto.x * sy + z1 * cy;
+  return { x: x2 * cz - y1 * sz, y: x2 * sz + y1 * cz, z: z2 };
+}
+
+// `icosaedro()` vem de `geometriaDoCristal()`, exportado na Tarefa 4.
+function octaedro(niveis = 2) {
+  const vertices = [
+    { x: 1, y: 0, z: 0 }, { x: -1, y: 0, z: 0 },
+    { x: 0, y: 1, z: 0 }, { x: 0, y: -1, z: 0 },
+    { x: 0, y: 0, z: 1 }, { x: 0, y: 0, z: -1 },
+  ];
+  let faces = [[0, 2, 4], [2, 1, 4], [1, 3, 4], [3, 0, 4],
+    [2, 0, 5], [1, 2, 5], [3, 1, 5], [0, 3, 5]];
+  for (let n = 0; n < niveis; n++) {
+    const cache = new Map();
+    const proximas = [];
+    const meio = (a, b) => {
+      const chave = a < b ? `${a}:${b}` : `${b}:${a}`;
+      if (cache.has(chave)) return cache.get(chave);
+      const va = vertices[a], vb = vertices[b];
+      const norma = Math.hypot((va.x + vb.x) / 2, (va.y + vb.y) / 2, (va.z + vb.z) / 2) || 1;
+      vertices.push({
+        x: (va.x + vb.x) / 2 / norma,
+        y: (va.y + vb.y) / 2 / norma,
+        z: (va.z + vb.z) / 2 / norma,
+      });
+      cache.set(chave, vertices.length - 1);
+      return vertices.length - 1;
+    };
+    for (const [a, b, c] of faces) {
+      const ab = meio(a, b), bc = meio(b, c), ca = meio(c, a);
+      proximas.push([a, ab, ca], [b, bc, ab], [c, ca, bc], [ab, bc, ca]);
+    }
+    faces = proximas;
+  }
+  const vistas = new Set();
+  const arestas = [];
+  for (const [a, b, c] of faces) {
+    for (const [i, j] of [[a, b], [b, c], [c, a]]) {
+      const chave = i < j ? `${i}:${j}` : `${j}:${i}`;
+      if (!vistas.has(chave)) { vistas.add(chave); arestas.push([i, j]); }
+    }
+  }
+  return { vertices, arestas };
+}
+
+function toro(raio, tubo, segmentos = 64) {
+  const vertices = [];
+  const arestas = [];
+  for (let i = 0; i < segmentos; i++) {
+    const u = (i / segmentos) * Math.PI * 2;
+    for (let j = 0; j < 8; j++) {
+      const v = (j / 8) * Math.PI * 2;
+      vertices.push({
+        x: (raio + tubo * Math.cos(v)) * Math.cos(u),
+        y: tubo * Math.sin(v),
+        z: (raio + tubo * Math.cos(v)) * Math.sin(u),
+      });
+      const atual = i * 8 + j;
+      arestas.push([atual, ((i + 1) % segmentos) * 8 + j]);
+      if (j === 0) arestas.push([atual, i * 8 + 1]);
+    }
+  }
+  return { vertices, arestas };
+}
+
 function hexParaHsl(hex) {
   const m = /^#?([0-9a-f]{6})$/i.exec(String(hex).trim());
   const n = m ? parseInt(m[1], 16) : 0xff3446;
@@ -35,7 +153,7 @@ function hexParaHsl(hex) {
   return { h: (h * 60 + 360) % 360, s: d ? d / (1 - Math.abs(2 * l - 1)) : 0 };
 }
 
-export function criarOrbe(canvas) {
+export function criarOrbe(canvas, { modo } = {}) {
   const c = canvas.getContext('2d');
   const reduzir = window.matchMedia?.('(prefers-reduced-motion: reduce)').matches;
   const FILAMENTOS = 4;
@@ -49,6 +167,26 @@ export function criarOrbe(canvas) {
   let raf = 0, ultimo = 0, fase = 0, giro = 0, energia = 0, brilho = 0.8;
   let alvo = { energia: 0, brilho: 0.8 }, cor = hexParaHsl('#ff3446'), corLida = 0;
   let w = 0, h = 0, dpr = 1;
+
+  // malhas construídas uma vez; o quadro só gira e projeta
+  const cristal = geometriaDoCristal();
+  const casca = octaedro(2);
+  const aneisGiro = [
+    { malha: toro(1.85, 0.012), ax: 0.5, ay: 0.2, az: 1.1, vel: 0.22 },
+    { malha: toro(2.18, 0.010), ax: -0.9, ay: 0.6, az: 0.3, vel: -0.16 },
+    { malha: toro(2.52, 0.008), ax: 0.2, ay: -1.1, az: 0.7, vel: 0.11 },
+  ];
+  let modoAtual = normalizarModo(modo);
+  let alvoX3d = 0, alvoY3d = 0, px3d = 0, py3d = 0;
+  let rodando = false;
+  const aoMover3d = evento => {
+    if (reduzir || modoAtual !== '3d') return;
+    const r = canvas.getBoundingClientRect();
+    alvoX3d = (evento.clientX - (r.left + r.width / 2)) / Math.max(1, r.width);
+    alvoY3d = (evento.clientY - (r.top + r.height / 2)) / Math.max(1, r.height);
+  };
+  window.addEventListener('pointermove', aoMover3d, { passive: true });
+  window.addEventListener('pointerleave', () => { alvoX3d = 0; alvoY3d = 0; });
 
   function medir() {
     dpr = Math.min(2, window.devicePixelRatio || 1);
@@ -78,29 +216,8 @@ export function criarOrbe(canvas) {
     c.globalAlpha = 1;
   }
 
-  function quadro(t) {
-    const dt = Math.min(0.05, (t - ultimo) / 1000 || 0.016);
-    ultimo = t;
-    if (t - corLida > 800) {          // a cor acompanha --core do tema
-      cor = hexParaHsl(getComputedStyle(document.documentElement).getPropertyValue('--core'));
-      corLida = t;
-    }
-    const ataque = alvo.energia > energia;
-    energia += (alvo.energia - energia) * (1 - Math.exp(-dt * (ataque ? 9 : 2.2)));
-    brilho += (alvo.brilho - brilho) * (1 - Math.exp(-dt * 3.4));
-    const vel = reduzir ? 0.25 : 1;
-    fase += dt * (0.6 + 3.4 * energia) * vel;
-    giro += dt * (0.05 + 0.55 * energia) * vel;
-
-    c.setTransform(1, 0, 0, 1, 0, 0);
-    c.clearRect(0, 0, canvas.width, canvas.height);
-    c.scale(dpr, dpr);
-    c.translate(w / 2, h / 2);
-    const R = Math.min(w, h) * 0.5;
-    const sat = 62 + 38 * energia;
-    const luz = 44 + 14 * energia;
-    const intensidade = (0.55 + 0.45 * energia) * brilho;
-
+  // Ramo 2D: o desenho original do orbe, sem mudanças.
+  function desenhar2d(R, cor, sat, luz, intensidade) {
     c.globalCompositeOperation = 'lighter';
 
     // 1) halo atmosférico
@@ -150,37 +267,164 @@ export function criarOrbe(canvas) {
     c.beginPath(); c.arc(0, 0, R * 0.24 * pulso, 0, Math.PI * 2); c.fill();
 
     c.globalCompositeOperation = 'source-over';
+  }
+
+  // Projeção em perspectiva: glow → núcleo → malhas (casca, cristal, anéis) → anéis de onda.
+  function desenhar3d(dt, R, cor, sat, luz, intensidade) {
+    if (reduzir) {
+      px3d = 0; py3d = 0;
+    } else {
+      const amortece = 1 - Math.exp(-dt * 3);
+      px3d += (alvoX3d - px3d) * amortece;
+      py3d += (alvoY3d - py3d) * amortece;
+    }
+    const ax = 0.35 + py3d * 0.6;
+    const ay = (reduzir ? 0 : giro) + px3d * 0.9;
+
+    c.globalCompositeOperation = 'lighter';
+
+    // 1) glow
+    const halo = c.createRadialGradient(0, 0, R * 0.05, 0, 0, R * 0.72);
+    halo.addColorStop(0, `hsla(${cor.h}, ${sat}%, ${luz}%, ${0.30 * intensidade})`);
+    halo.addColorStop(1, `hsla(${cor.h}, ${sat}%, ${luz - 12}%, 0)`);
+    c.fillStyle = halo;
+    c.beginPath(); c.arc(0, 0, R * 0.72, 0, Math.PI * 2); c.fill();
+
+    // 2) esfera interna: respira com a energia
+    const raioNucleo = Math.max(1, R * (0.22 + 0.05 * Math.sin(fase * 1.3) + 0.1 * energia));
+    const nucleo = c.createRadialGradient(0, 0, 0, 0, 0, raioNucleo);
+    nucleo.addColorStop(0, `hsla(${cor.h}, 30%, 96%, ${0.95 * intensidade})`);
+    nucleo.addColorStop(0.4, `hsla(${cor.h}, ${sat}%, ${luz + 20}%, ${0.7 * intensidade})`);
+    nucleo.addColorStop(1, `hsla(${cor.h}, ${sat}%, ${luz}%, 0)`);
+    c.fillStyle = nucleo;
+    c.beginPath(); c.arc(0, 0, raioNucleo, 0, Math.PI * 2); c.fill();
+
+    // 3) malhas: escala projetada ~0.7×..1.4× a nominal vira 0..1
+    const escalaBase = projetar({ x: 0, y: 0, z: 0 }).escala;
+    const normalizar = e => Math.min(1, Math.max(0, (e / escalaBase - 0.7) / 0.7));
+    const malhas = [
+      { malha: casca, escala: 0.30, alfa: 0.20, anel: null },
+      { malha: cristal, escala: 0.23, alfa: 0.75, anel: null },
+      ...aneisGiro.map(a => ({ malha: a.malha, escala: 0.34, alfa: 1, anel: a })),
+    ];
+    for (const { malha, escala, alfa, anel } of malhas) {
+      // com movimento reduzido os anéis ficam com ângulos fixos
+      if (anel && !reduzir) anel.volta = (anel.volta || 0) + anel.vel * dt;
+      const ox = ax + (anel ? anel.ax : 0);
+      const oy = ay + (anel ? anel.ay : 0);
+      const oz = (anel ? anel.az + (anel.volta || 0) : 0);
+      const pontos = malha.vertices.map(v => {
+        const p = projetar(girar(v, ox, oy, oz));
+        return { x: p.x * escala * R, y: p.y * escala * R, z: p.z, escala: p.escala };
+      });
+      const arestas = malha.arestas
+        .map(([i, j]) => ({ i, j, z: (pontos[i].z + pontos[j].z) / 2 }))
+        .sort((a, b) => a.z - b.z);            // fundo primeiro
+      const escalaMedia = pontos.reduce((soma, p) => soma + p.escala, 0) / pontos.length;
+      const n = normalizar(escalaMedia);
+      c.strokeStyle = `hsla(${cor.h}, ${sat}%, ${luz + 18}%, 1)`;
+      c.globalAlpha = alfa * (0.12 + 0.58 * n);
+      c.lineWidth = 0.5 + 1.1 * n;
+      for (const { i, j } of arestas) {
+        c.beginPath();
+        c.moveTo(pontos[i].x, pontos[i].y);
+        c.lineTo(pontos[j].x, pontos[j].y);
+        c.stroke();
+      }
+    }
+
+    // 4) anéis de onda no plano z = 0
+    for (let i = 0; i < 3; i++) {
+      const raio = R * (0.52 + i * 0.13) * (1 + 0.03 * Math.sin(fase + i));
+      c.globalAlpha = 0.16 * intensidade;
+      c.strokeStyle = `hsla(${cor.h}, ${sat}%, ${luz}%, 1)`;
+      c.lineWidth = 1;
+      c.save();
+      c.scale(1, 0.42);
+      c.beginPath(); c.arc(0, 0, raio, 0, Math.PI * 2); c.stroke();
+      c.restore();
+    }
+
+    c.globalCompositeOperation = 'source-over';
+    c.globalAlpha = 1;
+  }
+
+  function quadro(t) {
+    const dt = Math.min(0.05, (t - ultimo) / 1000 || 0.016);
+    ultimo = t;
+    if (t - corLida > 800) {
+      cor = hexParaHsl(getComputedStyle(document.documentElement).getPropertyValue('--core'));
+      corLida = t;
+    }
+    const ataque = alvo.energia > energia;
+    energia += (alvo.energia - energia) * (1 - Math.exp(-dt * (ataque ? 9 : 2.2)));
+    brilho += (alvo.brilho - brilho) * (1 - Math.exp(-dt * 3.4));
+    const vel = reduzir ? 0.25 : 1;
+    fase += dt * (0.6 + 3.4 * energia) * vel;
+    giro += dt * (0.05 + 0.55 * energia) * vel;
+
+    c.setTransform(1, 0, 0, 1, 0, 0);
+    c.clearRect(0, 0, canvas.width, canvas.height);
+    c.scale(dpr, dpr);
+    c.translate(w / 2, h / 2);
+    const R = Math.min(w, h) * 0.5;
+    const sat = 62 + 38 * energia;
+    const luz = 44 + 14 * energia;
+    const intensidade = (0.55 + 0.45 * energia) * brilho;
+
+    if (modoAtual === '3d') desenhar3d(dt, R, cor, sat, luz, intensidade);
+    else desenhar2d(R, cor, sat, luz, intensidade);
+
     raf = requestAnimationFrame(quadro);
   }
 
+  function definirModo(novo) {
+    modoAtual = normalizarModo(novo);
+    alvoX3d = 0; alvoY3d = 0; px3d = 0; py3d = 0;
+  }
+
+  function aoVisibilidade() {
+    if (document.hidden) { cancelAnimationFrame(raf); raf = 0; }
+    else if (rodando) { ultimo = performance.now(); raf = requestAnimationFrame(quadro); }
+  }
+  document.addEventListener('visibilitychange', aoVisibilidade);
+
   return {
-    iniciar() { if (!raf) { medir(); ultimo = performance.now(); raf = requestAnimationFrame(quadro); } },
-    parar() { cancelAnimationFrame(raf); raf = 0; },
+    iniciar() { if (rodando) return; rodando = true; medir(); ultimo = performance.now(); raf = requestAnimationFrame(quadro); },
+    parar() { rodando = false; cancelAnimationFrame(raf); raf = 0; },
     definir(e) { alvo = e; },
+    definirModo,
     medir,
   };
 }
 
-// Campo de partículas: poeira vermelha em órbita do núcleo.
-// Três profundidades orbitais + uma camada ambiente bem discreta. A energia do
-// estado real (respondendo/pensando) acelera a deriva e aumenta o brilho.
-// O ponteiro inclina o campo (parallax por profundidade) e as partículas mais
-// rápidas deixam um rastro curto — a poeira parece ter massa, não ser um print.
+// Campo estelar: poeira distante quase parada e poeira próxima com parallax.
+// Deriva lenta para baixo, cintilação e nada de órbita — leitura de céu, não de sistema solar.
 export function criarCampo(canvas) {
   const c = canvas.getContext('2d');
   const reduzir = window.matchMedia?.('(prefers-reduced-motion: reduce)').matches;
-  const CAMADAS = [
-    // prof = profundidade aparente: 0 longe (quase não reage), 1 perto (reage mais)
-    { fracao: 0.52, dist: [0.30, 0.78], tam: [0.50, 0.95], alfa: [0.16, 0.34], giro: [0.004, 0.012], deriva: [0.002, 0.006], prof: [0.30, 0.55] },
-    { fracao: 0.30, dist: [0.52, 1.02], tam: [0.60, 1.25], alfa: [0.24, 0.50], giro: [0.006, 0.018], deriva: [0.004, 0.012], prof: [0.55, 0.80] },
-    { fracao: 0.18, dist: [0.72, 1.28], tam: [1.00, 2.10], alfa: [0.36, 0.74], giro: [0.010, 0.030], deriva: [0.006, 0.020], prof: [0.80, 1.00] },
-  ];
-  const sorte = (a, b) => a + Math.random() * (b - a);
-  let w = 0, h = 0, dpr = 1, raf = 0, ultimo = performance.now();
-  let orbitais = [], ambiente = [], centro = { x: 0, y: 0 }, raio = 300;
-  let cor = '#ff2f42', lido = 0, energia = 0;
-  // ponteiro normalizado (-1..1) e a versão amortecida que o campo segue
+  let w = 0, h = 0, dpr = 1, raf = 0, ultimo = performance.now(), rodando = false;
+  let perto = [], longe = [], cor = '#ff3446';
   let alvoX = 0, alvoY = 0, px = 0, py = 0;
+
+  const sorte = (a, b) => a + Math.random() * (b - a);
+
+  function medir() {
+    dpr = Math.min(2, window.devicePixelRatio || 1);
+    w = window.innerWidth; h = window.innerHeight;
+    canvas.width = Math.max(1, Math.round(w * dpr));
+    canvas.height = Math.max(1, Math.round(h * dpr));
+    const criar = (n, rMin, rMax, aMin, aMax, pMin, pMax) => Array.from({ length: n }, () => ({
+      x: Math.random() * w, y: Math.random() * h,
+      r: sorte(rMin, rMax), a: sorte(aMin, aMax),
+      prof: sorte(pMin, pMax), fase: Math.random() * Math.PI * 2,
+      tw: sorte(0.3, 1.2),
+    }));
+    const area = Math.min(1.4, Math.max(0.7, (w * h) / 1100000));
+    perto = criar(Math.round(110 * area), 0.8, 1.8, 0.5, 0.9, 0.8, 1);
+    longe = criar(Math.round(220 * area), 0.3, 0.9, 0.15, 0.4, 0.2, 0.5);
+    cor = getComputedStyle(document.documentElement).getPropertyValue('--core').trim() || '#ff3446';
+  }
 
   function aoMover(evento) {
     if (reduzir) return;
@@ -189,132 +433,46 @@ export function criarCampo(canvas) {
   }
   function aoSair() { alvoX = 0; alvoY = 0; }
 
-  function medir() {
-    dpr = Math.min(2, window.devicePixelRatio || 1);
-    w = window.innerWidth; h = window.innerHeight;
-    canvas.width = Math.round(w * dpr); canvas.height = Math.round(h * dpr);
-
-    const total = Math.round(Math.min(230, Math.max(120, (w * h) / 7600)));
-    orbitais = [];
-    for (const camada of CAMADAS) {
-      const n = Math.round(total * camada.fracao);
-      for (let i = 0; i < n; i++) {
-        orbitais.push({
-          ang: Math.random() * Math.PI * 2,
-          dist: sorte(camada.dist[0], camada.dist[1]),
-          r: sorte(camada.tam[0], camada.tam[1]),
-          a: sorte(camada.alfa[0], camada.alfa[1]),
-          giro: sorte(camada.giro[0], camada.giro[1]) * (Math.random() < 0.5 ? -1 : 1),
-          deriva: sorte(camada.deriva[0], camada.deriva[1]),
-          prof: sorte(camada.prof[0], camada.prof[1]),
-          fase: Math.random() * Math.PI * 2,
-          tw: sorte(0.35, 1.30),
-        });
-      }
-    }
-    ambiente = Array.from({ length: Math.round(Math.min(56, w / 22)) }, () => ({
-      x: Math.random() * w, y: Math.random() * h,
-      r: sorte(0.3, 0.9), a: sorte(0.07, 0.17),
-      v: sorte(0.4, 1.4), prof: sorte(0.10, 0.30),
-      fase: Math.random() * Math.PI * 2, tw: sorte(0.2, 0.8),
-    }));
-    medirCentro(true);
-  }
-
-  function medirCentro(forcar) {
-    const agora = performance.now();
-    if (!forcar && agora - lido < 700) return;
-    lido = agora;
-    const alvo = document.getElementById('core');
-    const r = alvo?.getBoundingClientRect();
-    if (r && r.width > 40) {
-      centro = { x: r.left + r.width / 2, y: r.top + r.height / 2 };
-      raio = Math.max(150, Math.min(r.width, r.height) * 0.62);
-    } else {
-      centro = { x: w / 2, y: h * 0.45 };
-      raio = Math.min(w, h) * 0.34;
-    }
-    const estado = document.getElementById('chamber')?.dataset.state || '';
-    const alvoEnergia = /respondendo|ouvindo/.test(estado) ? 1 : /pensando/.test(estado) ? 0.55 : 0;
-    energia += (alvoEnergia - energia) * 0.5;
-    cor = getComputedStyle(document.documentElement).getPropertyValue('--core').trim() || '#ff2f42';
-  }
-
   function quadro(t) {
     const dt = Math.min(0.05, (t - ultimo) / 1000 || 0.016);
     ultimo = t;
-    medirCentro(false);
-    // o campo segue o ponteiro com atraso: inclinação, não tremida
     const amortece = 1 - Math.exp(-dt * 3.4);
     px += (alvoX - px) * amortece;
     py += (alvoY - py) * amortece;
     c.setTransform(1, 0, 0, 1, 0, 0);
     c.clearRect(0, 0, canvas.width, canvas.height);
     c.scale(dpr, dpr);
-    c.fillStyle = cor;
-    c.strokeStyle = cor;
-    c.lineCap = 'round';
-    const vel = reduzir ? 0 : 1;
 
-    // camada ambiente: poeira solta, quase invisível
-    for (const p of ambiente) {
-      if (vel) {
-        p.y -= p.v * 7 * dt;
-        if (p.y < -6) { p.y = h + 6; p.x = Math.random() * w; }
+    const desenhar = (lista, corDaCamada, deriva, parallax) => {
+      c.fillStyle = corDaCamada;
+      for (const p of lista) {
+        if (!reduzir) {
+          p.y += deriva * (0.4 + p.prof) * dt;
+          if (p.y > h + 2) { p.y = -2; p.x = Math.random() * w; }
+        }
+        const ox = -px * parallax * p.prof, oy = -py * parallax * p.prof;
+        c.globalAlpha = p.a * (reduzir ? 0.8 : 0.55 + 0.45 * Math.sin(t / 1000 * p.tw + p.fase));
+        c.beginPath(); c.arc(p.x + ox, p.y + oy, p.r, 0, Math.PI * 2); c.fill();
       }
-      const ox = -px * 6 * p.prof, oy = -py * 5 * p.prof;
-      const cintila = reduzir ? 0.8 : 0.55 + 0.45 * Math.sin((t / 1000) * p.tw + p.fase);
-      c.globalAlpha = p.a * cintila;
-      c.beginPath(); c.arc(p.x + ox, p.y + oy, p.r, 0, Math.PI * 2); c.fill();
-    }
-
-    // camadas orbitais: densas perto do núcleo, abrindo para fora
-    for (const p of orbitais) {
-      if (vel) {
-        p.ang += p.giro * dt * (1 + energia * 1.4);
-        p.dist += p.deriva * dt * (1 + energia * 2.2);
-        if (p.dist > 1.38) { p.dist = sorte(0.28, 0.52); p.ang = Math.random() * Math.PI * 2; }
-      }
-      // parallax: quanto mais perto, mais a poeira desliza contra o ponteiro
-      const ox = -px * 16 * p.prof, oy = -py * 12 * p.prof;
-      const x = centro.x + Math.cos(p.ang) * p.dist * raio + ox;
-      const y = centro.y + Math.sin(p.ang) * p.dist * raio * 0.94 + oy;
-      if (x < -24 || x > w + 24 || y < -24 || y > h + 24) continue;
-      const cintila = reduzir ? 0.8 : 0.60 + 0.40 * Math.sin((t / 1000) * p.tw + p.fase);
-      const alfa = Math.min(0.90, p.a * cintila * (1 + energia * 0.45));
-
-      // rastro: o arco percorrido num instante, proporcional à velocidade real
-      const arco = Math.abs(p.giro) * (1 + energia * 1.4) * p.dist * raio;
-      const cauda = reduzir ? 0 : Math.min(9, arco * 0.075) * p.prof;
-      if (cauda > 0.7) {
-        const sinal = p.giro < 0 ? -1 : 1;
-        const tx = -Math.sin(p.ang) * sinal, ty = Math.cos(p.ang) * sinal * 0.94;
-        c.globalAlpha = alfa * 0.42;
-        c.lineWidth = Math.max(0.5, p.r * 1.15);
-        c.beginPath();
-        c.moveTo(x - tx * cauda, y - ty * cauda);
-        c.lineTo(x, y);
-        c.stroke();
-      }
-
-      c.globalAlpha = alfa;
-      c.beginPath(); c.arc(x, y, p.r, 0, Math.PI * 2); c.fill();
-      if (p.r > 1.55) {                      // brasa: halo curto, sem shadowBlur
-        c.globalAlpha *= 0.16;
-        c.beginPath(); c.arc(x, y, p.r * 3.1, 0, Math.PI * 2); c.fill();
-      }
-    }
-
+    };
+    desenhar(longe, '#cfe0ff', 2, 8);
+    desenhar(perto, cor, 5, 18);
     c.globalAlpha = 1;
     raf = requestAnimationFrame(quadro);
+  }
+
+  function aoVisibilidade() {
+    if (document.hidden) { cancelAnimationFrame(raf); raf = 0; }
+    else if (rodando) { ultimo = performance.now(); raf = requestAnimationFrame(quadro); }
   }
 
   window.addEventListener('pointermove', aoMover, { passive: true });
   window.addEventListener('pointerleave', aoSair);
   window.addEventListener('blur', aoSair);
   window.addEventListener('resize', medir);
+  document.addEventListener('visibilitychange', aoVisibilidade);
   return {
-    iniciar() { medir(); ultimo = performance.now(); raf = requestAnimationFrame(quadro); },
-    parar() { cancelAnimationFrame(raf); raf = 0; },
+    iniciar() { if (rodando) return; rodando = true; medir(); ultimo = performance.now(); raf = requestAnimationFrame(quadro); },
+    parar() { rodando = false; cancelAnimationFrame(raf); raf = 0; },
   };
 }

@@ -100,7 +100,9 @@ def create_server(runtime, token: str, host: str = "127.0.0.1", port: int = PREF
             path = self._path()
             try:
                 if path == _PREFIX + "health":
-                    self._send(200, {"ok": True, "version": "1.18.0"})
+                    self._send(200, {"ok": True, "version": "1.19.0"})
+                elif path == _PREFIX + "unlock":
+                    self._send(200, runtime.unlock_info())
                 elif path == _PREFIX + "status":
                     self._send(200, runtime.get_snapshot())
                 elif path == _PREFIX + "events":
@@ -125,6 +127,8 @@ def create_server(runtime, token: str, host: str = "127.0.0.1", port: int = PREF
                     self._send(200, runtime.update_info())
                 elif path == _PREFIX + "update/check":
                     self._send(200, runtime.check_update())
+                elif path == _PREFIX + "undo":
+                    self._send(200, runtime.undo_list())
                 elif path == _PREFIX + "conversation":
                     # Bate-papo: turnos da sessão (texto já redigido pelo runtime).
                     self._send(200, {"turns": runtime.conversation_turns()})
@@ -144,7 +148,21 @@ def create_server(runtime, token: str, host: str = "127.0.0.1", port: int = PREF
             if body is None:
                 return
             try:
-                if path == _PREFIX + "commands":
+                if path == _PREFIX + "unlock":
+                    metodo = body.get("method")
+                    if metodo == "hello" and set(body) == {"method"}:
+                        self._send(200, runtime.unlock_hello())
+                    elif (metodo == "pin" and set(body) == {"method", "pin"}
+                          and isinstance(body["pin"], str) and 1 <= len(body["pin"]) <= 64):
+                        self._send(200, runtime.unlock_pin(body["pin"]))
+                    else:
+                        self._send(400, {"error": "invalid_unlock_payload"})
+                elif path == _PREFIX + "lock":
+                    if body:
+                        self._send(400, {"error": "empty_payload_required"})
+                        return
+                    self._send(200, runtime.lock())
+                elif path == _PREFIX + "commands":
                     if set(body) != {"text"}:
                         self._send(400, {"error": "invalid_command_payload"})
                         return

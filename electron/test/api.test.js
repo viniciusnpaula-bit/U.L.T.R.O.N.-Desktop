@@ -1,5 +1,7 @@
 const test = require('node:test');
 const assert = require('node:assert/strict');
+const { readFile } = require('node:fs/promises');
+const path = require('node:path');
 const { createApiClient } = require('../api');
 
 const TOKEN = 't'.repeat(48);
@@ -24,6 +26,11 @@ test('named API actions call only the current ULTRON routes with the run token',
   await api.confirmation('request-1', true, '1234');
   await api.emergencyStop();
   await api.palcoFechar();
+  await api.unlockInfo();
+  await api.unlockHello();
+  await api.unlockPin('2468');
+  await api.lock();
+  await api.undoList();
   await api.shutdown();
 
   assert.deepEqual(calls.map(({ url, init }) => [url, init.method, init.body || null]), [
@@ -38,6 +45,11 @@ test('named API actions call only the current ULTRON routes with the run token',
       '{"request_id":"request-1","approved":true,"pin":"1234"}'],
     ['http://127.0.0.1:43873/api/v1/emergency-stop', 'POST', '{}'],
     ['http://127.0.0.1:43873/api/v1/palco/fechar', 'POST', '{}'],
+    ['http://127.0.0.1:43873/api/v1/unlock', 'GET', null],
+    ['http://127.0.0.1:43873/api/v1/unlock', 'POST', '{"method":"hello"}'],
+    ['http://127.0.0.1:43873/api/v1/unlock', 'POST', '{"method":"pin","pin":"2468"}'],
+    ['http://127.0.0.1:43873/api/v1/lock', 'POST', '{}'],
+    ['http://127.0.0.1:43873/api/v1/undo', 'GET', null],
     ['http://127.0.0.1:43873/api/v1/shutdown', 'POST', '{}'],
   ]);
   for (const { init } of calls) {
@@ -65,4 +77,16 @@ test('API transport errors never expose the run token', async () => {
     fetchImpl: async () => { throw new Error(`connection failed: ${TOKEN}`); },
   });
   await assert.rejects(api.status(), error => !error.message.includes(TOKEN));
+});
+
+test('unlock usa o prazo longo do prompt e valida o PIN antes de enviar', async () => {
+  const source = await readFile(path.join(__dirname, '..', 'api.js'), 'utf8');
+  assert.match(source, /UNLOCK_TIMEOUT_MS\s*=\s*70000/);
+  const api = createApiClient({
+    baseUrl: 'http://127.0.0.1:43873', token: TOKEN,
+    fetchImpl: async () => Response.json({ ok: true }),
+  });
+  assert.throws(() => api.unlockPin(''));
+  assert.throws(() => api.unlockPin('x'.repeat(65)));
+  assert.throws(() => api.unlockPin(1234));
 });

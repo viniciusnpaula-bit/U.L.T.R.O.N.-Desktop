@@ -1,5 +1,6 @@
 const API_PREFIX = '/api/v1';
 const REQUEST_TIMEOUT_MS = 12000;
+const UNLOCK_TIMEOUT_MS = 70000;
 const MAX_COMMAND_LENGTH = 4000;
 
 function createApiClient({ baseUrl, token, fetchImpl = fetch }) {
@@ -18,7 +19,7 @@ function createApiClient({ baseUrl, token, fetchImpl = fetch }) {
   }
   const origin = url.origin;
 
-  async function request(method, route, data) {
+  async function request(method, route, data, timeoutMs = REQUEST_TIMEOUT_MS) {
     const controller = new AbortController();
     const headers = { Accept: 'application/json', 'X-ULTRON-Token': token };
     const init = { method, headers, signal: controller.signal };
@@ -26,7 +27,7 @@ function createApiClient({ baseUrl, token, fetchImpl = fetch }) {
       headers['Content-Type'] = 'application/json';
       init.body = JSON.stringify(data);
     }
-    const timer = setTimeout(() => controller.abort(), REQUEST_TIMEOUT_MS);
+    const timer = setTimeout(() => controller.abort(), timeoutMs);
     try {
       const response = await fetchImpl(`${origin}${API_PREFIX}${route}`, init);
       const raw = await response.text();
@@ -52,6 +53,15 @@ function createApiClient({ baseUrl, token, fetchImpl = fetch }) {
 
   return Object.freeze({
     health: () => request('GET', '/health'),
+    unlockInfo: () => request('GET', '/unlock'),
+    unlockHello: () => request('POST', '/unlock', { method: 'hello' }, UNLOCK_TIMEOUT_MS),
+    unlockPin: pin => {
+      if (typeof pin !== 'string' || pin.length < 1 || pin.length > 64) {
+        throw new TypeError('O PIN deve conter de 1 a 64 caracteres.');
+      }
+      return request('POST', '/unlock', { method: 'pin', pin }, UNLOCK_TIMEOUT_MS);
+    },
+    lock: () => request('POST', '/lock', {}),
     status: () => request('GET', '/status'),
     events: () => request('GET', '/events'),
     cofreStatus: () => request('GET', '/cofre'),
@@ -79,6 +89,7 @@ function createApiClient({ baseUrl, token, fetchImpl = fetch }) {
     updateApply: restartAfter => request('POST', '/update/apply', { restart_after: restartAfter === true }),
     updateLaunch: () => request('POST', '/update/launch', {}),
     updateRollback: () => request('POST', '/update/rollback', {}),
+    undoList: () => request('GET', '/undo'),
     command: text => {
       if (typeof text !== 'string' || !text.trim() || text.length > MAX_COMMAND_LENGTH) {
         throw new TypeError('O comando deve conter de 1 a 4000 caracteres.');

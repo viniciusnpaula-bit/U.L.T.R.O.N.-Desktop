@@ -8,6 +8,7 @@ from unittest.mock import patch
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
 
+import cofre
 import memoria
 
 
@@ -23,9 +24,13 @@ class RecallTests(unittest.TestCase):
         CREATE TABLE IF NOT EXISTS fatos(id INTEGER PRIMARY KEY, texto TEXT UNIQUE);
         CREATE TABLE IF NOT EXISTS lembretes(id INTEGER PRIMARY KEY, due REAL, texto TEXT, feito INTEGER DEFAULT 0);
         """)
-        self.patch = patch.object(memoria, "_db", self.conexao)
-        self.patch.start()
-        self.addCleanup(self.patch.stop)
+        self.conexao.execute("PRAGMA user_version=0")
+        self.conexao.commit()
+        for alvo, nome, valor in ((memoria, "_db", self.conexao),
+                                  (cofre, "ARQUIVO_CHAVE", Path(self.temp.name) / ".cofre.chave")):
+            item = patch.object(alvo, nome, valor)
+            item.start()
+            self.addCleanup(item.stop)
         self.addCleanup(self.conexao.close)
 
     def _guardar(self, papel, texto, dias=1):
