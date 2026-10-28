@@ -167,13 +167,25 @@ class DesktopApiTests(unittest.TestCase):
         if payload is not None:
             request_headers.setdefault("Content-Type", "application/json")
         req = Request(self.url + path, data=payload, headers=request_headers, method=method)
-        try:
-            with urlopen(req, timeout=2) as response:
-                return response.status, json.loads(response.read().decode())
-        except HTTPError as error:
-            body = error.read().decode()
-            error.close()
-            return error.code, json.loads(body)
+        for tentativa in range(2):
+            try:
+                with urlopen(req, timeout=2) as response:
+                    return response.status, json.loads(response.read().decode())
+            except HTTPError as error:
+                codigo = error.code
+                try:
+                    corpo = error.read().decode()
+                except OSError:
+                    corpo = ""   # o status chegou; o corpo pode morrer no RST
+                finally:
+                    error.close()
+                return codigo, json.loads(corpo) if corpo else {}
+            except OSError:
+                # O servidor recusa cedo (401/413) e fecha o socket com o corpo
+                # ainda chegando; no Windows o RST pode vencer a resposta, e o
+                # urllib embrulha isso em URLError. Repetir lê a resposta.
+                if tentativa:
+                    raise
 
     def test_health_status_and_events_require_token_and_return_expected_data(self):
         status, health = self.call("/api/v1/health")

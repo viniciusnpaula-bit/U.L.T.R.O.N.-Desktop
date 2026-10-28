@@ -24,7 +24,8 @@ REQUIRED_IN_ZIP = (
 REQUIRED_BINARIES_IN_ZIP = ("ULTRON.exe", "ULTRON-Setup.exe")
 # ".env.example" é documentação e deve estar no pacote; ".env" com chaves reais, não.
 FORBIDDEN_IN_ZIP = (".env", "venv/", "node_modules/", "dados/", "logs/", "__pycache__/",
-                    "electron/dist", "build/", ".pytest_cache/", "setup.log", "ultron.db")
+                    "electron/dist", "build/", ".pytest_cache/", "setup.log", "ultron.db",
+                    ".internal/", ".beads/", ".agents/", ".claude/", ".codex/", ".cursor/")
 
 
 class PackageBuilderTests(unittest.TestCase):

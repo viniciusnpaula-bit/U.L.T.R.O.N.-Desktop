@@ -19,6 +19,7 @@ da área protegida do ULTRON.
 from __future__ import annotations
 
 import copy
+import hashlib
 import json
 import logging
 import os
@@ -188,6 +189,8 @@ def resumo_inversa(entrada: dict) -> str:
         if len(itens) == 1:
             return f"devolver {itens[0].get('de')} para {itens[0].get('para')}"
         return f"devolver {len(itens)} arquivo(s) para as pastas de origem"
+    if tipo == "truncar":
+        return f"remover o trecho que o ULTRON acrescentou em {caminho}"
     return str(entrada.get("resumo") or entrada.get("operacao") or "a última operação")
 
 
@@ -324,6 +327,19 @@ def inversa_restaurar(caminho) -> dict:
     if p is None:
         raise ValueError("caminho inválido")
     return {"tipo": "restaurar_lixeira", "caminho": str(p), **_impressao(p)}
+
+
+def inversa_truncar(caminho, tamanho, sha256) -> dict:
+    """Inversa de acrescentar texto: cortar o arquivo no tamanho anterior.
+
+    `sha256` é o hash do conteúdo DEPOIS do acréscimo; se o arquivo mudou, o
+    desfazer recusa em vez de cortar o que o usuário escreveu.
+    """
+    p = _absoluto(caminho)
+    if p is None:
+        raise ValueError("caminho inválido")
+    return {"tipo": "truncar", "caminho": str(p),
+            "tamanho": int(tamanho), "sha256": str(sha256)}
 
 
 def inversa_arvore(caminho, remover_raiz: bool = True) -> dict:
@@ -606,6 +622,37 @@ def _aplicar_arvore(dados: dict) -> dict:
     return _ok(f"apaguei a pasta extraída {p}.")
 
 
+def _aplicar_truncar(dados: dict) -> dict:
+    """Desfaz um acréscimo: corta o arquivo de volta ao tamanho anterior.
+
+    Só corta se o conteúdo ainda for exatamente o que o ULTRON deixou (hash);
+    qualquer edição posterior faz o desfazer recusar.
+    """
+    p = _absoluto(dados.get("caminho"))
+    if p is None:
+        return _falha("o caminho registrado não é válido.")
+    motivo = _motivo_recusa(p)
+    if motivo:
+        return _falha(motivo + ".")
+    if p.is_symlink() or not p.is_file():
+        return _falha("o arquivo não está mais lá do jeito que o ULTRON deixou.")
+    try:
+        conteudo = p.read_bytes()
+    except OSError as erro:
+        return _falha(f"o Windows não deixou ler o arquivo ({erro.strerror or erro}).")
+    tamanho = max(0, int(dados.get("tamanho") or 0))
+    if len(conteudo) < tamanho:
+        return _falha("o arquivo encolheu depois da anotação; não vou cortar.")
+    if hashlib.sha256(conteudo).hexdigest() != str(dados.get("sha256") or ""):
+        return _falha("o arquivo mudou depois da anotação; não vou cortar o que você escreveu.")
+    try:
+        with open(p, "r+b") as arquivo:
+            arquivo.truncate(tamanho)
+    except OSError as erro:
+        return _falha(f"o Windows não deixou reescrever o arquivo ({erro.strerror or erro}).")
+    return _ok(f"removi o trecho que o ULTRON tinha acrescentado em {p}.")
+
+
 def _aplicar(entrada: dict, restaurador=None) -> dict:
     inversa = entrada.get("inversa") or {}
     tipo = inversa.get("tipo")
@@ -620,6 +667,8 @@ def _aplicar(entrada: dict, restaurador=None) -> dict:
             return _aplicar_restaurar(inversa, restaurador)
         if tipo == "remover_arvore":
             return _aplicar_arvore(inversa)
+        if tipo == "truncar":
+            return _aplicar_truncar(inversa)
     except Exception as erro:
         return _falha(f"a operação inversa falhou ({type(erro).__name__}).")
     return _falha("o diário não sabe desfazer essa operação.")

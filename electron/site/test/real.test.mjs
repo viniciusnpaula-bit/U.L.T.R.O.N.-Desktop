@@ -250,3 +250,14 @@ test('diário: IPC e transporte leem a rota /undo pela ponte segura', async () =
   assert.match(main, /ipcMain\.handle\('undo:list', event => isSender\(event, mainWindow\) \? api\.undoList\(\) : null\)/);
   assert.match(preload, /undoList: \(\) => ipcRenderer\.invoke\('undo:list'\)/);
 });
+
+test('prévia: todo id da tela real existe na prévia', async () => {
+  const site = new URL('../', import.meta.url);
+  const real = await readFile(fileURLToPath(new URL('index.html', site)), 'utf8');
+  const preview = await readFile(fileURLToPath(new URL('preview.html', site)), 'utf8');
+  const ids = html => new Set([...html.matchAll(/\sid="([^"]+)"/g)].map(m => m[1]));
+  const faltando = [...ids(real)].filter(id => !ids(preview).has(id)).sort();
+  assert.deepEqual(faltando, []);
+  assert.match(preview, /preview-mock\.js/);
+  assert.doesNotMatch(real, /preview-mock\.js/);
+});

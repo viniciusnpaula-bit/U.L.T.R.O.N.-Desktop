@@ -271,13 +271,17 @@ class RuntimeTests(unittest.TestCase):
         self.assertTrue(self.runtime.get_snapshot()["session_desbloqueada"])
 
     def test_unlock_info_reports_real_state_without_raising(self):
-        info = self.runtime.unlock_info()
+        # o PIN do .env não pode decidir o resultado: aqui testamos os dois estados
+        with patch.object(config, "PIN", ""):
+            info = self.runtime.unlock_info()
         self.assertFalse(info["session"]["desbloqueada"])
         self.assertFalse(info["hello"]["disponivel"])
         self.assertFalse(info["pin_configurado"])
         self.assertEqual(info["irreversiveis"], ["apagar_arquivo", "executar_comando"])
         self.assertEqual(info["historico"]["algoritmo"], "AES-256-GCM")
         self.assertIn("versao", info)
+        with patch.object(config, "PIN", "2468"):
+            self.assertTrue(self.runtime.unlock_info()["pin_configurado"])
 
     def test_unlock_info_omits_history_when_memoria_is_unavailable(self):
         self.memoria.status_criptografia = lambda: (_ for _ in ()).throw(RuntimeError("sem chave"))
@@ -329,7 +333,9 @@ class RuntimeTests(unittest.TestCase):
         self.assertEqual(self.runtime.unlock_hello()["error"], "busy")
 
     def test_pin_unlock_requires_configured_pin(self):
-        self.assertEqual(self.runtime.unlock_pin("2468")["error"], "no_method_configured")
+        # sem PIN no ambiente, o desbloqueio por PIN não está configurado
+        with patch.object(config, "PIN", ""):
+            self.assertEqual(self.runtime.unlock_pin("2468")["error"], "no_method_configured")
         with patch.object(config, "PIN", "2468"):
             self.assertEqual(self.runtime.unlock_pin("0000")["error"], "pin_invalid")
             resultado = self.runtime.unlock_pin("2468")

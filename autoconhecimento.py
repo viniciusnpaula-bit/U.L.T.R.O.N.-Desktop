@@ -67,6 +67,8 @@ _GRUPOS = {
     "mídia e palco": ("controlar_midia", "mostrar_na_interface", "youtube"),
     "memória e lembretes": (
         "cancelar_lembrete", "criar_lembrete", "esquecer_fato", "lembrar_fato", "listar_lembretes",
+        "obsidian_anexar", "obsidian_buscar", "obsidian_criar", "obsidian_diario",
+        "obsidian_ler", "obsidian_notas", "obsidian_status", "obsidian_tarefas",
     ),
     "automação": ("executar_fluxo", "listar_jogos"),
     "desfazer": ("desfazer",),

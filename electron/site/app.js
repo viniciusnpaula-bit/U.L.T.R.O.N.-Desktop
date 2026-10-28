@@ -26,7 +26,7 @@ const state = {
   writing: 0,         // turnos que vieram do campo de texto nesta sessão
   palco: null,        // mídia exibida no lugar do núcleo
   palcoIgnorado: null, // id fechado localmente: não reabre por um status atrasado
-  undo: [], undoErro: false, undoBusy: false, // diário: só o que veio de GET /undo
+  undo: [], undoErro: false, undoBusy: false, // diário read-only do dock direito
 };
 const transport = new RealTransport({ onEvent: handleEvent });
 const desbloqueio = criarDesbloqueio({
@@ -82,14 +82,12 @@ function applyTheme(theme) {
 }
 
 /* ── núcleo 3D/2D ────────────────────────────────────────────────────────── */
-/* O modo vive no localStorage; chip, gaveta e orbe são derivados dele.
-   `avisar` existe para o clique: o boot não fala nada. */
+/* A preferência é local e vale mais que o padrão: o chip e os botões da
+   gaveta leem o mesmo estado, e o orbe só troca de ramo, sem recriar canvas. */
 function aplicarModoNucleo(modo, { avisar = false } = {}) {
   modoNucleo = normalizarModo(modo);
   orb.definirModo(modoNucleo);
-  try {
-    if (localStorage.getItem(CHAVE_MODO) !== modoNucleo) localStorage.setItem(CHAVE_MODO, modoNucleo);
-  } catch {}
+  try { localStorage.setItem(CHAVE_MODO, modoNucleo); } catch {}
   const chip = $('coreMode');
   chip.textContent = modoNucleo.toUpperCase();
   chip.setAttribute('aria-pressed', String(modoNucleo === '3d'));
@@ -231,9 +229,10 @@ async function carregarConversa() {
   } catch { /* a API pode não ter a rota em versões antigas: a fita ainda mostra tudo */ }
 }
 
-/* ── diário (GET /undo) ───────────────────────────────────────────────────── */
-/* Linha somente leitura: o comando do rodapé desfaz a próxima operação real,
-   não a linha clicada — por isso nenhum botão por item. */
+/* ── diário do dock direito: GET /api/v1/undo, somente leitura ───────────── */
+/* Cada linha é o que o núcleo já fez. Não há botão por linha: o comando real
+   desfaz a última operação, não a linha clicada. Com a sessão bloqueada a lista
+   é limpa e não volta a ser buscada — o diário contém caminhos do usuário. */
 function linhaDesfazer(item) {
   const linha = document.createElement('article');
   linha.className = 'undo-row';
@@ -286,8 +285,6 @@ function limparDiario() {
   pintarDiario();
 }
 
-/* Sem timer: chamado na transição para liberado, ao abrir o dock e após cada
-   COMMAND_RESULT. A guarda de sessão é o que impede leitura com a tela travada. */
 async function carregarDiario() {
   if (state.status.session_desbloqueada !== true || state.undoBusy) return;
   state.undoBusy = true;
@@ -383,10 +380,10 @@ function updateStatus(data) {
   setMetric('micLevelVal', percent === null ? '—' : `${percent}%`);
   const detalheMic = data.microphone_error || (state.paused ? 'Escuta pausada' : data.microphone_capturing ? 'Capturando áudio' : data.microphone_state || 'indisponível');
   if ($('micDetail')) $('micDetail').textContent = detalheMic;
-  // #voiceSubStatus vive dentro de #reply[aria-live=polite] e o status é relido
-  // a cada 750 ms: reescrever a mesma string faria o leitor reanunciar sem parar.
+  // #voiceSubStatus vive dentro do #reply[aria-live]: só escrever quando muda,
+  // senão o polling de 750ms reanuncia a mesma frase a cada tique.
   const subVoz = $('voiceSubStatus');
-  if (subVoz.textContent !== detalheMic) subVoz.textContent = detalheMic;
+  if (subVoz && subVoz.textContent !== detalheMic) subVoz.textContent = detalheMic;
 
   for (const [valueId, barId, value] of [['cpuVal', 'cpuBar', data.cpu_percent], ['ramVal', 'ramBar', data.ram_percent], ['diskVal', 'diskBar', data.disk_percent]]) {
     const n = value == null || !Number.isFinite(Number(value)) ? null : Math.max(0, Math.min(100, Number(value)));
@@ -414,7 +411,6 @@ function updateStatus(data) {
   setMetric('voicePageStatus', data.microphone_error || mic);
 
   if (state.pending === null) aplicarEstado(data);
-  // sessão: o diário só é lido na transição para liberado e é limpo ao bloquear
   if (data.session_desbloqueada === true && sessaoAntes !== true) {
     carregarHistorico();
     carregarDiario();
@@ -673,7 +669,8 @@ function handleEvent(event) {
   if (event.event === 'SYSTEM_STATUS') updateStatus(event.data || {});
   if (event.event === 'NOTIFICATION') {
     const message = event.data.message || 'Notificação do núcleo.';
-    if ($('activityText')) $('activityText').textContent = message;
+    const atividade = document.getElementById('activityText');
+    if (atividade) atividade.textContent = message;
     toast(message);
   }
   if (event.event === 'CONVERSATION_TURN') {
@@ -690,7 +687,7 @@ function handleEvent(event) {
     const value = event.data?.response;
     const text = typeof value === 'string' && value ? value : 'O núcleo recebeu o comando.';
     responder(text);
-    carregarDiario();       // o comando pode ter mudado o diário; sem timer
+    carregarDiario();
     const escrito = state.writing > 0;
     if (escrito) state.writing -= 1;
     if (escrito) adicionarTurno({ role: 'assistant', text, source: 'texto', at: Date.now() / 1000 });
@@ -705,8 +702,8 @@ async function send(text) {
   state.writing += 1;
   adicionarTurno({ role: 'user', text, source: 'texto', at: Date.now() / 1000 });
   responder('Enviado. Aguardando o núcleo…');
-  $('stateWord').textContent = 'PENSANDO';
-  orb.definir({ rotulo: 'PENSANDO', energia: 0.5, brilho: 1, dica: 'Processando o comando…' });
+  $('stateWord').textContent = 'TRABALHANDO';
+  orb.definir({ rotulo: 'TRABALHANDO', energia: 0.5, brilho: 1, humor: 'trabalhando', dica: 'Executando o pedido…' });
   try {
     const result = await transport.command(text);
     state.commands.set(result.operation_id, text);
@@ -1491,9 +1488,9 @@ async function desfazerAtualizacao() {
   }
 }
 
-/* ── docks recolhíveis (bate-papo e diário) ───────────────────────────────── */
-/* Nascem abertos (o diário só em tela larga), lembram a escolha e podem ser
-   recolhidos por dois caminhos: botão no topo e seta no próprio cabeçalho. */
+/* ── barras recolhíveis (bate-papo e diário) ──────────────────────────────── */
+/* Nascem abertas nos docks, lembram a escolha e recolhem para 46px. O diário
+   começa recolhido abaixo de 1280px; a preferência salva vence o padrão. */
 const RAILS = {
   chat: { chave: 'ultron-chat-aberto', attr: 'data-chat', botoes: ['collapseChat'],
     alternador: 'toggleChat', rotulo: 'bate-papo', tecla: 'Ctrl+1', painel: 'drawerChat' },
@@ -1501,7 +1498,7 @@ const RAILS = {
     alternador: 'toggleSystem', rotulo: 'diário', tecla: 'Ctrl+2', painel: 'sidePanel' },
 };
 
-function aplicarRail(nome, aberto) {
+function aplicarRail(nome, aberto, { persistir = true } = {}) {
   const rail = RAILS[nome];
   document.documentElement.setAttribute(rail.attr, aberto ? 'on' : 'off');
   const titulo = `${aberto ? 'Recolher' : 'Abrir'} ${rail.rotulo} (${rail.tecla})`;
@@ -1516,8 +1513,9 @@ function aplicarRail(nome, aberto) {
   alternador.title = titulo;
   const painel = $(rail.painel);
   painel.setAttribute('aria-hidden', String(!aberto));
-  try { localStorage.setItem(rail.chave, aberto ? '1' : '0'); } catch {}
-  if (nome === 'sys' && aberto) carregarDiario();   // abrir o dock é uma leitura, não um timer
+  // só a escolha do usuário é lembrada; o padrão por largura não vira preferência
+  if (persistir) { try { localStorage.setItem(rail.chave, aberto ? '1' : '0'); } catch {} }
+  if (nome === 'sys' && aberto) carregarDiario();
   return aberto;
 }
 
@@ -1534,7 +1532,7 @@ function restaurarRails() {
   for (const nome of Object.keys(RAILS)) {
     let salvo = null;
     try { salvo = localStorage.getItem(RAILS[nome].chave); } catch {}
-    aplicarRail(nome, (salvo ?? padrao[nome]) !== '0');
+    aplicarRail(nome, (salvo ?? padrao[nome]) !== '0', { persistir: false });
   }
 }
 
@@ -1545,7 +1543,7 @@ let gavetaAberta = false;
 let gavetaSaindo = 0;
 
 function posicionarBarra() {
-  // a barra nasce abaixo da faixa superior e acompanha a altura real da câmara
+  // a barra nasce abaixo da ponte e acompanha a altura real da câmara
   const topo = document.querySelector('.bridge')?.getBoundingClientRect().bottom ?? 64;
   document.documentElement.style.setProperty('--stage-top', `${Math.round(topo + 8)}px`);
 }
@@ -1613,6 +1611,9 @@ function fecharGaveta() {
 /* ── ligação dos controles ───────────────────────────────────────────────── */
 applyTheme((() => { try { return localStorage.getItem('ultron-theme') || 'ultron'; } catch { return 'ultron'; } })());
 aplicarModoNucleo(modoNucleo);
+$('coreMode').onclick = () => aplicarModoNucleo(modoNucleo === '3d' ? '2d' : '3d', { avisar: true });
+document.querySelectorAll('[data-core]').forEach(node => node.onclick = () => aplicarModoNucleo(node.dataset.core, { avisar: true }));
+document.querySelectorAll('[data-theme-pill]').forEach(node => node.onclick = () => applyTheme(node.dataset.themePill));
 document.querySelectorAll('#themeSwatches .swatch').forEach(node => node.onclick = () => applyTheme(node.dataset.theme));
 document.querySelectorAll('[data-theme-pill]').forEach(node => node.onclick = () => applyTheme(node.dataset.themePill));
 $('coreMode').onclick = () => aplicarModoNucleo(modoNucleo === '3d' ? '2d' : '3d', { avisar: true });
@@ -1673,11 +1674,16 @@ $('sessionButton').addEventListener('click', async () => {
   if (state.status.session_desbloqueada === true) {
     try { await transport.lock(); } catch { /* o polling reconcilia */ }
     state.status.session_desbloqueada = false;
-    limparDiario();          // o diário tem caminhos do usuário: some no bloqueio
+    limparDiario();
   }
   desbloqueio.abrir();
 });
-transport.onSessionLocked(() => desbloqueio.abrir());
+transport.onSessionLocked(() => {
+  // bloqueio vindo do Windows (tela bloqueada/suspensão): o diário não fica na tela
+  state.status.session_desbloqueada = false;
+  limparDiario();
+  desbloqueio.abrir();
+});
 $('collapseChat').onclick = () => alternarRail('chat');
 $('collapseSystem').onclick = () => alternarRail('sys');
 $('undoAction').onclick = async () => {
@@ -1772,15 +1778,15 @@ document.addEventListener('visibilitychange', () => orbLoop(!document.hidden));
 window.addEventListener('beforeunload', () => { orb.parar(); campo.parar(); desbloqueio.parar(); transport.disconnect(); });
 
 (async () => {
-  // AO ABRIR: o overlay de desbloqueio cuida da sessão; os docks já estão no
-  // lugar (restaurarRails) e a conexão com o núcleo chega sem segurar a tela
+  // AO ABRIR: a câmara aparece inteira; ajustes só quando forem pedidos.
+  // A conexão com o núcleo chega depois e não deve segurar a interface vazia.
   desbloqueio.abrir();
+  pintarDiario();
   try {
     await transport.connect();
     connection(true);
-    pintarDiario();                           // estado honesto: vazio até haver dado real
-    carregarPersonalidade();                  // alimenta o perfil/jeito do header
-    carregarHistorico();                      // sai cedo se a sessão ainda está bloqueada
+    carregarPersonalidade();
+    carregarHistorico();
   } catch (est) {
     if (est && typeof est.message === 'string') {
       $('updateLine').textContent = 'Aguardando o núcleo local... (abra pelo atalho ULTRON Desktop)';

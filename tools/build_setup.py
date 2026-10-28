@@ -121,8 +121,12 @@ def build_zip(output: Path | None = None) -> Path:
     output = Path(output) if output else ROOT.parent / f"ULTRON-Desktop-v{package_version}.zip"
     # Pastas de saída de build (electron/dist*, dist-portable etc.) nunca entram no ZIP:
     # eram ~2 GB de instaladores antigos que ninguém usa e que só geram alerta.
+    # Pastas de ferramentas do desenvolvedor (.internal com planos/specs, .beads com o
+    # quadro de tarefas, regras de .claude/.codex/.cursor/.agents) são do repositório,
+    # não do produto: ficam fora do pacote para não vazar nota interna nem lock.
     skip_dirs = {"build", "venv", "node_modules", ".venv", "__pycache__", "logs", "dados",
-                 ".git", ".pytest_cache", "out"}
+                 ".git", ".pytest_cache", "out",
+                 ".internal", ".beads", ".agents", ".claude", ".codex", ".cursor"}
     members: list[Path] = []
     for item in sorted(ROOT.rglob("*")):
         relative = item.relative_to(ROOT)
@@ -137,6 +141,8 @@ def build_zip(output: Path | None = None) -> Path:
         if item.name in {"preview-mock.js", "preview.html"}:   # prévia só existe no repositório
             continue
         if item.name.startswith(".ultron-") or item.name in {"setup.log", "SHA256SUMS.txt", ".env"}:
+            continue
+        if item.name.endswith((".gate.lock", ".lock")):   # travas de ferramenta, não do app
             continue
         if item.name.endswith((".db", ".sqlite", ".sqlite3")) or relative.parts[0] in {"logs", "dados"}:
             continue

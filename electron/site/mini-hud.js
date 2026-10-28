@@ -3,7 +3,8 @@ import { criarOrbe } from './src/orb.js';
 /* Janela flutuante: recebe um retrato pronto do núcleo (via main.js) e ecoa
    verbos aprovados. Não fala com a API; não tem token; não inventa estado. */
 const $ = id => document.getElementById(id);
-const orb = criarOrbe($('hudOrb'));
+/* janela pequena e sempre no topo: o orbe 2D basta e custa bem menos por quadro */
+const orb = criarOrbe($('hudOrb'), { modo: '2d' });
 orb.iniciar();
 
 $('hudReturn').onclick = () => window.ultron?.returnToMain?.();

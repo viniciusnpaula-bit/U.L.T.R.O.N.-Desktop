@@ -28,6 +28,7 @@ Ele descreve o que o código faz hoje, o que a documentação promete, e as dife
 
 ### Interface
 - Núcleo em canvas (`criarOrbe`): energia ligada ao estado real do núcleo; **não gira continuamente** (rotação lenta só sob atividade).
+- Tamanho do holograma medido pela câmara (container query, `--core-size`), não pela janela: ocupa a altura útil menos o espaço das legendas e continua quadrado com os docks abertos.
 - Bate-papo de voz, fita de eventos, linha de comando única, barra de sistema com 3 barras recolhíveis (`Ctrl+1`, `Ctrl+2`, `Ctrl+,`).
 - Temas ULTRON/JARVIS/VISÃO/EDITH trocam `--core`; logo oficial intocada.
 - Zoom desligado por decisão de projeto (`zoom-lock.js` + main).
@@ -64,11 +65,24 @@ comando de diagnóstico, desligar/reiniciar/cancelar, lembrar/esquecer fato, cri
   AES-256-GCM por campo, AAD `ultron-memoria-v1`, prefixo `v1:`, chave DPAPI do
   cofre, `PRAGMA user_version=1`, `secure_delete=ON` e `VACUUM`. Backup exige o
   banco **e** `dados/.cofre.chave`.
+- Vault do Obsidian (`obsidian.py`): leitura por tokens (até 3 notas por
+  resposta) mais a nota `Preferencias.md`, que entra em toda resposta para que
+  um costume registrado ("música sempre no Spotify") valha sem palavra-chave.
+  Escrita autônoma (BAIXO, sem confirmação) por ferramenta: o ULTRON grava o que
+  julgar útil. Nome relativo obrigatório, caminho
+  resolvido e conferido contra o vault, `.obsidian`/`.trash` recusados, limites
+  de 512 KB por nota e 256 KB por escrita. Toda escrita registra inversa no
+  diário: criar → apagar; acrescentar → truncar com hash (recusa se o usuário
+  editou depois). `OBSIDIAN_ATIVO=0` desliga leitura e escrita.
 
 ### API local
 `GET /health`, `/status`, `/events`, `/conversation`, `/microphones`, `/update`, `/update/check`;
 `POST /commands`, `/microphone`, `/microphone/device`, `/confirmations`, `/emergency-stop`,
 `/update/apply`, `/update/launch`, `/update/rollback`, `/shutdown`.
+
+Recusas (401/403/413) leem o resto do corpo antes de fechar a conexão: sem isso o
+Windows devolve RST e o cliente pode perder a resposta. O descarte é limitado a
+16 KB e 0,2 s por leitura.
 
 ### Empacotamento
 - `tools/build_setup.py` gera `ULTRON.exe` (launcher windowed), `ULTRON-Setup.exe` e o ZIP; o ícone vem só de `electron/assets/ULTRON.ico`.

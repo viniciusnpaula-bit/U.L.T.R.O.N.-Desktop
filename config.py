@@ -121,6 +121,17 @@ except ValueError:
     FATO_MAX_TOTAL = 50
 FATO_MIN_BUSCA = 3   # caracteres úteis para apagar com segurança
 
+# Memória no Obsidian: pasta do vault (vazio = Documents/ULTRON-Vault), quantas
+# notas entram no contexto de cada resposta (0 desliga a leitura automática) e
+# se a integração está ligada.
+OBSIDIAN_VAULT = _env("OBSIDIAN_VAULT", "")
+OBSIDIAN_ATIVO = (_env("OBSIDIAN_ATIVO", "1") or "1").lower() not in (
+    "0", "nao", "não", "false", "off")
+try:
+    OBSIDIAN_RECALL = max(0, int(_env("OBSIDIAN_RECALL", "3") or 3))
+except ValueError:
+    OBSIDIAN_RECALL = 3
+
 # Segundos em que uma fala sem "Ei, Ultron" ainda é aceita como comando (0 desliga)
 try:
     JANELA_SEGUIMENTO = max(0.0, float(_env("JANELA_SEGUIMENTO", "6") or 6))

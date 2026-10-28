@@ -1,3 +1,36 @@
+ULTRON Desktop 1.19.0 — interface espacial
+
+- Nova casca espacial: campo estelar, HUD de vidro, dock de bate-papo, dock de
+  diário e console inferior, sem dependências novas e com a CSP intacta.
+- Núcleo 3D (cristal, casca, anéis giroscópicos e ondas) desenhado no canvas 2D;
+  o orbe anterior continua disponível no modo 2D. A escolha fica em
+  `localStorage['ultron-core']` e pode ser trocada no chip da câmara ou nos
+  ajustes.
+- Quatro animações derivadas do estado real, com transições amortecidas:
+  parado (batida funda a cada ~7 s), escutando (o aro abre com o volume do
+  microfone), respondendo (ondas de choque a cada fala) e trabalhando (aro
+  tracejado girando enquanto o turno está em processamento). Nenhum contador de
+  tarefas é inventado: o trabalho usa o sinal `microphone_state`. O rótulo
+  `PENSANDO` virou `TRABALHANDO`.
+- Dock direito com o diário real de desfazer (`GET /api/v1/undo`, somente
+  leitura) e sinais reais de núcleo, API, microfone, sessão, histórico e versão.
+  O diário só é lido com a sessão desbloqueada.
+- Tela de desbloqueio restilizada em três colunas; Windows Hello, PIN, câmera de
+  pré-visualização e `stage.inert` continuam iguais.
+- O campo de estrelas atrás do núcleo deriva em diagonal e cintila; com "menos
+  movimento" no Windows ele continua andando devagar, em vez de congelar.
+- Memória no Obsidian (opcional): lê até 3 notas por resposta e grava no vault
+  (`Documents/ULTRON-Vault`) por ferramentas, com diário real e desfazer.
+- Escrita no vault autônoma (risco baixo, sem confirmação): o ULTRON guarda
+  sozinho o que julgar útil lembrar. A nota `Preferencias.md` entra em toda
+  resposta, então "toque música" já sabe que o padrão é o Spotify.
+- `OBSIDIAN_ATIVO=0` agora desliga também a escrita (antes só a leitura).
+- O holograma do núcleo passou a medir a câmara (76% da altura útil) e o desenho
+  3D preenche o canvas: o cristal ficou ~50% maior, com as legendas ainda abaixo
+  dele. Em janela baixa o conjunto encolhe junto, sem cortar anéis nem virar
+  elipse quando os docks estão abertos.
+- Sem bump de versão, sem mudança de CSP ou permissões.
+
 ULTRON Desktop 1.19.0 — sessão local e histórico cifrado
 
 - Windows Hello (rosto/impressão digital/PIN do Windows) desbloqueia o Desktop;
