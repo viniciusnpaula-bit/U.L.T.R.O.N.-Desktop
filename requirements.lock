@@ -1,6 +1,6 @@
 # Versões exatas testadas (ambiente de desenvolvimento, Windows + Python 3.15)
 python-dotenv==1.2.4
-openai==3.37.0
+openai==3.40.0
 requests==2.34.2
 feedparser==6.0.14
 ddgs==9.16.1
