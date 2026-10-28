@@ -1,6 +1,6 @@
 const path = require('node:path');
 const { pathToFileURL } = require('node:url');
-const { app, BrowserWindow, ipcMain, protocol, screen, shell } = require('electron');
+const { app, BrowserWindow, ipcMain, powerMonitor, protocol, screen, session, shell } = require('electron');
 const { createApiClient } = require('./api');
 const { validarUrlExterna } = require('./links');
 const { criarRespostaPalco, abrirPdfPalco } = require('./palco-protocol');
@@ -34,6 +34,7 @@ let nextActionRequest = 0;
 const pendingActions = new Map();
 let quitting = false;
 let zoomsEnabled = false;
+let lockPendente = false;
 
 function isSender(event, window) {
   return Boolean(window && !window.isDestroyed() && event.sender === window.webContents &&
@@ -46,10 +47,20 @@ function registerApiHandlers() {
     'api:conversation': () => api.conversation(),
     'api:conversation-clear': () => api.clearConversation(),
     'api:command': (_event, text) => api.command(text), 'api:microphone': (_event, paused) => api.microphone(paused),
-    'api:confirmation': (_event, requestId, approved, pin) => api.confirmation(requestId, approved, pin),
+      'api:confirmation': (_event, requestId, approved, pin) => api.confirmation(requestId, approved, pin),
     'api:emergency-stop': () => api.emergencyStop(), 'api:shutdown': () => api.shutdown(),
   };
   for (const [channel, handler] of Object.entries(methods)) ipcMain.handle(channel, handler);
+
+  ipcMain.handle('unlock:info', event => isSender(event, mainWindow) ? api.unlockInfo() : null);
+  ipcMain.handle('unlock:hello', event => isSender(event, mainWindow) ? api.unlockHello() : null);
+  ipcMain.handle('unlock:pin', (event, pin) => {
+    if (!isSender(event, mainWindow) || typeof pin !== 'string' || pin.length < 1 || pin.length > 64) return null;
+    return api.unlockPin(pin);
+  });
+  ipcMain.handle('unlock:lock', event => isSender(event, mainWindow) ? api.lock() : null);
+  ipcMain.handle('undo:list', event => isSender(event, mainWindow) ? api.undoList() : null);
+
   ipcMain.handle('api:microphones', event => {
     if (!isSender(event, mainWindow)) throw new TypeError('Janela do ULTRON inválida.');
     return api.microphones();
@@ -242,6 +253,46 @@ function registerApiHandlers() {
   });
 }
 
+// O bloqueio do Windows vale como bloqueio do ULTRON. Se o POST /lock falhar
+// (ex.: durante o suspend), a flag fica ligada e o resume tenta de novo.
+async function tentarBloquear(tentativas) {
+  for (let indice = 0; indice < tentativas && lockPendente; indice += 1) {
+    try {
+      await api.lock();
+      lockPendente = false;
+      return;
+    } catch {
+      if (indice + 1 < tentativas) await new Promise(resolve => setTimeout(resolve, 250));
+    }
+  }
+}
+
+function bloquearSessao() {
+  lockPendente = true;
+  if (mainWindow && !mainWindow.isDestroyed()) mainWindow.webContents.send('session:locked');
+  return tentarBloquear(1);
+}
+
+function registrarEnergia() {
+  powerMonitor.on('lock-screen', bloquearSessao);
+  powerMonitor.on('suspend', bloquearSessao);
+  powerMonitor.on('resume', () => { if (lockPendente) tentarBloquear(3); });
+  powerMonitor.on('unlock-screen', () => { if (lockPendente) tentarBloquear(3); });
+}
+
+function restringirCamera() {
+  const permitido = (webContents, permission, details) => {
+    const tipos = details?.mediaTypes || [];
+    return permission === 'media' && webContents === mainWindow?.webContents &&
+      tipos.includes('video') && !tipos.includes('audio');
+  };
+  session.defaultSession.setPermissionRequestHandler((webContents, permission, callback, details) => {
+    callback(permitido(webContents, permission, details));
+  });
+  session.defaultSession.setPermissionCheckHandler((webContents, permission) =>
+    permission === 'media' && webContents === mainWindow?.webContents);
+}
+
 function secureLocalWindow(window, file) {
   window.webContents.on('will-navigate', (event, url) => {
     if (url !== pathToFileURL(file).href) event.preventDefault();
@@ -304,6 +355,8 @@ app.whenReady().then(() => {
   });
   registerApiHandlers();
   createWindow();
+  registrarEnergia();
+  restringirCamera();
   app.on('before-quit', () => { quitting = true; });
   app.on('activate', () => {
     if (mainWindow && !mainWindow.isDestroyed()) { mainWindow.show(); mainWindow.focus(); }

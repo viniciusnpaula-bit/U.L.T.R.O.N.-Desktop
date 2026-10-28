@@ -5,8 +5,8 @@
 <meta name="color-scheme" content="dark"><title>U.L.T.R.O.N. — prévia</title>
 <link rel="icon" type="image/png" href="icons/ULTRON-Logo.png"><link rel="stylesheet" href="style.css">
 <script src="zoom-lock.js"></script>
-<meta http-equiv="Content-Security-Policy" content="default-src 'self'; script-src 'self'; style-src 'self' 'unsafe-inline'; img-src 'self' data:; connect-src 'none'; object-src 'none'; base-uri 'none'; form-action 'none'">
-<meta name="ultron-version" content="1.12.1">
+<meta http-equiv="Content-Security-Policy" content="default-src 'self'; script-src 'self'; style-src 'self' 'unsafe-inline'; img-src 'self' data: ultron-palco: https: http:; media-src 'self' ultron-palco: https: http:; frame-src ultron-palco: https: http:; connect-src 'none'; object-src 'none'; base-uri 'none'; form-action 'none'">
+<meta name="ultron-version" content="1.19.0">
 </head>
 <body>
 <canvas id="field" aria-hidden="true"></canvas>
@@ -14,125 +14,151 @@
 
 <div class="stage" id="stage">
 
-  <!-- ── faixa superior: só sinais reais ─────────────────────────────── -->
-  <header class="topline">
-    <div class="mark">
+  <!-- ── faixa superior: identidade, tema e sinais reais ──────────────── -->
+  <header class="bridge">
+    <div class="bridge-id">
       <span class="mark-glyph" aria-hidden="true"></span>
-      <div><b>U.L.T.R.O.N.</b><small>núcleo local</small></div>
+      <div class="id-text">
+        <b>U.L.T.R.O.N.</b>
+        <small><span id="headerProfile">núcleo local</span> · <span id="headerStyle">jeito —</span></small>
+      </div>
     </div>
-    <div class="signals" role="group" aria-label="Sinais do sistema">
+    <div class="theme-pills" role="group" aria-label="Tema visual">
+      <button type="button" class="theme-pill" data-theme-pill="ultron" aria-pressed="true" aria-label="Tema ULTRON">ULTRON</button>
+      <button type="button" class="theme-pill" data-theme-pill="jarvis" aria-pressed="false" aria-label="Tema JARVIS">JARVIS</button>
+      <button type="button" class="theme-pill" data-theme-pill="amber" aria-pressed="false" aria-label="Tema VISÃO">VISÃO</button>
+      <button type="button" class="theme-pill" data-theme-pill="emerald" aria-pressed="false" aria-label="Tema EDITH">EDITH</button>
+    </div>
+    <div class="bridge-signals" role="group" aria-label="Sinais do sistema">
       <span class="signal" id="signalCore"><i class="led"></i><span>núcleo</span><b id="signalCoreText">—</b></span>
       <span class="signal" id="signalMic"><i class="led" id="voiceLed"></i><span>voz</span><b id="micVal">aguardando</b></span>
-      <span class="signal" id="signalCpu"><span>cpu</span><b id="cpuVal">—</b></span>
-      <span class="signal" id="signalRam"><span>ram</span><b id="ramVal">—</b></span>
-      <span class="signal" id="signalDisk"><span>disco</span><b id="diskVal">—</b></span>
+      <span class="signal" id="signalCpu"><span>cpu</span><b id="cpuVal">—</b><i class="signal-bar"><i id="cpuBar"></i></i></span>
+      <span class="signal" id="signalRam"><span>ram</span><b id="ramVal">—</b><i class="signal-bar"><i id="ramBar"></i></i></span>
+      <span class="signal" id="signalDisk"><span>disco</span><b id="diskVal">—</b><i class="signal-bar"><i id="diskBar"></i></i></span>
     </div>
-    <div class="clock">
-      <b id="clockTime">--:--</b>
-      <span id="clockDate">—</span>
-    </div>
-    <button class="ghost icon rail-toggle" id="toggleChat" aria-pressed="true" aria-controls="drawerChat"
-            title="Recolher conversa de voz (Ctrl+1)">
+    <div class="clock"><b id="clockTime">--:--</b><span id="clockDate">—</span></div>
+    <button class="ghost tiny" id="sessionButton" data-state="off" title="Sessão local: bloqueado" aria-label="Sessão local">bloqueado</button>
+    <button class="ghost icon" id="toggleChat" aria-expanded="true" aria-controls="drawerChat" aria-label="Abrir ou recolher o bate-papo" title="Recolher bate-papo (Ctrl+1)">
       <svg viewBox="0 0 24 24" aria-hidden="true"><rect x="3" y="4.5" width="7.5" height="15" rx="2"/><path d="M15 8.5h5M15 12h5M15 15.5h3"/></svg>
     </button>
-    <button class="ghost icon rail-toggle" id="toggleTape" aria-pressed="true" aria-controls="side"
-            title="Recolher eventos (Ctrl+2)">
-      <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M4 6.5h16M4 12h10M4 17.5h13"/></svg>
-    </button>
-    <button class="ghost icon rail-toggle" id="toggleSystem" aria-pressed="false" aria-controls="drawer"
-            title="Barra de sistema (Ctrl+,)">
-      <svg viewBox="0 0 24 24" aria-hidden="true"><rect x="13.5" y="4.5" width="7.5" height="15" rx="2"/><path d="M4 8.5h5M4 12h5M4 15.5h3"/></svg>
+    <button class="ghost icon" id="toggleSystem" aria-expanded="true" aria-controls="sidePanel" aria-label="Abrir ou recolher o diário" title="Recolher diário (Ctrl+2)">
+      <svg viewBox="0 0 24 24" aria-hidden="true"><rect x="5" y="3.5" width="14" height="17" rx="2"/><path d="M8.5 8h7M8.5 12h7M8.5 16h4"/></svg>
     </button>
     <button class="ghost icon" id="openSettings" aria-label="Ajustes do sistema" title="Ajustes do sistema (Ctrl+,)">
-      <svg viewBox="0 0 24 24" aria-hidden="true"><circle cx="12" cy="12" r="3.2"/><path d="M12 2.6v3M12 18.4v3M4.2 7.3l2.6 1.5M17.2 15.2l2.6 1.5M4.2 16.7l2.6-1.5M17.2 8.8l2.6-1.5"/></svg>
+      <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M4 7.5h5.2M15.8 7.5H20M4 12h8.2M16.8 12H20M4 16.5h3.2M13.8 16.5H20"/><circle cx="12.5" cy="7.5" r="1.9"/><circle cx="14.5" cy="12" r="1.9"/><circle cx="11.5" cy="16.5" r="1.9"/></svg>
     </button>
   </header>
 
-  <!-- ── corpo: câmara + fita de eventos ─────────────────────────────── -->
-  <div class="chamber-row">
+  <!-- ── corpo: docks + câmara ────────────────────────────────────────── -->
+  <main class="arena">
+    <aside class="dock dock-left" id="drawerChat" aria-label="Bate-papo">
+      <header class="dock-head">
+        <div class="comms-tabs" role="tablist" aria-label="Painéis do bate-papo">
+          <button type="button" class="comms-tab" id="chatTab" role="tab" aria-selected="true" aria-controls="commsList">bate-papo</button>
+        </div>
+        <span class="comms-live" id="commsLive" title="Escuta ativa">ao vivo</span>
+        <button class="ghost tiny" id="clearHistory" title="Limpar a sessão">limpar</button>
+        <button class="ghost tiny rail-mini" id="collapseChat" title="Recolher bate-papo (Ctrl+1)" aria-label="Recolher bate-papo">
+          <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M15 5l-7 7 7 7"/></svg>
+        </button>
+        <button class="ghost tiny" id="scrollLatest" title="Ir para a última mensagem" aria-label="Ir para a última mensagem">↓</button>
+      </header>
+      <div class="comms-list" id="commsList" role="tabpanel" aria-labelledby="chatTab" aria-live="polite" aria-label="Mensagens do bate-papo">
+        <div class="comms-empty" id="commsEmpty">
+          <b>Ainda não há mensagens.</b>
+          <span>Diga “Ei, Ultron” ou escreva abaixo — cada mensagem, de voz ou texto, aparece aqui.</span>
+        </div>
+      </div>
+      <footer class="dock-foot">
+        <span class="comms-count" id="commsCount">0 mensagens</span>
+        <span class="comms-note">voz e texto · últimas 15</span>
+      </footer>
+    </aside>
 
-      <!-- bate-papo de voz: o que foi dito e o que o núcleo respondeu -->
-      <section class="comms" id="drawerChat" aria-label="Conversa de voz">
-        <header class="comms-head">
-          <span class="eyebrow">conversa</span>
-          <span class="comms-live" id="commsLive" title="Escuta ativa">ao vivo</span>
-          <button class="ghost tiny rail-mini" id="collapseChat" title="Recolher conversa (Ctrl+1)" aria-label="Recolher conversa de voz">
-            <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M15 5l-7 7 7 7"/></svg>
-          </button>
-          <button class="ghost tiny" id="scrollLatest" title="Ir para a última fala">última ↓</button>
-        </header>
-        <div class="comms-list" id="commsList" aria-live="polite" aria-label="Mensagens da conversa">
-          <div class="comms-empty" id="commsEmpty">
-            <b>Ainda não há conversa.</b>
-            <span>Diga “Ei, Ultron” — cada fala reconhecida e cada resposta aparecem aqui.</span>
+    <section class="chamber" id="chamber" data-state="connecting" aria-label="Câmara do núcleo">
+      <!-- palco: ocupa o lugar do núcleo quando há algo para ver -->
+      <section class="palco" id="palco" aria-label="Palco do ULTRON" hidden>
+        <header class="palco-head">
+          <div class="palco-id">
+            <span class="eyebrow" id="palcoKind">palco</span>
+            <h2 id="palcoTitle">—</h2>
           </div>
-        </div>
-        <div class="comms-foot">
-          <span class="comms-count" id="commsCount">0 falas</span>
-          <span class="tape-sep" aria-hidden="true"></span>
-          <span class="comms-note">só voz · o que você escreve aparece na câmara</span>
-        </div>
+          <div class="palco-actions">
+            <button type="button" class="ghost tiny" id="palcoSound" hidden aria-pressed="false" title="Ligar o som do vídeo">som</button>
+            <button type="button" class="ghost tiny" id="palcoExternal" hidden>abrir no navegador</button>
+            <button type="button" class="ghost tiny" id="palcoClose" title="Fechar o palco (Esc)">fechar</button>
+          </div>
+        </header>
+        <div class="palco-body" id="palcoBody"></div>
+        <footer class="palco-foot">
+          <span id="palcoNote">—</span>
+          <span id="palcoSource" class="micro nano"></span>
+        </footer>
       </section>
 
-    <main class="chamber" id="chamber" data-state="connecting" aria-label="Câmara do núcleo">
-
-      <div class="core" id="core" data-state="connecting">
+      <div class="core-frame" id="core" data-state="connecting">
+        <div class="reticle" aria-hidden="true"><i></i><i></i><i></i></div>
         <canvas id="orbCanvas" role="img" aria-label="Núcleo animado do ULTRON"></canvas>
+        <button type="button" class="core-mode" id="coreMode" aria-pressed="true" title="Alternar núcleo 3D/2D">3D</button>
         <div class="state-word" id="stateWord" aria-live="polite">CONECTANDO</div>
         <div class="state-hint" id="stateHint">Estabelecendo canal com o núcleo local</div>
       </div>
+    </section>
 
-      <div class="reply" id="reply" aria-live="polite">
-        <span class="reply-caret" aria-hidden="true"></span>
-        <p id="responseText">Pronto. Diga “Ei, Ultron” ou escreva abaixo.</p>
-      </div>
-
-      <nav class="verbs" aria-label="Ações rápidas">
-        <button class="verb" data-command="Abra o navegador"><b>↗</b><span>Abrir navegador</span></button>
-        <button class="verb" data-command="Abra o Spotify"><b>♪</b><span>Spotify</span></button>
-        <button class="verb" data-command="Pause ou retome a música"><b>❚❚</b><span>Mídia</span></button>
-        <button class="verb" data-command="Aumente o volume do PC"><b>+</b><span>Volume</span></button>
-        <button class="verb" data-command="Abra o Rocket League"><b>◆</b><span>Abrir Rocket League</span></button>
-        <button class="verb" data-command="Ative o modo jogo"><b>⚡</b><span>Modo jogo</span></button>
-        <button class="verb" data-command="Minimize tudo"><b>▁</b><span>Minimizar tudo</span></button>
-      </nav>
-
-      <!-- ── linha de comando: o único lugar onde se escreve ─────────── -->
-      <form class="console" id="consoleForm" autocomplete="off">
-        <span class="prompt" aria-hidden="true">›</span>
-        <label class="sr-only" for="commandInput">Comando para o ULTRON</label>
-        <input id="commandInput" placeholder="Fale com o ULTRON…   (“Ei, Ultron, abra o navegador”)" maxlength="4000" spellcheck="false">
-        <button type="button" class="ghost mic" id="micButton" aria-pressed="false" title="Pausar escuta contínua">
-          <svg viewBox="0 0 24 24" aria-hidden="true"><rect x="9" y="2.5" width="6" height="12" rx="3"/><path d="M5.5 11v1.5a6.5 6.5 0 0 0 13 0V11M12 19v2.5M8.5 21.5h7"/></svg>
-          <span id="micButtonLabel">escutando</span>
+    <aside class="dock dock-right" id="sidePanel" aria-label="Diário e sinais">
+      <header class="dock-head">
+        <span class="eyebrow">diário</span>
+        <button class="ghost tiny rail-mini" id="collapseSystem" title="Recolher diário (Ctrl+2)" aria-label="Recolher diário">
+          <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M15 5l-7 7 7 7"/></svg>
         </button>
-        <button type="submit" class="send" id="sendButton" title="Enviar (Enter)">
-          <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M3.5 12 20 4.5 13.5 20l-2.2-6.1z"/></svg>
-        </button>
-        <div class="mic-meter" id="micMeter" aria-hidden="true"><i id="micLevelBar"></i></div>
-      </form>
-      <div class="console-hint" id="consoleHint">Enter para enviar · Esc para limpar · Ctrl+, ajustes</div>
-    </main>
-
-    <aside class="side" id="side" aria-label="Eventos da sessão">
-      <section class="tape" id="tape" aria-label="Eventos da sessão">
-      <div class="tape-head">
-        <span class="eyebrow">sessão</span>
-        <b id="sessionCount">0</b>
-        <button class="ghost tiny" id="clearHistory">limpar</button>
+      </header>
+      <div class="undo-list" id="undoList"></div>
+      <button type="button" class="ghost undo-action" id="undoAction" disabled>desfazer a última</button>
+      <div class="dock-signals">
+        <div class="kv"><span>núcleo</span><b id="dockCore">—</b></div>
+        <div class="kv"><span>api local</span><b id="dockApi">—</b></div>
+        <div class="kv"><span>microfone</span><b id="dockMic">—</b></div>
+        <div class="kv"><span>sessão</span><b id="dockSession">bloqueado</b></div>
+        <div class="kv"><span>histórico</span><b id="dockHistorico">histórico local</b></div>
+        <div class="kv"><span>versão</span><b id="dockVersion">—</b></div>
       </div>
-      <div class="tape-list" id="tapeList" aria-live="polite">
-        <div class="tape-empty">Nada ainda nesta sessão.<br><span>O que você disser aparece aqui.</span></div>
-      </div>
-      <div class="tape-foot">
-        <span class="signal" id="signalApi"><i class="led" id="apiLed"></i><span>api</span><b id="apiVal">—</b></span>
-        <span class="tape-sep" aria-hidden="true"></span>
-        <span class="tape-meta" id="autostartVal">início —</span>
-        <button class="ghost tiny" id="toggleHud" title="Painel flutuante">janela flutuante</button>
-      </div>
-      </section>
+      <footer class="dock-foot"><span id="undoNote" role="status">nada para desfazer</span></footer>
     </aside>
-  </div>
+  </main>
+
+  <footer class="console-hull">
+    <div class="reply" id="reply" aria-live="polite">
+      <span class="reply-caret" aria-hidden="true"></span>
+      <p id="responseText">Pronto. Diga “Ei, Ultron” ou escreva abaixo.</p>
+      <span class="voice-sub" id="voiceSubStatus">—</span>
+    </div>
+
+    <nav class="verbs" aria-label="Ações rápidas">
+      <button class="verb" data-command="Abra o navegador"><b>↗</b><span>Abrir navegador</span></button>
+      <button class="verb" data-command="Abra o Spotify"><b>♪</b><span>Spotify</span></button>
+      <button class="verb" data-command="Pause ou retome a música"><b>❚❚</b><span>Mídia</span></button>
+      <button class="verb" data-command="Aumente o volume do PC"><b>+</b><span>Volume</span></button>
+      <button class="verb" data-command="Abra o Rocket League"><b>◆</b><span>Abrir Rocket League</span></button>
+      <button class="verb" data-command="Ative o modo jogo"><b>⚡</b><span>Modo jogo</span></button>
+      <button class="verb" data-command="Minimize tudo"><b>▁</b><span>Minimizar tudo</span></button>
+    </nav>
+
+    <!-- ── linha de comando: o único lugar onde se escreve ─────────── -->
+    <form class="console" id="consoleForm" autocomplete="off">
+      <span class="prompt" aria-hidden="true">›</span>
+      <label class="sr-only" for="commandInput">Comando para o ULTRON</label>
+      <input id="commandInput" placeholder="Fale com o ULTRON… (“Ei, Ultron”)" maxlength="4000" spellcheck="false">
+      <button type="button" class="ghost mic" id="micButton" aria-pressed="false" title="Pausar escuta contínua">
+        <svg viewBox="0 0 24 24" aria-hidden="true"><rect x="9" y="2.5" width="6" height="12" rx="3"/><path d="M5.5 11v1.5a6.5 6.5 0 0 0 13 0V11M12 19v2.5M8.5 21.5h7"/></svg>
+        <span id="micButtonLabel">escutando</span>
+      </button>
+      <button type="submit" class="send" id="sendButton" title="Enviar (Enter)">
+        <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M3.5 12 20 4.5 13.5 20l-2.2-6.1z"/></svg>
+      </button>
+      <div class="mic-meter" id="micMeter" aria-hidden="true"><i id="micLevelBar"></i></div>
+    </form>
+    <div class="console-hint" id="consoleHint">Enter para enviar · Esc para limpar · Esc Esc para parar tudo · Ctrl+, ajustes</div>
+  </footer>
 </div>
 
 <!-- ── caixa lateral de sistema (mesma família do bate-papo; recolhe com o painel) ── -->
@@ -155,22 +181,162 @@
         <button role="radio" class="swatch" data-theme="amber" aria-label="VISÃO (âmbar)"><i></i><span>VISÃO</span></button>
         <button role="radio" class="swatch" data-theme="emerald" aria-label="EDITH (verde)"><i></i><span>EDITH</span></button>
       </div>
+      <div class="core-choice" role="radiogroup" aria-label="Modelo do núcleo">
+        <button type="button" role="radio" data-core="3d" aria-checked="true">3D</button>
+        <button type="button" role="radio" data-core="2d" aria-checked="false">2D</button>
+      </div>
+      <p class="micro nano">modelo do núcleo</p>
+    </section>
+
+    <section class="block" id="voiceStyleBlock">
+      <h3>Voz e Jeito</h3>
+      <p class="muted">Escolha como o ULTRON fala e como ele se comporta. O jeito muda o tom; as regras de segurança não mudam.</p>
+      <div class="seg-tabs" role="tablist" aria-label="Voz, jeito, microfone e sobre você">
+        <button type="button" class="seg-tab" id="tabVoice" role="tab" aria-selected="true" aria-controls="paneVoice">voz</button>
+        <button type="button" class="seg-tab" id="tabStyle" role="tab" aria-selected="false" aria-controls="paneStyle">jeito</button>
+        <button type="button" class="seg-tab" id="tabMic" role="tab" aria-selected="false" aria-controls="paneMic">microfone</button>
+        <button type="button" class="seg-tab" id="tabAbout" role="tab" aria-selected="false" aria-controls="paneAbout">sobre você</button>
+      </div>
+
+      <div class="seg-pane" id="paneVoice" role="tabpanel" aria-labelledby="tabVoice">
+        <p class="micro nano" id="voiceActive">voz ativa: —</p>
+        <div class="choice-grid" id="voiceCards" role="radiogroup" aria-label="Voz do ULTRON"></div>
+        <label class="sr-only" for="voiceSelect">Voz</label>
+        <select id="voiceSelect" hidden><option value="">voz padrão</option></select>
+        <div class="field-row">
+          <button class="ghost" id="testVoice">testar voz</button>
+          <button class="ghost" id="saveVoice">usar esta voz</button>
+        </div>
+        <p class="micro nano" id="testResult" role="status">—</p>
+      </div>
+
+      <div class="seg-pane" id="paneStyle" role="tabpanel" aria-labelledby="tabStyle" hidden>
+        <p class="micro nano">identidade</p>
+        <div class="swatches" id="profileSwatches" role="radiogroup" aria-label="Perfil de personalidade">
+          <button role="radio" class="swatch" data-profile="ultron" aria-label="ULTRON"><i></i><span>ULTRON</span></button>
+          <button role="radio" class="swatch" data-profile="jarvis" aria-label="JARVIS"><i></i><span>JARVIS</span></button>
+          <button role="radio" class="swatch" data-profile="visao" aria-label="VISÃO"><i></i><span>VISÃO</span></button>
+          <button role="radio" class="swatch" data-profile="edith" aria-label="EDITH"><i></i><span>EDITH</span></button>
+        </div>
+        <p class="micro nano">jeito de falar</p>
+        <div class="choice-grid" id="styleCards" role="radiogroup" aria-label="Jeito de falar"></div>
+      </div>
+
+      <div class="seg-pane" id="paneMic" role="tabpanel" aria-labelledby="tabMic" hidden>
+        <p class="muted">A captura é do núcleo; aqui você escolhe a entrada e pausa a escuta.</p>
+        <div class="field-row">
+          <label class="sr-only" for="microphoneSelect">Microfone</label>
+          <select id="microphoneSelect"><option value="">carregando…</option></select>
+          <button class="ghost" id="refreshMicrophones">atualizar</button>
+        </div>
+        <p class="micro nano" id="microphoneDeviceStatus" role="status">aguardando lista</p>
+        <div class="field-row">
+          <button class="solid" id="saveMicrophone">usar este microfone</button>
+          <button class="ghost" id="voiceStart">pausar escuta</button>
+        </div>
+        <p class="muted nano" id="voicePageStatus">—</p>
+        <div class="field-row">
+          <button class="ghost" id="testMic">testar microfone</button>
+        </div>
+      </div>
+
+      <div class="seg-pane" id="paneAbout" role="tabpanel" aria-labelledby="tabAbout" hidden>
+        <p class="muted">Opcional. Serve para o ULTRON te chamar pelo nome e lembrar do contexto certo.</p>
+        <div class="field-col">
+          <label for="tratamentoInput">como devo te chamar</label>
+          <input id="tratamentoInput" maxlength="40" placeholder="senhor, Pedro, doutor…">
+        </div>
+        <div class="field-col">
+          <label for="userName">seu nome</label>
+          <input id="userName" maxlength="60" placeholder="como você se chama">
+        </div>
+        <div class="field-col">
+          <label for="userNickname">apelido</label>
+          <input id="userNickname" maxlength="40" placeholder="como seus amigos te chamam">
+        </div>
+        <div class="field-row">
+          <div class="field-col grow">
+            <label for="userAge">idade</label>
+            <input id="userAge" type="number" min="1" max="120" inputmode="numeric" placeholder="opcional">
+          </div>
+          <div class="field-col grow">
+            <label for="userGender">gênero</label>
+            <select id="userGender">
+              <option value="">prefiro não dizer</option>
+              <option value="homem">homem</option>
+              <option value="mulher">mulher</option>
+              <option value="outro">outro</option>
+            </select>
+          </div>
+        </div>
+        <div class="field-col">
+          <label for="userAbout">algo que devo saber sobre você</label>
+          <input id="userAbout" maxlength="300" placeholder="ex.: trabalho com design, prefiro respostas curtas">
+        </div>
+        <div class="field-row">
+          <button class="ghost" id="greetingToggle" role="switch" aria-checked="true">saudação ao abrir: ligada</button>
+        </div>
+      </div>
+
+      <div class="field-row panel-actions">
+        <button class="solid" id="savePersonality">aplicar</button>
+        <button class="ghost" id="previewPersonality">ver instrução</button>
+        <button class="ghost" id="resetPersonality">padrão</button>
+      </div>
+      <p class="micro nano" id="profileNote" role="status">—</p>
     </section>
 
     <section class="block">
-      <h3>Voz</h3>
-      <p class="muted">A captura é do núcleo; aqui você só escolhe a entrada e pausa a escuta.</p>
+      <h3>Chaves de API</h3>
+      <p class="muted">Guardadas <b>cifradas</b> (AES-256 + DPAPI do Windows) em <code id="cofreArquivo">dados/cofre.json</code>. A interface nunca mostra a chave de volta — só o final. Cada plataforma tem o link oficial para criar a chave. O que já está no .env continua valendo.</p>
+      <div id="cofreList" class="cofre-list" aria-live="polite"><span class="micro nano">carregando…</span></div>
       <div class="field-row">
-        <label class="sr-only" for="microphoneSelect">Microfone</label>
-        <select id="microphoneSelect"><option value="">carregando…</option></select>
-        <button class="ghost" id="refreshMicrophones">atualizar</button>
+        <label class="sr-only" for="cofreNome">Credencial</label>
+        <select id="cofreNome">
+          <option value="gemini">Gemini</option>
+          <option value="groq">Groq</option>
+          <option value="nvidia">NVIDIA Build</option>
+          <option value="openai">OpenAI</option>
+          <option value="openrouter">OpenRouter</option>
+          <option value="mistral">Mistral</option>
+          <option value="deepseek">DeepSeek</option>
+          <option value="cerebras">Cerebras</option>
+          <option value="together">Together AI</option>
+          <option value="xai">xAI (Grok)</option>
+          <option value="telegram_token">Telegram (token do bot)</option>
+          <option value="telegram_uid">Telegram (seu ID)</option>
+        </select>
+        <label class="sr-only" for="cofreValor">Valor da chave</label>
+        <input id="cofreValor" type="password" autocomplete="off" spellcheck="false" placeholder="cole a chave aqui (não aparece na tela)">
+        <button class="solid" id="cofreSalvar">salvar</button>
       </div>
-      <p class="micro nano" id="microphoneDeviceStatus" role="status">aguardando lista</p>
+      <p class="micro nano" id="cofreNote" role="status">—</p>
+      <p class="muted nano" id="cofreProtecao">—</p>
+    </section>
+
+    <section class="block">
+      <h3>Memória</h3>
+      <p class="muted">Fatos que o ULTRON guardou sobre você. Só os essenciais vão em cada conversa; o resto é buscado quando importa.</p>
       <div class="field-row">
-        <button class="solid" id="saveMicrophone">usar este microfone</button>
-        <button class="ghost" id="voiceStart">pausar escuta</button>
+        <label class="sr-only" for="factsSearch">Buscar fato</label>
+        <input id="factsSearch" placeholder="buscar fato…">
+        <button class="ghost" id="factsRefresh">buscar</button>
       </div>
-      <p class="muted nano" id="voicePageStatus">—</p>
+      <div class="facts-list" id="factsList" aria-live="polite"><span class="micro nano">nenhum fato carregado</span></div>
+      <p class="micro nano" id="factsNote" role="status">—</p>
+      <div id="lembretesList" class="facts-list" aria-live="polite"></div>
+      <p class="muted nano" id="lembretesNote">—</p>
+    </section>
+
+    <section class="block">
+      <h3>Fluxos rápidos</h3>
+      <p class="muted">Sequências com etapas. Se uma etapa falhar, o fluxo para e diz qual falhou.</p>
+      <div class="field-row" id="fluxosList">
+        <button class="ghost" data-fluxo="abrir.rocket">abrir Rocket League</button>
+        <button class="ghost" data-fluxo="modo_jogo">modo jogo (3 etapas)</button>
+        <button class="ghost" data-fluxo="minimizar">minimizar tudo</button>
+      </div>
+      <p class="micro nano" id="fluxoNote" role="status">—</p>
     </section>
 
     <section class="block">
@@ -179,8 +345,10 @@
       <div class="kv"><span>api local</span><b id="apiServiceVal">—</b></div>
       <div class="kv"><span>estado</span><b id="coreState">—</b></div>
       <div class="kv"><span>sessão</span><b id="authStatus">não verificada</b></div>
+      <div class="kv"><span>início</span><b id="autostartVal">—</b></div>
       <div class="field-row">
         <button class="ghost" id="testConnection">verificar conexão</button>
+        <button class="ghost" id="toggleHud" title="Painel flutuante">janela flutuante</button>
         <button class="danger" id="emergencyStopButton">parada de emergência</button>
       </div>
       <p class="muted nano" id="settingsResult"></p>
@@ -193,19 +361,71 @@
       <button class="ghost" id="updateRollback" hidden title="Voltar para a versão anterior">desfazer</button>
     </div>
     <div class="update-progress" id="updateProgress" hidden><i id="updateProgressBar"></i></div>
-    <p class="update-line" id="updateLine" role="status" aria-live="polite">versão <b id="updateVersion">1.12.1</b> · <span id="updateState">não verificado</span></p>
+    <p class="update-line" id="updateLine" role="status" aria-live="polite">versão <b id="updateVersion">1.19.0</b> · <span id="updateState">não verificado</span></p>
     <p class="update-notes" id="updateNotes" hidden></p>
     <span class="update-note">Fechar a janela encerra a API e libera o microfone.</span>
   </footer>
 </section>
+
+<!-- ── tela de desbloqueio: por cima do palco, abaixo dos modais ─────────── -->
+<div class="unlock" id="unlock" role="dialog" aria-modal="true"
+     aria-labelledby="unlockTitle" hidden>
+  <div class="unlock-frame">
+    <header class="unlock-bar">
+      <b id="unlockTitle">U.L.T.R.O.N. <span>// acesso local</span></b>
+      <span>v<b id="unlockVersion">—</b> · <b id="unlockSession">bloqueado</b></span>
+    </header>
+    <div class="unlock-grid">
+      <section class="unlock-col" aria-labelledby="unlockSessionLabel">
+        <p class="eyebrow" id="unlockSessionLabel">01 / sessão</p>
+        <dl class="unlock-facts">
+          <dt>Windows Hello</dt><dd id="unlockHelloState">—</dd>
+          <dt>PIN do ULTRON</dt><dd id="unlockPinState">—</dd>
+          <dt>câmera</dt><dd id="unlockCameraState">—</dd>
+        </dl>
+        <div class="unlock-pin" id="unlockPinBlock" hidden>
+          <label for="unlockPin">PIN do ULTRON</label>
+          <form id="unlockPinForm">
+            <input id="unlockPin" type="password" inputmode="numeric" autocomplete="off"
+                   maxlength="64" aria-label="PIN do ULTRON">
+            <button class="solid" type="submit">desbloquear</button>
+          </form>
+        </div>
+      </section>
+      <section class="unlock-center">
+        <div class="unlock-reticle">
+          <video id="unlockCameraVideo" autoplay muted playsinline
+                 aria-label="Pré-visualização da câmera"></video>
+          <i class="unlock-scan" aria-hidden="true"></i>
+        </div>
+        <p class="unlock-state" id="unlockStatus" role="status" aria-live="polite">Aguardando autorização local.</p>
+        <p class="unlock-camera-error" id="unlockCameraError"></p>
+        <div class="unlock-actions">
+          <button class="solid" id="unlockHello" type="button">Windows Hello</button>
+          <button class="ghost" id="unlockLater" type="button">Agora não</button>
+        </div>
+      </section>
+      <section class="unlock-col" aria-labelledby="unlockAuthLabel">
+        <p class="eyebrow" id="unlockAuthLabel">02 / autorização</p>
+        <dl class="unlock-facts">
+          <dt>irreversíveis</dt><dd id="unlockIrreversiveis">—</dd>
+          <dt>histórico</dt><dd id="unlockHistorico">histórico local</dd>
+          <dt>allowlist</dt><dd>ativa</dd>
+          <dt>log</dt><dd>ativo</dd>
+        </dl>
+        <ol class="unlock-log" id="unlockLog" aria-label="Tentativas desta sessão"></ol>
+      </section>
+    </div>
+    <footer class="unlock-foot">AES-256-GCM · histórico local</footer>
+  </div>
+</div>
 
 <!-- nós mantidos para compatibilidade com o estado do núcleo -->
 <div class="sr-only" aria-hidden="true">
   <span id="sideDot"></span><span id="sideStatus"></span><span id="sideInfo"></span>
   <span id="headerLed"></span><span id="systemBadge"></span>
   <span id="heroStatus"></span><span id="micDetail"></span><span id="micLevelVal"></span>
-  <span id="systemMicVal"></span><span id="coreLed"></span><span id="cpuBar"></span>
-  <span id="ramBar"></span><span id="diskBar"></span><span id="uptime"></span>
+  <span id="systemMicVal"></span><span id="coreLed"></span><span id="uptime"></span>
   <span id="orbState"></span><span id="orbResponse"></span><span id="coreServiceVal"></span>
   <span id="memoryList"></span><span id="activityFeed"></span><span id="recentList"></span>
 </div>
