@@ -364,7 +364,8 @@ export function criarOrbe(canvas, { modo } = {}) {
     const I = Math.min(1, Math.max(0, intensidade) * tremula * 1.45 * suave.alfa);
     // batida de repouso: um pulso fundo a cada ~7 s, só no ocioso
     const batida = Math.pow(0.5 + 0.5 * Math.sin(fase * 0.85 - 1.2), 8) * pesos.ocioso;
-    const R2 = R * 0.98;
+    const R2 = R * 1.32;   // o holograma ocupa o canvas: a onda mais externa
+                           // (2,11) chega a ~0,91 do raio, sem cortar as bordas
     const tinta = (t, a = 1) => `hsla(${cor.h}, ${sat}%, ${luz + t}%, ${a})`;
 
     const projetarPonto = (p, rx, ry, rz) => {

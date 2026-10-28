@@ -90,3 +90,19 @@ test('o fundo estelar nunca fica parado, nem com movimento reduzido', async () =
   assert.match(campo, /reduzir \? 0\.5 : 1/);
   assert.match(campo, /p\.x \+= passo \* 0\.45 \* p\.dir/);
 });
+
+test('o holograma mede a câmara, ocupa o espaço e não vira elipse', async () => {
+  const css = await readFile(new URL('../style.css', import.meta.url), 'utf8');
+  const camara = css.slice(css.indexOf('.chamber {'), css.indexOf('.chamber::after'));
+  assert.match(camara, /container-type:\s*size/);
+  const frame = css.slice(css.indexOf('.core-frame {'), css.indexOf('.core-frame canvas'));
+  assert.match(frame, /--core-size:\s*clamp\(180px, min\(calc\(100cqh - 124px\), 76cqw, 620px\), 620px\)/);
+  assert.match(css, /\.core-frame canvas\s*\{[^}]*width:\s*var\(--core-size\)/);
+  assert.match(css, /\.reticle\s*\{[^}]*width:\s*var\(--core-size\)/);
+  assert.match(css, /\.state-word\s*\{[^}]*top:\s*calc\(50% \+ var\(--core-size\) \/ 2 \+ 8px\)/);
+
+  const fonte = await readFile(new URL('../src/orb.js', import.meta.url), 'utf8');
+  // sem o zoom, o cristal desenhado ocupava só ~1/6 do canvas
+  const zoom = fonte.match(/const R2 = R \* ([0-9.]+);/);
+  assert.ok(zoom && Number(zoom[1]) >= 1.3, 'o desenho 3d precisa preencher o canvas');
+});

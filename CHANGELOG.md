@@ -21,6 +21,10 @@ ULTRON Desktop 1.19.0 — interface espacial
   movimento" no Windows ele continua andando devagar, em vez de congelar.
 - Memória no Obsidian (opcional): lê até 3 notas por resposta e grava no vault
   (`Documents/ULTRON-Vault`) por ferramentas, com diário real e desfazer.
+- O holograma do núcleo passou a medir a câmara (76% da altura útil) e o desenho
+  3D preenche o canvas: o cristal ficou ~50% maior, com as legendas ainda abaixo
+  dele. Em janela baixa o conjunto encolhe junto, sem cortar anéis nem virar
+  elipse quando os docks estão abertos.
 - Sem bump de versão, sem mudança de CSP ou permissões.
 
 ULTRON Desktop 1.19.0 — sessão local e histórico cifrado
