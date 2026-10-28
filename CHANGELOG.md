@@ -21,6 +21,10 @@ ULTRON Desktop 1.19.0 — interface espacial
   movimento" no Windows ele continua andando devagar, em vez de congelar.
 - Memória no Obsidian (opcional): lê até 3 notas por resposta e grava no vault
   (`Documents/ULTRON-Vault`) por ferramentas, com diário real e desfazer.
+- Escrita no vault autônoma (risco baixo, sem confirmação): o ULTRON guarda
+  sozinho o que julgar útil lembrar. A nota `Preferencias.md` entra em toda
+  resposta, então "toque música" já sabe que o padrão é o Spotify.
+- `OBSIDIAN_ATIVO=0` agora desliga também a escrita (antes só a leitura).
 - O holograma do núcleo passou a medir a câmara (76% da altura útil) e o desenho
   3D preenche o canvas: o cristal ficou ~50% maior, com as legendas ainda abaixo
   dele. Em janela baixa o conjunto encolhe junto, sem cortar anéis nem virar

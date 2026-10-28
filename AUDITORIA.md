@@ -66,11 +66,14 @@ comando de diagnóstico, desligar/reiniciar/cancelar, lembrar/esquecer fato, cri
   cofre, `PRAGMA user_version=1`, `secure_delete=ON` e `VACUUM`. Backup exige o
   banco **e** `dados/.cofre.chave`.
 - Vault do Obsidian (`obsidian.py`): leitura por tokens (até 3 notas por
-  resposta) e escrita só por ferramenta. Nome relativo obrigatório, caminho
+  resposta) mais a nota `Preferencias.md`, que entra em toda resposta para que
+  um costume registrado ("música sempre no Spotify") valha sem palavra-chave.
+  Escrita autônoma (BAIXO, sem confirmação) por ferramenta: o ULTRON grava o que
+  julgar útil. Nome relativo obrigatório, caminho
   resolvido e conferido contra o vault, `.obsidian`/`.trash` recusados, limites
   de 512 KB por nota e 256 KB por escrita. Toda escrita registra inversa no
   diário: criar → apagar; acrescentar → truncar com hash (recusa se o usuário
-  editou depois).
+  editou depois). `OBSIDIAN_ATIVO=0` desliga leitura e escrita.
 
 ### API local
 `GET /health`, `/status`, `/events`, `/conversation`, `/microphones`, `/update`, `/update/check`;

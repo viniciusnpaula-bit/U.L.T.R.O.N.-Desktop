@@ -112,6 +112,25 @@ class ObsidianTests(unittest.TestCase):
         self.assertEqual(s["notas"], 1)
         self.assertEqual(Path(s["vault"]), self.vault.resolve())
 
+    def test_preferencias_entram_no_contexto_mesmo_sem_palavra_chave(self):
+        obsidian.criar(obsidian.NOTA_PREFERENCIAS,
+                       "# Preferências\n\n- Música: sempre no Spotify.")
+        # assunto sem relação nenhuma com a nota: mesmo assim ela vem junto
+        bloco = obsidian.contexto("receita de bolo")
+        self.assertIn("Spotify", bloco)
+        self.assertIn("Preferências do usuário", bloco)
+        # e não aparece duas vezes quando a busca também acha a nota
+        bloco = obsidian.contexto("preferências de música")
+        self.assertEqual(bloco.count("sempre no Spotify"), 1)
+
+    def test_sem_nota_de_preferencias_o_contexto_segue_vazio(self):
+        self.assertEqual(obsidian.contexto("receita de bolo"), "")
+        self.assertEqual(obsidian.preferencias(), "")
+
+    def test_recall_zero_desliga_ate_as_preferencias(self):
+        obsidian.criar(obsidian.NOTA_PREFERENCIAS, "- Música: sempre no Spotify.")
+        self.assertEqual(obsidian.contexto("toque música", limite=0), "")
+
 
 class ObsidianFerramentasTests(unittest.TestCase):
     """As ferramentas passam pelo autorizador e pelo diário de desfazer."""
@@ -179,6 +198,30 @@ class ObsidianFerramentasTests(unittest.TestCase):
         self.pedidos.clear()
         self.assertIn("Achavel", self.executar("obsidian_buscar", {"consulta": "assunto raro"}))
         self.assertIn("assunto raro", self.executar("obsidian_ler", {"nota": "Achavel"}))
+        self.assertEqual(self.pedidos, [])
+
+    def test_escrita_no_vault_e_autonoma(self):
+        """Nada de confirmação: guardar preferência é decisão do ULTRON."""
+        self.assertIn("Nota criada", self.executar(
+            "obsidian_criar", {"nota": "Preferencias",
+                               "conteudo": "- Música: sempre no Spotify."}))
+        self.assertEqual(self.pedidos, [])
+        self.assertIn("Anotado", self.executar(
+            "obsidian_anexar", {"nota": "Preferencias",
+                                "texto": "- Café: sem açúcar."}))
+        self.assertIn("Registrado", self.executar(
+            "obsidian_diario", {"texto": "Preferências anotadas."}))
+        self.assertEqual(self.pedidos, [])
+        texto = (self.vault / "Preferencias.md").read_text(encoding="utf-8")
+        self.assertIn("Spotify", texto)
+        self.assertIn("sem açúcar", texto)
+        self.assertTrue(any((self.vault / "Diario").glob("*.md")))
+
+    def test_vault_desligado_nao_grava(self):
+        with patch.object(obsidian.config, "OBSIDIAN_ATIVO", False):
+            saida = self.executar("obsidian_criar", {"nota": "Bloqueada", "conteudo": "x"})
+        self.assertIn("desligado", saida)
+        self.assertFalse((self.vault / "Bloqueada.md").exists())
         self.assertEqual(self.pedidos, [])
 
 

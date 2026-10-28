@@ -862,16 +862,20 @@ def desfazer():
 
 # ---------- memória no Obsidian ----------
 def _cls_nota(operacao, resumo):
-    """Escrita no vault: nota fora da allowlist pede confirmação, pasta interna é negada."""
+    """Escrita no vault: autônoma (BAIXO), sem pedir confirmação.
+
+    O vault é a memória do próprio ULTRON: se ele julgar útil guardar algo, guarda.
+    O que continua barrado é nome de nota inválido (caminho absoluto, `..`, pasta
+    interna) e qualquer alvo protegido.
+    """
     def cls(**args):
         try:
             p = obsidian.caminho(str(args.get("nota") or ""))
         except Exception:
-            return Classificacao(MEDIO, operacao, False, negar="nota_invalida")
+            return Classificacao(BAIXO, operacao, False, negar="nota_invalida")
         if _protegido(str(p)):
-            return Classificacao(MEDIO, operacao, False, negar="protected_path")
-        return Classificacao(MEDIO, operacao, _pasta_ok(str(p)),
-                             resumo=resumo(args))
+            return Classificacao(BAIXO, operacao, False, negar="protected_path")
+        return Classificacao(BAIXO, operacao, True, resumo=resumo(args))
     return cls
 
 
@@ -880,11 +884,10 @@ def _cls_diario(resumo):
         try:
             p = obsidian.caminho(obsidian.nota_do_dia())
         except Exception:
-            return Classificacao(MEDIO, "diario.anexar", False, negar="nota_invalida")
+            return Classificacao(BAIXO, "diario.anexar", False, negar="nota_invalida")
         if _protegido(str(p)):
-            return Classificacao(MEDIO, "diario.anexar", False, negar="protected_path")
-        return Classificacao(MEDIO, "diario.anexar", _pasta_ok(str(p)),
-                             resumo=resumo(args))
+            return Classificacao(BAIXO, "diario.anexar", False, negar="protected_path")
+        return Classificacao(BAIXO, "diario.anexar", True, resumo=resumo(args))
     return cls
 
 
@@ -950,13 +953,16 @@ def obsidian_status():
             f"Leitura automática no contexto: {'ligada' if s['ativo'] else 'desligada'}")
 
 
-@ferramenta("Cria uma nota nova no vault do Obsidian. Não sobrescreve nota existente.",
-            risco=MEDIO,
+@ferramenta("Cria uma nota nova no vault do Obsidian, sem pedir confirmação. Use para guardar "
+            "preferências, fatos e referências úteis por conta própria. Não sobrescreve nota existente.",
+            risco=BAIXO,
             params={"nota": "Nome relativo, ex: Projetos/ULTRON",
                     "conteudo": "Texto em Markdown"},
             classificar=_cls_nota("nota.criar",
                                   lambda a: f"criar a nota {a.get('nota')} no vault"))
 def obsidian_criar(nota: str, conteudo: str):
+    if not obsidian.ativo():
+        return "O vault do Obsidian está desligado (OBSIDIAN_ATIVO=0); nada foi gravado."
     p = obsidian.caminho(nota)
     faltando = _pastas_que_faltam(p.parent)
     try:
@@ -969,12 +975,15 @@ def obsidian_criar(nota: str, conteudo: str):
     return f"Nota criada em {p}"
 
 
-@ferramenta("Acrescenta texto ao fim de uma nota do vault, criando a nota se ela faltar.",
-            risco=MEDIO,
+@ferramenta("Acrescenta texto ao fim de uma nota do vault, criando a nota se ela faltar. "
+            "Sem confirmação: use sempre que uma informação nova merecer ser lembrada.",
+            risco=BAIXO,
             params={"nota": "Nome relativo da nota", "texto": "Texto a acrescentar"},
             classificar=_cls_nota("nota.anexar",
                                   lambda a: f"acrescentar texto à nota {a.get('nota')}"))
 def obsidian_anexar(nota: str, texto: str):
+    if not obsidian.ativo():
+        return "O vault do Obsidian está desligado (OBSIDIAN_ATIVO=0); nada foi gravado."
     p = obsidian.caminho(nota)
     faltando = _pastas_que_faltam(p.parent)
     info = obsidian.anexar(nota, texto)
@@ -988,11 +997,14 @@ def obsidian_anexar(nota: str, texto: str):
     return f"Anotado em {info['nota']}."
 
 
-@ferramenta("Registra uma linha no diário de hoje do vault do Obsidian, com data e hora reais.",
-            risco=MEDIO, params={"texto": "O que aconteceu"},
+@ferramenta("Registra uma linha no diário de hoje do vault do Obsidian, com data e hora reais. "
+            "Sem confirmação: use quando algo relevante do dia acontecer.",
+            risco=BAIXO, params={"texto": "O que aconteceu"},
             classificar=_cls_diario(
                 lambda a: f"anotar no diário de hoje: {str(a.get('texto') or '')[:60]}"))
 def obsidian_diario(texto: str):
+    if not obsidian.ativo():
+        return "O vault do Obsidian está desligado (OBSIDIAN_ATIVO=0); nada foi gravado."
     info = obsidian.diario(texto)
     p = Path(info["caminho"])
     if info["criada"]:
