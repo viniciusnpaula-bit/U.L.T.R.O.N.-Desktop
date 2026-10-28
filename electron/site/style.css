@@ -89,6 +89,16 @@ button { cursor: pointer; border: 0; background: none; }
   -webkit-mask-image: radial-gradient(70% 66% at 50% 45%, #000 10%, transparent 74%);
   mask-image: radial-gradient(70% 66% at 50% 45%, #000 10%, transparent 74%);
   opacity: .5;
+  animation: star-drift 34s linear infinite, star-shimmer 9s ease-in-out infinite alternate;
+}
+/* o campo de pontos deriva em diagonal e respira: nada fica congelado atrás do núcleo */
+@keyframes star-drift {
+  from { background-position: 0 0; }
+  to { background-position: 34px 68px; }
+}
+@keyframes star-shimmer {
+  from { opacity: .36; }
+  to { opacity: .62; }
 }
 
 /* ── casca ───────────────────────────────────────────────────────────────── */
@@ -1140,6 +1150,7 @@ button { cursor: pointer; border: 0; background: none; }
    e leitura continuam animando, porque não causam desconforto vestibular. */
 @media (prefers-reduced-motion: reduce) {
   .unlock-scan { display: none; animation: none; }
+  .vignette::before { animation: star-drift 60s linear infinite; opacity: .5; }
   :root { --t-press: 1ms; --t-panel: 140ms; }
   .msg, .reply.arriving p, .modal, .palco { animation: none; }
   .comms-live.on::before, .reply-caret { animation: none; opacity: .8; }

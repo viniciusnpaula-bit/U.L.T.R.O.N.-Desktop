@@ -684,7 +684,7 @@ export function criarCampo(canvas) {
       x: Math.random() * w, y: Math.random() * h,
       r: sorte(rMin, rMax), a: sorte(aMin, aMax),
       prof: sorte(pMin, pMax), fase: Math.random() * Math.PI * 2,
-      tw: sorte(0.3, 1.2),
+      tw: sorte(0.3, 1.2), dir: Math.random() < 0.5 ? -1 : 1,
     }));
     const area = Math.min(1.4, Math.max(0.7, (w * h) / 1100000));
     perto = criar(Math.round(110 * area), 0.8, 1.8, 0.5, 0.9, 0.8, 1);
@@ -712,10 +712,15 @@ export function criarCampo(canvas) {
     const desenhar = (lista, corDaCamada, deriva, parallax) => {
       c.fillStyle = corDaCamada;
       for (const p of lista) {
-        if (!reduzir) {
-          p.y += deriva * (0.4 + p.prof) * dt;
-          if (p.y > h + 2) { p.y = -2; p.x = Math.random() * w; }
-        }
+        // deriva diagonal: cada estrela tem sua direção, então o campo nunca
+        // parece uma imagem colada atrás do núcleo. Com movimento reduzido a
+        // deriva continua, só que bem mais lenta (nada de paralaxe nem cintilo).
+        const passo = deriva * (0.4 + p.prof) * dt * (reduzir ? 0.5 : 1);
+        p.y += passo;
+        p.x += passo * 0.45 * p.dir;
+        if (p.y > h + 2) { p.y = -2; p.x = Math.random() * w; }
+        if (p.x > w + 2) p.x = -2;
+        else if (p.x < -2) p.x = w + 2;
         const ox = -px * parallax * p.prof, oy = -py * parallax * p.prof;
         c.globalAlpha = p.a * (reduzir ? 0.8 : 0.55 + 0.45 * Math.sin(t / 1000 * p.tw + p.fase));
         c.beginPath(); c.arc(p.x + ox, p.y + oy, p.r, 0, Math.PI * 2); c.fill();

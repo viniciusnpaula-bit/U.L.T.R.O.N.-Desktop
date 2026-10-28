@@ -1,5 +1,6 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
+import { readFile } from 'node:fs/promises';
 import { estadoDoOrbe, geometriaDoCristal, normalizarHumor, normalizarModo, projetar } from '../src/orb.js';
 
 test('modo do núcleo é 3d por padrão e só aceita 2d quando pedido', () => {
@@ -74,4 +75,18 @@ test('nível usa o volume real normalizado pelo limiar e nunca sai de 0..1', () 
   assert.equal(estadoDoOrbe({ ...escutando, microphone_threshold: 0, microphone_level: 50 }, {}, agora).nivel, 0);
   const semCaptura = { core_running: true, microphone_capturing: false, microphone_threshold: 100, microphone_level: 90 };
   assert.equal(estadoDoOrbe(semCaptura, {}, agora).nivel, 0);
+});
+
+test('o fundo estelar nunca fica parado, nem com movimento reduzido', async () => {
+  const css = await readFile(new URL('../style.css', import.meta.url), 'utf8');
+  assert.match(css, /@keyframes star-drift/);
+  assert.match(css, /\.vignette::before\s*\{[^}]*animation:\s*star-drift/);
+  const reduzido = css.slice(css.indexOf('(prefers-reduced-motion: reduce)'));
+  assert.match(reduzido, /\.vignette::before\s*\{[^}]*star-drift/);
+
+  const fonte = await readFile(new URL('../src/orb.js', import.meta.url), 'utf8');
+  const inicio = fonte.indexOf('function criarCampo');
+  const campo = fonte.slice(inicio, fonte.indexOf('function aoVisibilidade', inicio));
+  assert.match(campo, /reduzir \? 0\.5 : 1/);
+  assert.match(campo, /p\.x \+= passo \* 0\.45 \* p\.dir/);
 });
