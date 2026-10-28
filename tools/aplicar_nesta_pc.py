@@ -51,8 +51,6 @@ def arquivos_para_copiar(origem: Path):
         relativo = arquivo.relative_to(origem)
         if any(parte in PROTEGIDAS for parte in relativo.parts):
             continue
-        if relativo.parts and relativo.parts[0] == "ULTRON-Mobile":
-            continue
         # pastas de build antigas do electron (instaladores velhos) não fazem parte do app
         if any(parte.startswith("dist") for parte in relativo.parts[:2]):
             continue

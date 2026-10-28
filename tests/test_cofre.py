@@ -21,6 +21,54 @@ class CofreTests(unittest.TestCase):
             self.patch_attr.start()
             self.addCleanup(self.patch_attr.stop)
 
+    def test_dados_cifram_com_aad_propria_e_prefixo_v1(self):
+        pacote = cofre.cifrar_dados("lembrar da consulta")
+        self.assertTrue(pacote.startswith("v1:"))
+        self.assertNotIn("consulta", pacote)
+        self.assertEqual(cofre.decifrar_dados(pacote), "lembrar da consulta")
+        self.assertTrue(cofre.parece_cifrado(pacote))
+        self.assertFalse(cofre.parece_cifrado("texto em claro"))
+        # AAD diferente do cofre: um pacote não abre como o outro
+        with self.assertRaises(Exception):
+            cofre._decifrar(pacote)
+        with self.assertRaises(ValueError):
+            cofre.decifrar_dados(cofre._cifrar("segredo"))
+
+    def test_pacote_adulterado_levanta_erro(self):
+        pacote = cofre.cifrar_dados("conteúdo")
+        adulterado = pacote[:-2] + ("AA" if not pacote.endswith("AA") else "BB")
+        with self.assertRaises(Exception):
+            cofre.decifrar_dados(adulterado)
+        with self.assertRaises(ValueError):
+            cofre.decifrar_dados("v1:")
+        with self.assertRaises(ValueError):
+            cofre.decifrar_dados("v1:curto")
+
+    def test_chave_ausente_nao_e_criada_para_ler(self):
+        with self.assertRaises(cofre.ChaveIndisponivel):
+            cofre.decifrar_dados("v1:" + "A" * 40)
+        self.assertFalse(cofre.ARQUIVO_CHAVE.exists())
+        self.assertFalse(cofre.chave_disponivel())
+
+    def test_chave_existente_ilegivel_nao_e_sobrescrita(self):
+        cofre.ARQUIVO_CHAVE.write_bytes(b"x" * 40)
+        with self.assertRaises(cofre.ChaveIndisponivel):
+            cofre._chave_local(criar=False)
+        self.assertEqual(cofre.ARQUIVO_CHAVE.read_bytes(), b"x" * 40)
+        status = cofre.status()
+        self.assertEqual(status["modo"], "indisponivel")
+        self.assertIn("indisponível", status["protecao"])
+
+    def test_chave_criada_uma_vez_serve_para_cifrar_e_decifrar(self):
+        self.assertFalse(cofre.chave_disponivel())
+        pacote = cofre.cifrar_dados("primeiro")
+        self.assertTrue(cofre.ARQUIVO_CHAVE.exists())
+        self.assertTrue(cofre.chave_disponivel())
+        self.assertEqual(cofre.decifrar_dados(pacote), "primeiro")
+        outro = cofre.cifrar_dados("primeiro")
+        self.assertNotEqual(pacote, outro)          # nonce novo a cada gravação
+        self.assertEqual(cofre.decifrar_dados(outro), "primeiro")
+
     def test_guarda_cifrado_e_nao_deixa_a_chave_no_arquivo(self):
         cofre.guardar("groq", "gsk_segredo_1234567890abcdef")
         texto = cofre.ARQUIVO.read_text(encoding="utf-8")

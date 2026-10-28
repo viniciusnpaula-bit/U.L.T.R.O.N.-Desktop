@@ -16,6 +16,7 @@ import uuid
 from dataclasses import dataclass
 
 import config
+import sessao
 from config import BASE
 
 # ====================== LOGS (com redação de segredos) ======================
@@ -153,6 +154,17 @@ def parar_tudo():
 BAIXO, MEDIO, ALTO, CRITICO = "BAIXO", "MEDIO", "ALTO", "CRITICO"
 ALLOW, DENY, CONFIRM = "ALLOW", "DENY", "CONFIRM"
 
+# ====================== SESSÃO LOCAL (Desktop) ======================
+# Ações que nunca ganham o atalho do desbloqueio: continuam consultando.
+IRREVERSIVEIS = frozenset({
+    "executar_comando", "rodar_codigo", "desligar_pc", "reiniciar_pc",
+    "apagar_arquivo", "enviar_formulario",
+})
+# ALTO e reversíveis, mas capturam imagem ou tomam o ponteiro: confirmam sempre.
+SEMPRE_CONFIRMAR = frozenset({"ver_tela", "webcam_foto", "controlar_mouse_com_gesto"})
+# Só canais que existem de verdade ganham o atalho; telegram/fluxo/teste ficam fora.
+ORIGENS_LOCAIS = frozenset({"desktop", "voz", "terminal"})
+
 
 @dataclass
 class Classificacao:
@@ -225,7 +237,7 @@ def permitir_shell_arbitrario():
 
 
 # ====================== AUTORIZADOR CENTRAL ======================
-def autorizar(cls):
+def autorizar(cls, ferramenta="", origem="desconhecida"):
     """Decide ALLOW / CONFIRM / DENY para uma ação já classificada. Devolve (decisão, motivo)."""
     if cls.negar:
         return DENY, cls.negar
@@ -242,6 +254,10 @@ def autorizar(cls):
             return ALLOW, "medium_risk_operation_allowlisted"
         return CONFIRM, "medium_risk_not_allowlisted"
     if cls.risco == ALTO:
+        # O desbloqueio vale só para ALTO local e reversível; allowlist/DENY não mudam.
+        if (ferramenta not in IRREVERSIVEIS and ferramenta not in SEMPRE_CONFIRMAR
+                and origem in ORIGENS_LOCAIS and sessao.estado()["desbloqueada"]):
+            return ALLOW, "unlocked_session_high_risk"
         return CONFIRM, "high_risk_action"
     if cls.risco == CRITICO:
         return CONFIRM, "critical_risk_action"
@@ -258,9 +274,10 @@ def novo_pedido(ferramenta, args, cls, origem):
     valores = ", ".join(str(v) for v in (args or {}).values())[:90]
     resumo = cls.resumo or (f"executar {ferramenta.replace('_', ' ')}" + (f" com {valores}" if valores else ""))
     aviso = {ALTO: "Ação de risco alto. ", CRITICO: "Ação de risco crítico. "}.get(cls.risco, "")
+    desbloqueada = origem in ORIGENS_LOCAIS and sessao.estado()["desbloqueada"]
     return {"id": uuid.uuid4().hex[:8], "acao": ferramenta, "risco": cls.risco, "origem": origem,
             "args": sanitizar_args(args), "ts": agora, "expira": agora + timeout("confirmacao_telegram"),
-            "exige_pin": cls.risco == CRITICO and bool(config.PIN),
+            "exige_pin": cls.risco == CRITICO and bool(config.PIN) and not desbloqueada,
             "mensagem": f"{aviso}Posso {resumo}? Confirma?"}
 
 

@@ -14,6 +14,12 @@ from pathlib import Path
 
 from microphone_devices import enumerate_input_devices
 
+import sessao
+
+# Limite de falhas de PIN e janela de espera (em memória, zerada ao reiniciar).
+UNLOCK_FALHAS_MAX = 5
+UNLOCK_ESPERA_S = 30.0
+
 
 class DesktopRuntime:
     """Runs one core voice loop and serializes Desktop commands through the core."""
@@ -52,6 +58,10 @@ class DesktopRuntime:
         self._command_thread: threading.Thread | None = None
         self._voice_thread: threading.Thread | None = None
         self._notification_callback = None
+
+        self._unlock_lock = threading.Lock()
+        self._unlock_falhas = 0
+        self._unlock_espera_ate = 0.0
 
     def start(self) -> None:
         with self._lifecycle_lock:
@@ -212,9 +222,7 @@ class DesktopRuntime:
     # ---- memória (Fase 3)
     def fatos_listar(self, busca: str = "") -> dict:
         import memoria
-        return {"fatos": memoria.buscar_fatos(busca, 50) if busca else
-                [{"id": i, "texto": texto} for i, texto in
-                 ((row[0], row[1]) for row in memoria._x("SELECT id, texto FROM fatos ORDER BY id", (), True))],
+        return {"fatos": memoria.buscar_fatos(busca, 50) if busca else memoria.fatos_com_id(50),
                 "limite": 50}
 
     def fatos_corrigir(self, id_, texto) -> dict:
@@ -569,6 +577,120 @@ class DesktopRuntime:
         self._commands.put((operation_id, text.strip()))
         return operation_id
 
+    # ---- sessão local (ed0): Hello, PIN e bloqueio
+    def _log_seg(self, acao: str, decisao: str, motivo: str) -> None:
+        try:
+            security = self._security or importlib.import_module("seguranca")
+            security.log_seg("desktop", acao, "-", decisao, motivo)
+        except Exception:
+            pass
+
+    def _biometria(self):
+        try:
+            return importlib.import_module("biometria")
+        except Exception:
+            return None
+
+    def unlock_info(self) -> dict:
+        bio = self._biometria()
+        try:
+            hello = bio.disponivel() if bio else {"disponivel": False, "motivo": "Windows Hello indisponível"}
+        except Exception:
+            hello = {"disponivel": False, "motivo": "Windows Hello indisponível"}
+        try:
+            import config
+            pin_configurado = bool(getattr(config, "PIN", ""))
+        except Exception:
+            pin_configurado = False
+        try:
+            security = self._security or importlib.import_module("seguranca")
+            irreversiveis = sorted(getattr(security, "IRREVERSIVEIS", ()))
+        except Exception:
+            irreversiveis = []
+        info = {
+            "session": sessao.estado(),
+            "hello": hello,
+            "pin_configurado": pin_configurado,
+            "irreversiveis": irreversiveis,
+            "versao": self.update_info().get("current_version", "desconhecida"),
+        }
+        try:
+            import memoria
+            info["historico"] = memoria.status_criptografia()
+        except Exception:
+            pass          # 5it ainda não existe: a tela mostra só "histórico local"
+        return info
+
+    def undo_list(self, limite: int = 10) -> dict:
+        limite = max(1, min(int(limite), 20))
+        try:
+            diario = importlib.import_module("desfazer")
+            itens = diario.listar(limite)
+        except Exception as erro:
+            print(f"[aviso] diário de desfazer indisponível: {type(erro).__name__}")
+            return {"itens": [], "limite": limite, "indisponivel": True}
+        return {"itens": itens, "limite": limite}
+
+    def unlock_hello(self) -> dict:
+        bio = self._biometria()
+        try:
+            hello = bio.disponivel() if bio else {"disponivel": False}
+        except Exception:
+            hello = {"disponivel": False}
+        if not hello.get("disponivel"):
+            self._log_seg("unlock", "DENY", "hello_unavailable")
+            return {"unlocked": False, "error": "hello_unavailable"}
+        try:
+            verificado = bio.verificar() is True
+        except bio.Ocupado:
+            return {"unlocked": False, "error": "busy"}
+        except Exception:
+            verificado = False
+        if not verificado:
+            self._log_seg("unlock", "DENY", "hello_not_verified")
+            return {"unlocked": False, "error": "not_verified"}
+        estado = sessao.desbloquear("hello")
+        self._log_seg("unlock", "ALLOW", "hello_verified")
+        return {"unlocked": True, "method": "hello", "session": estado}
+
+    def unlock_pin(self, pin: str) -> dict:
+        if time.monotonic() < self._unlock_espera_ate:
+            self._log_seg("unlock", "DENY", "pin_locked_out")
+            return {"unlocked": False, "error": "too_many_attempts"}
+        try:
+            import config
+            tem_pin = bool(getattr(config, "PIN", ""))
+        except Exception:
+            tem_pin = False
+        if not tem_pin:
+            self._log_seg("unlock", "DENY", "no_method_configured")
+            return {"unlocked": False, "error": "no_method_configured"}
+        try:
+            security = self._security or importlib.import_module("seguranca")
+            valido = bool(security.pin_valido(pin))
+        except Exception:
+            valido = False
+        if not valido:
+            with self._unlock_lock:
+                self._unlock_falhas += 1
+                bloqueado = self._unlock_falhas >= UNLOCK_FALHAS_MAX
+                if bloqueado:
+                    self._unlock_falhas = 0
+                    self._unlock_espera_ate = time.monotonic() + UNLOCK_ESPERA_S
+            self._log_seg("unlock", "DENY", "pin_locked_out" if bloqueado else "pin_invalid_or_missing")
+            return {"unlocked": False, "error": "too_many_attempts" if bloqueado else "pin_invalid"}
+        with self._unlock_lock:
+            self._unlock_falhas = 0
+            self._unlock_espera_ate = 0.0
+        estado = sessao.desbloquear("pin")
+        self._log_seg("unlock", "ALLOW", "pin_verified")
+        return {"unlocked": True, "method": "pin", "session": estado}
+
+    def lock(self) -> dict:
+        sessao.bloquear()
+        self._log_seg("lock", "ALLOW", "session_locked")
+        return {"locked": True}
+
     def get_snapshot(self) -> dict:
         autostart = False
         try:
@@ -608,6 +730,7 @@ class DesktopRuntime:
             "shutdown_requested": self._shutdown_requested,
             "error": self._error,
             "palco": palco_atual,
+            "session_desbloqueada": bool(sessao.estado()["desbloqueada"]),
         }
 
     def fechar_palco(self) -> dict:
@@ -653,7 +776,8 @@ class DesktopRuntime:
     def _confirmar(self, message: str, pedido: dict):
         request_id = uuid.uuid4().hex
         risk = str(pedido.get("risco", "")).upper()
-        requires_pin = bool(pedido.get("exige_pin")) or risk == "CRITICO"
+        desbloqueada = sessao.estado()["desbloqueada"]
+        requires_pin = (risk == "CRITICO" or bool(pedido.get("exige_pin"))) and not desbloqueada
         pending = {
             "event": threading.Event(),
             "approved": False,

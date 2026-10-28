@@ -40,6 +40,18 @@ class FakeRuntime:
             "saudacao": True, "tratamentos": {"ultron": "senhor", "jarvis": "senhor"},
         }
         self.personalidade_salva = []
+        self.unlock = {"session": {"desbloqueada": False, "metodo": None, "desde": None},
+                       "hello": {"disponivel": False, "motivo": "DeviceNotPresent"},
+                       "pin_configurado": True, "irreversiveis": ["apagar_arquivo"],
+                       "versao": "1.19.0"}
+        self.undo = {
+            "itens": [{"id": "a" * 12, "operacao": "arquivo.apagar",
+                       "resumo": "apagar C:\\tmp\\a.txt", "desfeito": False,
+                       "criado": 1.0}],
+            "limite": 10,
+        }
+        self.pins = []
+        self.locked = False
 
     def get_snapshot(self):
         return self.snapshot
@@ -50,6 +62,23 @@ class FakeRuntime:
     def limpar_conversa(self):
         self.conversation_cleared = True
         return 1
+
+    def unlock_info(self):
+        return dict(self.unlock)
+
+    def undo_list(self):
+        return dict(self.undo)
+
+    def unlock_hello(self):
+        return {"unlocked": False, "error": "hello_unavailable"}
+
+    def unlock_pin(self, pin):
+        self.pins.append(pin)
+        return {"unlocked": False, "error": "pin_invalid"}
+
+    def lock(self):
+        self.locked = True
+        return {"locked": True}
 
     def poll_events(self):
         events, self.events = self.events, []
@@ -149,7 +178,7 @@ class DesktopApiTests(unittest.TestCase):
     def test_health_status_and_events_require_token_and_return_expected_data(self):
         status, health = self.call("/api/v1/health")
         self.assertEqual(status, 200)
-        self.assertEqual(health["version"], "1.18.0")
+        self.assertEqual(health["version"], "1.19.0")
         status, snapshot = self.call("/api/v1/status")
         self.assertEqual(status, 200)
         self.assertFalse(snapshot["microphone_paused"])
@@ -164,6 +193,19 @@ class DesktopApiTests(unittest.TestCase):
         self.assertEqual(status, 200)
         self.assertEqual(data["turns"][0]["role"], "user")
         self.assertEqual(data["turns"][0]["source"], "voz")
+
+    def test_undo_route_is_read_only_and_requires_token(self):
+        status, _ = self.call("/api/v1/undo", use_token=False)
+        self.assertEqual(status, 401)
+
+        status, data = self.call("/api/v1/undo")
+        self.assertEqual(status, 200)
+        self.assertEqual(data["limite"], 10)
+        self.assertEqual(data["itens"][0]["operacao"], "arquivo.apagar")
+        self.assertNotIn("inversa", data["itens"][0])
+
+        status, _ = self.call("/api/v1/undo", method="POST", data={})
+        self.assertEqual(status, 404)
 
     def test_clear_conversation_route_requires_token_and_empty_body(self):
         status, _ = self.call("/api/v1/conversation/clear", method="POST", data={}, use_token=False)
@@ -327,6 +369,51 @@ class DesktopApiTests(unittest.TestCase):
         status, _ = self.call("/api/v1/personalidade/restaurar", method="POST", data={})
         self.assertEqual(status, 200)
         self.assertEqual(self.runtime.personalidade_salva, [{"restaurar": True}])
+
+    def test_unlock_info_requires_token_and_is_get_only(self):
+        status, _ = self.call("/api/v1/unlock", use_token=False)
+        self.assertEqual(status, 401)
+        status, data = self.call("/api/v1/unlock")
+        self.assertEqual(status, 200)
+        self.assertFalse(data["session"]["desbloqueada"])
+        self.assertIn("irreversiveis", data)
+        status, _ = self.call("/api/v1/unlock", method="POST", data={"method": "hello"})
+        self.assertEqual(status, 200)
+
+    def test_unlock_payloads_are_strict(self):
+        for corpo in ({}, {"method": "face"}, {"method": "hello", "pin": "1"},
+                      {"method": "pin"}, {"method": "pin", "pin": ""},
+                      {"method": "pin", "pin": "x" * 65},
+                      {"method": "pin", "pin": 1234}):
+            status, erro = self.call("/api/v1/unlock", method="POST", data=corpo)
+            self.assertEqual(status, 400, corpo)
+            self.assertEqual(erro["error"], "invalid_unlock_payload")
+        self.assertEqual(self.runtime.pins, [])
+
+    def test_unlock_returns_200_with_reason_when_verification_fails(self):
+        status, data = self.call("/api/v1/unlock", method="POST", data={"method": "hello"})
+        self.assertEqual(status, 200)
+        self.assertEqual(data["error"], "hello_unavailable")
+        status, data = self.call("/api/v1/unlock", method="POST",
+                                 data={"method": "pin", "pin": "2468"})
+        self.assertEqual(status, 200)
+        self.assertEqual(data["error"], "pin_invalid")
+        self.assertEqual(self.runtime.pins, ["2468"])
+
+    def test_lock_requires_empty_payload(self):
+        status, _ = self.call("/api/v1/lock", method="POST", data={"x": 1})
+        self.assertEqual(status, 400)
+        self.assertFalse(self.runtime.locked)
+        status, data = self.call("/api/v1/lock", method="POST", data={})
+        self.assertEqual(status, 200)
+        self.assertEqual(data, {"locked": True})
+        self.assertTrue(self.runtime.locked)
+
+    def test_status_carries_the_session_flag(self):
+        self.runtime.snapshot["session_desbloqueada"] = True
+        status, data = self.call("/api/v1/status")
+        self.assertEqual(status, 200)
+        self.assertTrue(data["session_desbloqueada"])
 
     def test_unknown_route_and_internal_errors_are_safe(self):
         status, _ = self.call("/api/v1/unknown")

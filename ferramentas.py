@@ -78,7 +78,7 @@ def executar(nome, args, confirmar, origem="desconhecida"):
     except Exception as e:
         seguranca.log_seg(origem, nome, f["risco"], seguranca.DENY, f"invalid_arguments:{type(e).__name__}", args)
         return f"Argumentos inválidos para {nome}: {e}"
-    decisao, motivo = seguranca.autorizar(cls)
+    decisao, motivo = seguranca.autorizar(cls, nome, origem)
     seguranca.log_seg(origem, nome, cls.risco, decisao, motivo, args)
     if decisao == seguranca.DENY:
         return (f"AÇÃO NEGADA pela segurança ({motivo}). Diga ao usuário que não pode fazer isso "

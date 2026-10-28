@@ -93,6 +93,8 @@ def build_exe(name: str = "ULTRON-Setup", entry: str = "installer/ultron_setup.p
         "--workpath", str(work),
         "--specpath", str(BUILD),
         "--log-level", "WARN",
+        "--hidden-import", "winrt.windows.security.credentials.ui",
+        "--collect-submodules", "winrt",
         str(ROOT / entry),
     ])
     exe = DIST / f"{name}.exe"
@@ -131,8 +133,6 @@ def build_zip(output: Path | None = None) -> Path:
         if item.is_dir():
             continue
         if item.suffix.lower() in {".pyc", ".pyo", ".log", ".zip", ".spec", ".tmp"}:
-            continue
-        if relative.parts[0] == "ULTRON-Mobile":     # projeto Android, tem Release próprio
             continue
         if item.name in {"preview-mock.js", "preview.html"}:   # prévia só existe no repositório
             continue

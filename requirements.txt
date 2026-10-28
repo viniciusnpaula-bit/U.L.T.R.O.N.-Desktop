@@ -20,3 +20,5 @@ pillow>=13.0.0,<14
 pystray>=0.19.5,<1
 cryptography>=50.0.2,<51
 opencv-python-headless>=4.8,<6
+winrt-runtime>=4.0.3,<5; sys_platform == "win32"
+winrt-Windows.Security.Credentials.UI>=4!10.0.28000.2705,<5!0; sys_platform == "win32"
