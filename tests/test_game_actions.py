@@ -92,7 +92,7 @@ class GameActionTests(unittest.TestCase):
     def test_hud_places_only_real_metrics_in_the_top_strip(self):
         root = Path(__file__).resolve().parents[1]
         html = (root / "electron" / "site" / "index.html").read_text(encoding="utf-8")
-        strip = html.split('class="signals"', 1)[1].split("</header>", 1)[0]
+        strip = html.split('class="bridge-signals"', 1)[1].split("</header>", 1)[0]
         for metric in ("cpuVal", "ramVal", "diskVal"):
             self.assertIn(f'id="{metric}"', strip)
         self.assertIn('id="commsCount"', html)

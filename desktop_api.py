@@ -36,7 +36,40 @@ def create_server(runtime, token: str, host: str = "127.0.0.1", port: int = PREF
             # The standard access log can include local identifiers and is not needed here.
             return
 
+        def _drenar_corpo(self, limite: int = 16 * 1024, espera: float = 0.2):
+            """Descarta o resto do corpo antes de fechar a conexão.
+
+            Sem isso o Windows devolve RST ao cliente (há bytes da requisição que
+            ninguém leu) e a resposta de recusa — 401, 403, 413 — pode se perder
+            no caminho. O limite evita ficar lendo um corpo enorme de propósito.
+            """
+            if getattr(self, "_corpo_lido", False):
+                return
+            self._corpo_lido = True
+            try:
+                restante = int(self.headers.get("Content-Length", "") or 0)
+            except ValueError:
+                return
+            restante = max(0, min(restante, limite))
+            if not restante:
+                return
+            try:
+                self.connection.settimeout(espera)
+                while restante > 0:
+                    pedaco = self.rfile.read(min(8192, restante))
+                    if not pedaco:
+                        break
+                    restante -= len(pedaco)
+            except OSError:
+                pass
+            finally:
+                try:
+                    self.connection.settimeout(None)
+                except OSError:
+                    pass
+
         def _send(self, status: int, data: dict):
+            self._drenar_corpo()
             payload = json.dumps(data, ensure_ascii=False, separators=(",", ":")).encode("utf-8")
             self.send_response(status)
             self.send_header("Content-Type", "application/json; charset=utf-8")
@@ -86,7 +119,9 @@ def create_server(runtime, token: str, host: str = "127.0.0.1", port: int = PREF
                 return None
             try:
                 value = json.loads(self.rfile.read(length).decode("utf-8"))
+                self._corpo_lido = True
             except (UnicodeDecodeError, json.JSONDecodeError):
+                self._corpo_lido = True
                 self._send(400, {"error": "invalid_json"})
                 return None
             if not isinstance(value, dict):
