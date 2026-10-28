@@ -17,6 +17,10 @@ ULTRON Desktop 1.19.0 — interface espacial
   O diário só é lido com a sessão desbloqueada.
 - Tela de desbloqueio restilizada em três colunas; Windows Hello, PIN, câmera de
   pré-visualização e `stage.inert` continuam iguais.
+- O campo de estrelas atrás do núcleo deriva em diagonal e cintila; com "menos
+  movimento" no Windows ele continua andando devagar, em vez de congelar.
+- Memória no Obsidian (opcional): lê até 3 notas por resposta e grava no vault
+  (`Documents/ULTRON-Vault`) por ferramentas, com diário real e desfazer.
 - Sem bump de versão, sem mudança de CSP ou permissões.
 
 ULTRON Desktop 1.19.0 — sessão local e histórico cifrado

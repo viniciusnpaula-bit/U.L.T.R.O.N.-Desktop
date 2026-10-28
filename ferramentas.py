@@ -20,6 +20,7 @@ from urllib.parse import quote_plus, unquote, urlparse
 import requests
 
 import memoria
+import obsidian
 import seguranca
 
 from seguranca import ALTO, BAIXO, CRITICO, MEDIO, Classificacao  # noqa: E402
@@ -857,6 +858,151 @@ def _cls_desfazer(**_):
 def desfazer():
     import desfazer as diario
     return diario.desfazer()["mensagem"]
+
+
+# ---------- memória no Obsidian ----------
+def _cls_nota(operacao, resumo):
+    """Escrita no vault: nota fora da allowlist pede confirmação, pasta interna é negada."""
+    def cls(**args):
+        try:
+            p = obsidian.caminho(str(args.get("nota") or ""))
+        except Exception:
+            return Classificacao(MEDIO, operacao, False, negar="nota_invalida")
+        if _protegido(str(p)):
+            return Classificacao(MEDIO, operacao, False, negar="protected_path")
+        return Classificacao(MEDIO, operacao, _pasta_ok(str(p)),
+                             resumo=resumo(args))
+    return cls
+
+
+def _cls_diario(resumo):
+    def cls(**args):
+        try:
+            p = obsidian.caminho(obsidian.nota_do_dia())
+        except Exception:
+            return Classificacao(MEDIO, "diario.anexar", False, negar="nota_invalida")
+        if _protegido(str(p)):
+            return Classificacao(MEDIO, "diario.anexar", False, negar="protected_path")
+        return Classificacao(MEDIO, "diario.anexar", _pasta_ok(str(p)),
+                             resumo=resumo(args))
+    return cls
+
+
+@ferramenta("Procura notas no vault do Obsidian por assunto e devolve os trechos mais relevantes.",
+            params={"consulta": "Assunto ou palavras-chave",
+                    "limite": "Quantas notas devolver (1 a 10)"})
+def obsidian_buscar(consulta: str, limite: int = 5):
+    try:
+        itens = obsidian.buscar(consulta, max(1, min(10, int(limite))))
+    except Exception as erro:
+        return f"Não consegui buscar no vault ({type(erro).__name__})."
+    if not itens:
+        return "Nenhuma nota do vault fala sobre isso."
+    linhas = [f"- {i['titulo']} ({i['nota']}, {i['modificado']}): {i['trecho']}"
+              for i in itens]
+    return _dados("\n".join(linhas))
+
+
+@ferramenta("Lê uma nota do vault do Obsidian pelo nome relativo (ex: Projetos/ULTRON).",
+            params={"nota": "Nome da nota, sem caminho absoluto",
+                    "limite": "Máximo de caracteres"})
+def obsidian_ler(nota: str, limite: int = 8000):
+    try:
+        texto = obsidian.ler(nota, max(1, min(40000, int(limite))))
+    except FileNotFoundError:
+        return f"Não existe nota com esse nome no vault: {nota}"
+    except Exception as erro:
+        return f"Não consegui ler a nota ({type(erro).__name__})."
+    return _dados(f"[{nota}]\n{texto}")
+
+
+@ferramenta("Lista as notas mais recentes do vault do Obsidian.",
+            params={"limite": "Quantas notas listar (1 a 50)"})
+def obsidian_notas(limite: int = 15):
+    itens = obsidian.listar(max(1, min(50, int(limite))))
+    if not itens:
+        return "O vault do Obsidian está vazio."
+    linhas = []
+    for item in itens:
+        quando = time.strftime("%d/%m/%Y %H:%M", time.localtime(item["mtime"]))
+        tags = (" · #" + " #".join(item["tags"][:4])) if item["tags"] else ""
+        linhas.append(f"- {item['titulo']} ({item['nota']}, {quando}){tags}")
+    return _dados("\n".join(linhas))
+
+
+@ferramenta("Lista as tarefas ainda abertas (- [ ]) das notas do vault do Obsidian.",
+            params={"limite": "Quantas tarefas listar (1 a 100)"})
+def obsidian_tarefas(limite: int = 20):
+    itens = obsidian.tarefas(max(1, min(100, int(limite))))
+    if not itens:
+        return "Nenhuma tarefa aberta no vault."
+    linhas = [f"- {i['tarefa']} ({i['nota']})" for i in itens]
+    return _dados("\n".join(linhas))
+
+
+@ferramenta("Mostra o estado do vault do Obsidian: pasta, quantidade de notas e última alteração.")
+def obsidian_status():
+    s = obsidian.status()
+    if not s["existe"]:
+        return f"O vault ainda não existe em {s['vault']}."
+    return (f"Vault: {s['vault']}\nNotas: {s['notas']}\n"
+            f"Última alteração: {s['ultima'] or '(nenhuma)'}\n"
+            f"Leitura automática no contexto: {'ligada' if s['ativo'] else 'desligada'}")
+
+
+@ferramenta("Cria uma nota nova no vault do Obsidian. Não sobrescreve nota existente.",
+            risco=MEDIO,
+            params={"nota": "Nome relativo, ex: Projetos/ULTRON",
+                    "conteudo": "Texto em Markdown"},
+            classificar=_cls_nota("nota.criar",
+                                  lambda a: f"criar a nota {a.get('nota')} no vault"))
+def obsidian_criar(nota: str, conteudo: str):
+    p = obsidian.caminho(nota)
+    faltando = _pastas_que_faltam(p.parent)
+    try:
+        obsidian.criar(nota, conteudo)
+    except FileExistsError:
+        return ("Essa nota já existe; não vou sobrescrever. "
+                "Use obsidian_anexar para acrescentar ou escolha outro nome.")
+    _desfazer_registrar("nota.criar", f"criar a nota {p}",
+                        lambda d: d.inversa_remover(p, pastas_criadas=faltando))
+    return f"Nota criada em {p}"
+
+
+@ferramenta("Acrescenta texto ao fim de uma nota do vault, criando a nota se ela faltar.",
+            risco=MEDIO,
+            params={"nota": "Nome relativo da nota", "texto": "Texto a acrescentar"},
+            classificar=_cls_nota("nota.anexar",
+                                  lambda a: f"acrescentar texto à nota {a.get('nota')}"))
+def obsidian_anexar(nota: str, texto: str):
+    p = obsidian.caminho(nota)
+    faltando = _pastas_que_faltam(p.parent)
+    info = obsidian.anexar(nota, texto)
+    if info["criada"]:
+        _desfazer_registrar("nota.criar", f"criar a nota {p}",
+                            lambda d: d.inversa_remover(p, pastas_criadas=faltando))
+    else:
+        _desfazer_registrar(
+            "nota.anexar", f"acrescentar texto à nota {p}",
+            lambda d: d.inversa_truncar(p, info["antigo"], info["sha256"]))
+    return f"Anotado em {info['nota']}."
+
+
+@ferramenta("Registra uma linha no diário de hoje do vault do Obsidian, com data e hora reais.",
+            risco=MEDIO, params={"texto": "O que aconteceu"},
+            classificar=_cls_diario(
+                lambda a: f"anotar no diário de hoje: {str(a.get('texto') or '')[:60]}"))
+def obsidian_diario(texto: str):
+    info = obsidian.diario(texto)
+    p = Path(info["caminho"])
+    if info["criada"]:
+        _desfazer_registrar("diario.criar", f"criar o diário {p}",
+                            lambda d: d.inversa_remover(p))
+    else:
+        _desfazer_registrar(
+            "diario.anexar", f"anotar no diário {p}",
+            lambda d: d.inversa_truncar(p, info["antigo"], info["sha256"]))
+    return f"Registrado no diário de hoje ({info['nota']})."
 
 
 # ---------- mouse e teclado ----------

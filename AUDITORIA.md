@@ -64,6 +64,12 @@ comando de diagnóstico, desligar/reiniciar/cancelar, lembrar/esquecer fato, cri
   AES-256-GCM por campo, AAD `ultron-memoria-v1`, prefixo `v1:`, chave DPAPI do
   cofre, `PRAGMA user_version=1`, `secure_delete=ON` e `VACUUM`. Backup exige o
   banco **e** `dados/.cofre.chave`.
+- Vault do Obsidian (`obsidian.py`): leitura por tokens (até 3 notas por
+  resposta) e escrita só por ferramenta. Nome relativo obrigatório, caminho
+  resolvido e conferido contra o vault, `.obsidian`/`.trash` recusados, limites
+  de 512 KB por nota e 256 KB por escrita. Toda escrita registra inversa no
+  diário: criar → apagar; acrescentar → truncar com hash (recusa se o usuário
+  editou depois).
 
 ### API local
 `GET /health`, `/status`, `/events`, `/conversation`, `/microphones`, `/update`, `/update/check`;

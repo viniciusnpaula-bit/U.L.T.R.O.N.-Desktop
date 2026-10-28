@@ -100,6 +100,27 @@ irritação, ansiedade, tristeza, confusão, animação e gratidão — e o tom 
 resposta se ajusta. É uma leitura objetiva por léxico, negação, intensificadores
 e pontuação; não é um diagnóstico.
 
+## Memória no Obsidian
+
+O ULTRON também lê e escreve em um vault do Obsidian (`OBSIDIAN_VAULT` no
+`.env`; vazio = `Documents/ULTRON-Vault`). São notas Markdown comuns:
+
+- a leitura é automática a cada resposta: até `OBSIDIAN_RECALL` notas (padrão 3)
+  que tenham a ver com o pedido entram no contexto, com o nome e um trecho;
+- `obsidian_buscar`, `obsidian_ler`, `obsidian_notas`, `obsidian_tarefas` e
+  `obsidian_status` consultam o vault;
+- `obsidian_criar`, `obsidian_anexar` e `obsidian_diario` gravam. O diário fica
+  em `Diario/AAAA-MM-DD.md`, com data e hora reais;
+- toda escrita entra no diário de desfazer: criar uma nota pode ser desfeito
+  apagando-a; acrescentar texto pode ser desfeito cortando só o trecho que o
+  ULTRON escreveu — se você editou a nota depois, o desfazer recusa em vez de
+  cortar o seu texto.
+
+Nomes de nota são relativos ao vault; caminho absoluto, `..` e as pastas
+internas (`.obsidian`, `.trash`) são recusados. A leitura automática não sai do
+computador. `OBSIDIAN_ATIVO=0` desliga a integração inteira e `OBSIDIAN_RECALL=0`
+desliga só a leitura no contexto.
+
 ## Autoconhecimento
 
 A cada resposta o ULTRON recebe um bloco curto gerado do sistema vivo: nome e
@@ -225,6 +246,7 @@ Estrutura:
 | `navegador.py`, `visao.py` | navegador controlado (Playwright) e webcam/gestos (OpenCV) |
 | `fala.py` | correção de palavras mal ouvidas no comando de voz |
 | `memoria.py`, `nuance.py` | memória SQLite entre sessões e leitura local de nuances |
+| `obsidian.py` | leitura e escrita no vault do Obsidian (notas Markdown) |
 | `personalidade.py`, `voz.py` | perfis, jeito, dados do usuário, saudação e vozes Edge TTS |
 | `autoconhecimento.py` | bloco do system prompt gerado do sistema vivo (nome, versão, SO, habilidades, limites) |
 | `voz_nativa.py` | reconhecimento de voz opcional do Windows (SAPI), offline |
