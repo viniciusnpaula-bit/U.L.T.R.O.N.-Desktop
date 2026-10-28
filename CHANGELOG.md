@@ -1,3 +1,46 @@
+ULTRON Desktop 1.19.0 — interface espacial
+
+- Nova casca espacial: campo estelar, HUD de vidro, dock de bate-papo, dock de
+  diário e console inferior, sem dependências novas e com a CSP intacta.
+- Núcleo 3D (cristal, casca, anéis giroscópicos e ondas) desenhado no canvas 2D;
+  o orbe anterior continua disponível no modo 2D. A escolha fica em
+  `localStorage['ultron-core']` e pode ser trocada no chip da câmara ou nos
+  ajustes.
+- Quatro animações derivadas do estado real, com transições amortecidas:
+  parado (batida funda a cada ~7 s), escutando (o aro abre com o volume do
+  microfone), respondendo (ondas de choque a cada fala) e trabalhando (aro
+  tracejado girando enquanto o turno está em processamento). Nenhum contador de
+  tarefas é inventado: o trabalho usa o sinal `microphone_state`. O rótulo
+  `PENSANDO` virou `TRABALHANDO`.
+- Dock direito com o diário real de desfazer (`GET /api/v1/undo`, somente
+  leitura) e sinais reais de núcleo, API, microfone, sessão, histórico e versão.
+  O diário só é lido com a sessão desbloqueada.
+- Tela de desbloqueio restilizada em três colunas; Windows Hello, PIN, câmera de
+  pré-visualização e `stage.inert` continuam iguais.
+- Sem bump de versão, sem mudança de CSP ou permissões.
+
+ULTRON Desktop 1.19.0 — sessão local e histórico cifrado
+
+- Windows Hello (rosto/impressão digital/PIN do Windows) desbloqueia o Desktop;
+  sem sensor, o `ULTRON_PIN` continua valendo. A sessão fica em memória e morre
+  ao fechar o app ou quando o Windows bloqueia/suspende.
+- Desbloqueado, ações de risco ALTO locais e reversíveis executam sem
+  confirmação. As irreversíveis (`executar_comando`, `rodar_codigo`,
+  `desligar_pc`, `reiniciar_pc`, `apagar_arquivo`, `enviar_formulario`) e as de
+  privacidade (`ver_tela`, `webcam_foto`, `controlar_mouse_com_gesto`) continuam
+  confirmando. CRITICO, Telegram, fluxos e origem desconhecida não mudam.
+- A tela de desbloqueio mostra câmera ao vivo (só pré-visualização, sem gravação
+  e sem áudio), o motivo real do Hello, o PIN configurado, as ações
+  irreversíveis e as tentativas da sessão. "Agora não" mantém o app bloqueado.
+- Histórico local (`mensagens`, `fatos` e `lembretes`) passa a ser cifrado em
+  repouso com AES-256-GCM e a chave DPAPI que o cofre já usava. A migração é
+  automática, transacional e sem mudar o schema; metadados (horário, papel,
+  contagem) continuam visíveis.
+- **Backup**: copie `dados/ultron.db` **e** `dados/.cofre.chave` juntos. A chave
+  é DPAPI do usuário: em outra conta Windows ou outro PC o histórico fica
+  ilegível (mas intacto), e o ULTRON não inventa uma chave nova.
+- Testes: 474 pytest + 58 em `testes_seguranca` + 37 Node, todos verdes.
+
 ULTRON Desktop 1.18.0 — escuta com Whisper grátis e conferência na dúvida
 
 - Motor de escuta novo: o Groq Whisper `large-v3` no plano gratuito (2.000
