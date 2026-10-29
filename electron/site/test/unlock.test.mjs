@@ -60,6 +60,22 @@ test('abrir mostra o overlay, liga só vídeo e parar solta as faixas', async ()
   assert.equal(doc.mapa.unlock.hidden, false);
 });
 
+test('sem Windows Hello não liga a câmera e explica o PIN', async () => {
+  const doc = documentoFalso();
+  const chamadas = [];
+  const transporte = transporteFalso();
+  transporte.unlockInfo = async () => ({ session: { desbloqueada: false },
+    hello: { disponivel: false, motivo: 'Sem sensor' }, pin_configurado: true });
+  const desbloqueio = criarDesbloqueio({ transport: transporte, doc,
+    midia: { getUserMedia: async restricoes => (chamadas.push(restricoes),
+      { getTracks: () => [] }) } });
+  await desbloqueio.abrir();
+  assert.deepEqual(chamadas, []);
+  assert.equal(doc.mapa.unlockCameraState.textContent, 'desligada');
+  assert.match(doc.mapa.unlockCameraError.textContent, /PIN/);
+  assert.equal(doc.mapa.unlockHello.disabled, true);
+});
+
 test('definirSessao não reabre a cada polling e reabre na transição liberado/bloqueado', async () => {
   const doc = documentoFalso();
   const desbloqueio = criarDesbloqueio({ transport: transporteFalso(), doc,

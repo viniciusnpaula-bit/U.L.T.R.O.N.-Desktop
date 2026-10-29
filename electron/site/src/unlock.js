@@ -32,6 +32,7 @@ export function criarDesbloqueio({ transport, aoMudarSessao = () => {},
   let sessao = null;
   let stream = null;
   let aberto = false;
+  let helloIndisponivel = false;
   const tentativas = [];
 
   function escrever(id, texto) {
@@ -71,6 +72,7 @@ export function criarDesbloqueio({ transport, aoMudarSessao = () => {},
 
   function renderInfo(info) {
     const hello = info?.hello || {};
+    helloIndisponivel = hello.disponivel === false;
     escrever('unlockHelloState', hello.disponivel ? 'disponível' : (hello.motivo || 'indisponível'));
     escrever('unlockPinState', info?.pin_configurado ? 'configurado' : 'não configurado');
     if (pinBlock) pinBlock.hidden = !info?.pin_configurado;
@@ -97,7 +99,13 @@ export function criarDesbloqueio({ transport, aoMudarSessao = () => {},
     if (status) status.textContent = 'Aguardando autorização local.';
     try { renderInfo(await transport.unlockInfo()); } catch { /* mantém os padrões */ }
     if (!aberto) return;
-    ligarCamera();
+    if (helloIndisponivel) {
+      // Sem sensor o vídeo não serve para desbloquear: não acende a câmera.
+      escrever('unlockCameraState', 'desligada');
+      escrever('unlockCameraError', 'Windows Hello indisponível: use o PIN.');
+    } else {
+      ligarCamera();
+    }
     focar();
   }
 
