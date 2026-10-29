@@ -4,6 +4,7 @@
    python main.py --texto          -> só terminal
    python main.py --instalar-inicio / --remover-inicio   -> iniciar junto com o Windows
    python main.py --testar                               -> testes locais (roda pytest)"""
+import getpass
 import os
 import re
 import socket
@@ -192,7 +193,11 @@ def _desbloquear_inicial() -> bool:
     except Exception:
         tem_pin = False
     if tem_pin:
-        pin = input("PIN de desbloqueio: ").strip()
+        try:
+            # getpass não ecoa os dígitos nem grava o PIN em logs/console.log.
+            pin = getpass.getpass("PIN de desbloqueio: ").strip()
+        except (EOFError, KeyboardInterrupt):
+            return False
         try:
             if seguranca.pin_valido(pin):
                 sessao.desbloquear("pin")
