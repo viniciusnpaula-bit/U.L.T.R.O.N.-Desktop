@@ -69,7 +69,13 @@ VOZ = _env("VOZ", "pt-BR-AntonioNeural")
 VOZ_PITCH = _env("VOZ_PITCH", "-12Hz")
 VOZ_RATE = _env("VOZ_RATE", "+0%")
 LIMIAR_VOZ = float(_env("LIMIAR_VOZ", "0") or 0)
-SILENCIO_FIM = float(_env("SILENCIO_FIM", "0.5") or 0.5)   # segundos de silêncio que encerram sua fala
+# Fração do limiar calibrado que já conta como fala (0.35 capta fala a 30-50 cm
+# sem disparar com ruído estável). Suba para 0.5+ em ambientes muito ruidosos.
+try:
+    LIMIAR_VOZ_FATOR = min(1.0, max(0.1, float(_env("LIMIAR_VOZ_FATOR", "0.35") or 0.35)))
+except ValueError:
+    LIMIAR_VOZ_FATOR = 0.35
+SILENCIO_FIM = float(_env("SILENCIO_FIM", "0.9") or 0.9)   # segundos de silêncio que encerram sua fala
 REASONING = _env("REASONING_EFFORT", "low").lower()        # "low" = IA mais rápida; vazio desliga
 # Retry das chamadas de IA: tentativas por provedor, backoff exponencial com
 # jitter e um teto de tempo total por provedor (o Ultron responde por voz).

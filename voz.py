@@ -49,6 +49,30 @@ _VAD_VOZ_MIN_HZ = 300       # banda inferior da fala humana
 _VAD_VOZ_MAX_HZ = 3400      # banda superior da fala humana
 
 
+def _normalizar_pcm(pcm: bytes, alvo_rms=3000.0, pico_max=30000) -> bytes:
+    """Normaliza o PCM int16 para o alvo de RMS, sem passar do pico.
+
+    Fala baixa (RMS 100-200) chega ao STT no mesmo nível de uma fala normal;
+    silêncio/ruído abaixo do limiar de energia fica intocado, para não
+    transformar chiado em "fala".
+    """
+    if not pcm or len(pcm) < 2:
+        return pcm
+    amostras = np.frombuffer(pcm[:len(pcm) - len(pcm) % 2], dtype=np.int16)
+    if amostras.size == 0:
+        return pcm
+    rms = float(np.sqrt(np.mean(amostras.astype(np.float32) ** 2)))
+    limite = float(getattr(transcricao, "LIMITE_ENERGIA", 50.0)) if transcricao else 50.0
+    if rms <= 0 or rms < limite:
+        return pcm
+    pico = float(np.max(np.abs(amostras.astype(np.float32)))) or 1.0
+    ganho = min(alvo_rms / rms, pico_max / pico)
+    if ganho == 1.0:
+        return pcm
+    saida = np.clip(amostras.astype(np.float32) * ganho, -32768, 32767)
+    return saida.astype(np.int16).tobytes()
+
+
 class _Vad:
     """Detecção de atividade de voz.
 
@@ -592,15 +616,18 @@ class Ouvido:
         energia = self.vad._energia_bandas_voz(bloco)
         zcr = self.vad._taxa_cruzamento_zero(bloco)
         nivel = float(np.sqrt(np.mean(bloco.astype(np.float32) ** 2)))
+        # Fração do limiar calibrado que já conta como fala: 0.35 capta fala
+        # normal a 30-50 cm sem disparar com ruído estável (0.5 era alto demais).
+        fator_limiar = getattr(config, "LIMIAR_VOZ_FATOR", 0.35)
         return (
             energia > 0.25
             and 0.02 < zcr < 0.35
-            and nivel > max(60.0, self.limiar * 0.5) * fator
+            and nivel > max(60.0, self.limiar * fator_limiar) * fator
         )
 
     def _gravar(self, espera, max_seg=15, silencio=None, min_voz=3, fator=1.0, gatilho=None):
         """Captura áudio. Com `gatilho` (Event), grava SÓ enquanto ele estiver ligado."""
-        silencio = getattr(config, "SILENCIO_FIM", 0.7) if silencio is None else silencio
+        silencio = getattr(config, "SILENCIO_FIM", 0.9) if silencio is None else silencio
         if self.pausado is not None and self.pausado.is_set():
             return None
         bloco = int(self.FS * 0.1)
@@ -656,7 +683,7 @@ class Ouvido:
             self.capturando.clear()
         if voz_n < min_voz:
             return None
-        return np.concatenate(quadros).tobytes()
+        return _normalizar_pcm(np.concatenate(quadros).tobytes())
 
     def escutar_manual(self, limite=30.0):
         """Segurar para falar: grava enquanto `pedido_manual` estiver ligado.
