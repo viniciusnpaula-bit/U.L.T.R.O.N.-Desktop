@@ -247,11 +247,14 @@ def aprovar(slug: str) -> str:
     return slug
 
 
-def descartar(slug: str) -> None:
+def descartar(slug: str) -> bool:
+    """True se removeu uma pendente; False se o slug não era pendente."""
     alvo = _pasta(PENDENTES, slug)
-    if alvo.is_dir():
-        shutil.rmtree(alvo)
-        invalidar()
+    if not alvo.is_dir():
+        return False
+    shutil.rmtree(alvo)
+    invalidar()
+    return True
 
 
 def marcar_uso(slug: str) -> None:

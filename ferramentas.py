@@ -1920,6 +1920,8 @@ def usar_skill(nome: str) -> str:
         return "Skills estão desativadas."
     texto = skills.corpo(nome)
     if not texto:
+        if skills.slugificar(nome) in [s.slug for s in skills.pendentes()]:
+            return f"Skill pendente de aprovação: {nome}"
         return f"Skill não encontrada: {nome}"
     skills.marcar_uso(skills.slugificar(nome))
     return f"Skill {nome}:\n{texto}"
@@ -1945,6 +1947,9 @@ def criar_skill(nome: str, descricao: str, quando: str, corpo: str) -> str:
     import skills
     if not _skills_ativos():
         return "Skills estão desativadas."
+    slug = skills.slugificar(nome)
+    if any(s.slug == slug for s in skills.listar() + skills.pendentes()):
+        return f"Já existe skill com esse nome: {slug}"
     try:
         slug = skills.criar(nome, descricao, quando, corpo)
     except ValueError as e:
@@ -1961,5 +1966,6 @@ def descartar_skill(nome: str) -> str:
     if not _skills_ativos():
         return "Skills estão desativadas."
     slug = skills.slugificar(nome)
-    skills.descartar(slug)
+    if not skills.descartar(slug):
+        return f"Skill pendente não encontrada: {slug}"
     return f"Skill pendente '{slug}' descartada."
