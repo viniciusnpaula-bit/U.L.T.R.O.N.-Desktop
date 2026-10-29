@@ -33,6 +33,8 @@ ULTRON Desktop 1.19.0 — interface espacial
   com halo do acento, mídia assentada numa vinheta e saída em fade (150 ms),
   cancelada se outra mídia chegar. Texto ganha coluna de leitura; o selo do PDF
   vira uma folha.
+- Electron atualizado de 35 para 45: fecha os alertas de segurança do
+  `package-lock.json` (`electron` e `extract-zip`); `npm audit` fica em zero.
 - Sem bump de versão, sem mudança de CSP ou permissões.
 
 ULTRON Desktop 1.19.0 — sessão local e histórico cifrado
