@@ -187,3 +187,91 @@ def corpo(slug: str) -> str:
         if skill.slug == slug or skill.nome.lower() == slug.lower():
             return skill.corpo
     return ""
+
+
+def _pasta(base: Path, slug: str) -> Path:
+    if not slug or ".." in slug or "/" in slug or "\\" in slug:
+        raise ValueError("nome de skill inválido")
+    return base / slug
+
+
+def _escrever(caminho: Path, texto: str) -> None:
+    caminho.parent.mkdir(parents=True, exist_ok=True)
+    tmp = caminho.with_suffix(".tmp")
+    tmp.write_text(texto, encoding="utf-8")
+    os.replace(tmp, caminho)
+
+
+def criar(nome, descricao, quando, corpo, criado_por="agente") -> str:
+    """Grava uma pendente. O agente cria; só o humano aprova."""
+    slug = slugificar(nome)
+    for existente in listar() + pendentes():
+        if existente.slug == slug:
+            return slug
+    maximo = int(getattr(config, "SKILLS_PENDENTES_MAX", 3))
+    if len(pendentes()) >= maximo:
+        raise ValueError("fila de skills cheia: aprove ou descarte antes de criar outra")
+    texto = (
+        "---\n"
+        f"nome: {' '.join(str(nome).split())[:80]}\n"
+        f"descricao: {' '.join(str(descricao).split())[:160]}\n"
+        f"quando: {' '.join(str(quando).split())[:160]}\n"
+        f"criado_por: {criado_por}\n"
+        f"criado_em: {date.today().isoformat()}\n"
+        "---\n\n"
+        f"{str(corpo).strip()[:_limite_corpo()]}\n"
+    )
+    _escrever(_pasta(PENDENTES, slug) / "SKILL.md", texto)
+    invalidar()
+    return slug
+
+
+def aprovar(slug: str) -> str:
+    origem = _pasta(PENDENTES, slug)
+    if not (origem / "SKILL.md").is_file():
+        raise ValueError(f"skill pendente não encontrada: {slug}")
+    destino = _pasta(BASE, slug)
+    if destino.exists():
+        raise ValueError(f"já existe skill com esse nome: {slug}")
+    maximo = int(getattr(config, "SKILLS_MAX_TOTAL", 100))
+    if len(listar()) >= maximo:
+        raise ValueError(f"limite de {maximo} skills ativas: apague alguma antes de aprovar")
+    shutil.move(str(origem), str(destino))
+    invalidar()
+    return slug
+
+
+def descartar(slug: str) -> None:
+    alvo = _pasta(PENDENTES, slug)
+    if alvo.is_dir():
+        shutil.rmtree(alvo)
+        invalidar()
+
+
+def marcar_uso(slug: str) -> None:
+    dados = _uso()
+    dados[slug] = date.today().isoformat()
+    USO.parent.mkdir(parents=True, exist_ok=True)
+    tmp = USO.with_suffix(".tmp")
+    tmp.write_text(json.dumps(dados, ensure_ascii=False), encoding="utf-8")
+    os.replace(tmp, USO)
+    invalidar()  # cache de _uso() é por (mtime, size): não depender do filesystem
+
+
+def curar(agora=None) -> dict:
+    """Só relata: não move nem apaga nada."""
+    hoje = agora or date.today()
+    ativos = [s for s in listar() if estado(s, hoje) == "ativo"]
+    avisos = []
+    dias = int(getattr(config, "SKILLS_PENDENTE_DIAS", 7))
+    for skill in pendentes():
+        criada = _data(skill.criado_em)
+        if criada and (hoje - criada).days > dias:
+            avisos.append(f"skill pendente há {(hoje - criada).days} dias: {skill.slug}")
+    return {
+        "ativos": len(ativos),
+        "obsoletos": len([s for s in listar() if estado(s, hoje) == "obsoleto"]),
+        "arquivados": len([s for s in listar() if estado(s, hoje) == "arquivado"]),
+        "pendentes": len(pendentes()),
+        "avisos": avisos,
+    }

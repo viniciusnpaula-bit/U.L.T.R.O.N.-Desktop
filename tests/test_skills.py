@@ -1,3 +1,4 @@
+import json
 import os
 import sys
 import tempfile
@@ -166,3 +167,64 @@ class EstadoTests(StoreBase):
         skills.invalidar()
         with mock.patch.object(skills, "_uso", return_value={}):
             self.assertEqual(skills.estado(skills.listar()[0]), "arquivado")
+
+
+class CicloTests(StoreBase):
+    def test_criar_grava_pendente(self):
+        slug = skills.criar("Nova Skill", "faz algo", "quando pedirem", "passo 1")
+        self.assertEqual(slug, "nova-skill")
+        self.assertEqual(len(skills.pendentes()), 1)
+        self.assertEqual(skills.listar(), [])
+
+    def test_criar_recusa_quarta_pendente(self):
+        for i in range(3):
+            skills.criar(f"Skill {i}", "d", "q", "c")
+        with self.assertRaises(ValueError) as erro:
+            skills.criar("Skill 4", "d", "q", "c")
+        self.assertIn("fila de skills cheia", str(erro.exception))
+
+    def test_criar_deduplica_nome_existente(self):
+        skills.criar("Repetida", "d", "q", "c")
+        self.assertEqual(skills.criar("Repetida", "d", "q", "c"), "repetida")
+        self.assertEqual(len(skills.pendentes()), 1)
+
+    def test_aprovar_move_para_raiz(self):
+        slug = skills.criar("Aprovar", "d", "q", "c")
+        skills.aprovar(slug)
+        self.assertEqual([s.slug for s in skills.listar()], [slug])
+        self.assertEqual(skills.pendentes(), [])
+
+    def test_aprovar_recusa_colisao(self):
+        self.escrever("colide")
+        slug = skills.criar("Colide", "d", "q", "c")
+        with self.assertRaises(ValueError):
+            skills.aprovar(slug)
+
+    def test_aprovar_recusa_acima_do_total(self):
+        self.escrever("ja-ativa")
+        slug = skills.criar("Nova", "d", "q", "c")
+        with mock.patch.object(config, "SKILLS_MAX_TOTAL", 1, create=True):
+            with self.assertRaises(ValueError) as erro:
+                skills.aprovar(slug)
+        self.assertIn("limite", str(erro.exception))
+
+    def test_descartar_remove_pendente(self):
+        slug = skills.criar("Lixo", "d", "q", "c")
+        skills.descartar(slug)
+        self.assertEqual(skills.pendentes(), [])
+
+    def test_marcar_uso_grava_json(self):
+        self.escrever("usada")
+        skills.marcar_uso("usada")
+        self.assertEqual(json.loads(skills.USO.read_text(encoding="utf-8"))["usada"],
+                         date.today().isoformat())
+
+    def test_curar_conta_e_avisa_pendente_antiga(self):
+        self.escrever("ativa")
+        velha = (HOJE - timedelta(days=30)).isoformat()
+        antiga = VALIDO.replace(HOJE.isoformat(), velha).replace("Organizar Downloads", "Antiga")
+        self.escrever("antiga", antiga, pendente=True)
+        r = skills.curar()
+        self.assertEqual(r["ativos"], 1)
+        self.assertEqual(r["pendentes"], 1)
+        self.assertTrue(any("antiga" in a for a in r["avisos"]))
