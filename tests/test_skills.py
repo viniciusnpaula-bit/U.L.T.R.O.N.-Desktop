@@ -2,7 +2,6 @@ import json
 import os
 import sys
 import tempfile
-import threading
 import unittest
 from datetime import date, datetime, timedelta
 from pathlib import Path
@@ -249,17 +248,21 @@ class CicloTests(StoreBase):
         self.assertEqual(json.loads(skills.USO.read_text(encoding="utf-8"))["usada"],
                          date.today().isoformat())
 
-    def test_escritas_concorrentes_nao_deixam_lixo(self):
+    def test_cada_escrita_usa_temporario_proprio(self):
         alvo = skills.BASE / "corrida" / "SKILL.md"
-        textos = ["A" * 200_000, "B" * 200_000]
-        threads = [threading.Thread(target=skills._escrever, args=(alvo, texto)) for texto in textos]
-        for t in threads:
-            t.start()
-        for t in threads:
-            t.join()
+        origens, real = [], skills.os.replace
 
-        self.assertEqual(sorted(p.name for p in alvo.parent.iterdir()), ["SKILL.md"])
-        self.assertIn(alvo.read_text(encoding="utf-8"), textos)
+        def espiao(origem, destino):
+            origens.append(Path(origem).name)
+            return real(origem, destino)
+
+        with mock.patch.object(skills.os, "replace", side_effect=espiao):
+            skills._escrever(alvo, "A")
+            skills._escrever(alvo, "B")
+
+        # tmp fixo faria as duas escritas usarem o mesmo nome
+        self.assertEqual(len(set(origens)), 2, origens)
+        self.assertEqual(alvo.read_text(encoding="utf-8"), "B")
 
     def test_escrita_que_falha_nao_deixa_temporario(self):
         alvo = skills.BASE / "falha" / "SKILL.md"
