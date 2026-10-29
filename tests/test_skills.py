@@ -1,7 +1,8 @@
+import os
 import sys
 import tempfile
 import unittest
-from datetime import date, timedelta
+from datetime import date, datetime, timedelta
 from pathlib import Path
 from unittest import mock
 
@@ -65,6 +66,15 @@ class LeituraTests(StoreBase):
         self.escrever("sem-campo", "---\nnome: X\n---\ncorpo")
         self.assertEqual(skills.listar(), [])
 
+    def test_encoding_ruim_nao_derruba_listar(self):
+        self.escrever("valida")
+        for codificacao in ("utf-16", "cp1252"):
+            with self.subTest(codificacao=codificacao):
+                pasta = skills.BASE / f"salva-{codificacao}"
+                pasta.mkdir(parents=True, exist_ok=True)
+                (pasta / "SKILL.md").write_bytes(VALIDO.encode(codificacao))
+                self.assertEqual([s.slug for s in skills.listar()], ["valida"])
+
     def test_pendente_nao_entra_no_indice(self):
         self.escrever("nova", pendente=True)
         self.assertEqual(skills.indice(), "")
@@ -95,7 +105,34 @@ class LeituraTests(StoreBase):
 
     def test_corpo_trunca_no_limite(self):
         self.escrever("longa", VALIDO.replace("2. Agrupe por extensão.", "x" * 5000))
-        self.assertLessEqual(len(skills.corpo("organizar-downloads")), 2000)
+        self.assertEqual(len(skills.corpo("longa")), 2000)
+
+    def test_cache_invalida_quando_skill_muda(self):
+        pasta = self.escrever("organizar-downloads")
+        self.assertEqual(skills.listar()[0].nome, "Organizar Downloads")
+        caminho = pasta / "SKILL.md"
+        caminho.write_text(VALIDO.replace("Organizar Downloads", "Organizar Fotos"), encoding="utf-8")
+        # mtime distinto: não depender da resolução do sistema de arquivos
+        ns = caminho.stat().st_mtime_ns + 1_000_000_000
+        os.utime(caminho, ns=(ns, ns))
+        self.assertEqual(skills.listar()[0].nome, "Organizar Fotos")
+
+    def test_cache_nao_invalida_quando_uso_e_escrito(self):
+        self.escrever("organizar-downloads")
+        antes = skills.listar()[0]
+        skills.USO.write_text('{"organizar-downloads": "2026-01-01"}', encoding="utf-8")
+        self.assertIs(skills.listar()[0], antes)
+
+    def test_corpo_vazio_quando_desligado(self):
+        self.escrever("organizar-downloads")
+        with mock.patch.object(config, "SKILLS_ATIVO", False, create=True), \
+             mock.patch.object(skills, "listar", side_effect=AssertionError("leu disco")):
+            self.assertEqual(skills.corpo("organizar-downloads"), "")
+
+    def test_indice_vazio_com_limite_zero(self):
+        self.escrever("organizar-downloads")
+        with mock.patch.object(config, "SKILLS_MAX_INDICE", 0, create=True):
+            self.assertEqual(skills.indice(), "")
 
     def test_slug_seguro(self):
         self.assertEqual(skills.slugificar("Organizar Downloads!"), "organizar-downloads")
@@ -121,3 +158,11 @@ class EstadoTests(StoreBase):
         with mock.patch.object(skills, "_uso", return_value={"velha": antiga}):
             skills.invalidar()
             self.assertEqual(skills.indice(), "")
+
+    def test_sem_criado_em_usa_mtime_do_arquivo(self):
+        pasta = self.escrever("antiga", VALIDO.replace(f"criado_em: {HOJE.isoformat()}\n", ""))
+        antigo = (datetime.now() - timedelta(days=120)).timestamp()
+        os.utime(pasta / "SKILL.md", (antigo, antigo))
+        skills.invalidar()
+        with mock.patch.object(skills, "_uso", return_value={}):
+            self.assertEqual(skills.estado(skills.listar()[0]), "arquivado")

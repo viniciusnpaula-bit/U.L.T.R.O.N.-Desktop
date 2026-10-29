@@ -51,7 +51,8 @@ def _limite_corpo() -> int:
 def _ler(caminho: Path, pendente: bool) -> Skill | None:
     try:
         texto = caminho.read_text(encoding="utf-8")
-    except OSError:
+        mtime = caminho.stat().st_mtime
+    except (OSError, UnicodeDecodeError):
         return None
     if not texto.lstrip().startswith("---"):
         return None
@@ -72,7 +73,7 @@ def _ler(caminho: Path, pendente: bool) -> Skill | None:
         descricao=meta["descricao"],
         quando=meta["quando"],
         criado_por=meta.get("criado_por", "usuario"),
-        criado_em=meta.get("criado_em", ""),
+        criado_em=meta.get("criado_em") or datetime.fromtimestamp(mtime).date().isoformat(),
         corpo=partes[2].strip()[:_limite_corpo()],
         pendente=pendente,
     )
@@ -104,9 +105,11 @@ def _assinatura() -> tuple:
 def _carregar():
     chave = _assinatura()
     if _CACHE["chave"] != chave:
-        _CACHE["chave"] = chave
-        _CACHE["ativos"] = _varrer(BASE, pendente=False)
-        _CACHE["pendentes"] = _varrer(PENDENTES, pendente=True)
+        ativos = _varrer(BASE, pendente=False)
+        pend = _varrer(PENDENTES, pendente=True)
+        _CACHE["ativos"] = ativos
+        _CACHE["pendentes"] = pend
+        _CACHE["chave"] = chave  # por último: ninguém vê chave nova com listas velhas
     return _CACHE["ativos"], _CACHE["pendentes"]
 
 
@@ -163,6 +166,8 @@ def indice() -> str:
     if not getattr(config, "SKILLS_ATIVO", True):
         return ""
     limite = int(getattr(config, "SKILLS_MAX_INDICE", 15))
+    if limite <= 0:
+        return ""
     linhas = []
     for skill in listar():
         if estado(skill) != "ativo":
@@ -176,6 +181,8 @@ def indice() -> str:
 
 def corpo(slug: str) -> str:
     """Só skills aprovadas: pendente é inerte e o agente não pode lê-la."""
+    if not getattr(config, "SKILLS_ATIVO", True):
+        return ""
     for skill in listar():
         if skill.slug == slug or skill.nome.lower() == slug.lower():
             return skill.corpo
