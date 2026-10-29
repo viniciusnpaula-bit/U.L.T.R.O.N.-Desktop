@@ -9,6 +9,7 @@ import hashlib
 import hmac
 import json
 import logging
+from logging.handlers import RotatingFileHandler
 import re
 import subprocess
 import threading
@@ -48,19 +49,20 @@ class _Redator(logging.Filter):
         return True
 
 
-logging.basicConfig(
-    filename=str(BASE / "logs" / "ultron.log"),
-    level=logging.INFO,
-    format="%(asctime)s | %(levelname)s | %(message)s",
-    encoding="utf-8",
-)
+# Rotação: 5 MB por arquivo, 3 backups (ultron.log.1..3, seguranca.log.1..3).
+_ROTACAO = {"maxBytes": 5 * 1024 * 1024, "backupCount": 3, "encoding": "utf-8"}
+
+_h_ultron = RotatingFileHandler(str(BASE / "logs" / "ultron.log"), **_ROTACAO)
+_h_ultron.setFormatter(logging.Formatter("%(asctime)s | %(levelname)s | %(message)s"))
+_h_ultron.addFilter(_Redator())
+logging.basicConfig(level=logging.INFO, handlers=[_h_ultron])
 for _h in logging.root.handlers:
     _h.addFilter(_Redator())
 log = logging.getLogger("ultron")
 
 _log_seg = logging.getLogger("ultron.seguranca")
 _log_seg.setLevel(logging.INFO)
-_hseg = logging.FileHandler(str(BASE / "logs" / "seguranca.log"), encoding="utf-8")
+_hseg = RotatingFileHandler(str(BASE / "logs" / "seguranca.log"), **_ROTACAO)
 _hseg.setFormatter(logging.Formatter("%(asctime)s %(message)s"))
 _hseg.addFilter(_Redator())
 _log_seg.addHandler(_hseg)
