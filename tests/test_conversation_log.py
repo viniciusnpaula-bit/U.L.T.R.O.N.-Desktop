@@ -9,6 +9,7 @@ from unittest.mock import patch
 sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
 
 import desktop_runtime
+import sessao
 
 
 class FakeSecurity:
@@ -115,6 +116,10 @@ class VoiceBridgeTests(unittest.TestCase):
         voz_falsa.falando = threading.Event()
         # streaming: "não falou nada" faz cair no modo normal, que o teste controla
         voz_falsa.falar_partes = lambda *_args, **_kwargs: ""
+
+        # o modo voz só escuta com a sessão liberada
+        sessao.desbloquear("pin")
+        self.addCleanup(sessao.bloquear)
 
         with patch.dict(sys.modules, {"voz": voz_falsa}):
             import main
