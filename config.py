@@ -143,6 +143,11 @@ try:
     JANELA_SEGUIMENTO = max(0.0, float(_env("JANELA_SEGUIMENTO", "6") or 6))
 except ValueError:
     JANELA_SEGUIMENTO = 6.0
+# Bloqueio automático da sessão após N minutos sem uso (0 desliga).
+try:
+    SESSAO_MINUTOS = max(0.0, float(_env("ULTRON_SESSAO_MINUTOS", "15") or 15))
+except ValueError:
+    SESSAO_MINUTOS = 15.0
 PIN = _env("ULTRON_PIN")   # opcional: exigido em ações CRÍTICAS (digitado no teclado/Telegram, nunca por voz)
 # Preferido: hash PBKDF2 do PIN (tools/definir_pin.py). Quando presente, ULTRON_PIN
 # em texto é ignorado; o texto só continua valendo por compatibilidade.

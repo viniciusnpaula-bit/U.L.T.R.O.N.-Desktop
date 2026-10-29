@@ -8,7 +8,8 @@ import threading
 import time
 
 _trava = threading.Lock()
-_estado = {"desbloqueada": False, "metodo": None, "desde": None}
+_estado = {"desbloqueada": False, "metodo": None, "desde": None,
+           "ultima_atividade": None}
 
 METODOS = ("hello", "pin")
 
@@ -21,11 +22,25 @@ def estado() -> dict:
 def desbloquear(metodo: str) -> dict:
     if metodo not in METODOS:
         raise ValueError("Método de desbloqueio desconhecido.")
+    agora = time.time()
     with _trava:
-        _estado.update(desbloqueada=True, metodo=metodo, desde=time.time())
+        _estado.update(desbloqueada=True, metodo=metodo, desde=agora,
+                       ultima_atividade=agora)
         return dict(_estado)
 
 
 def bloquear() -> None:
     with _trava:
-        _estado.update(desbloqueada=False, metodo=None, desde=None)
+        _estado.update(desbloqueada=False, metodo=None, desde=None,
+                       ultima_atividade=None)
+
+
+def tocar() -> None:
+    """Marca atividade agora (comando processado): adia o bloqueio por inatividade."""
+    with _trava:
+        _estado["ultima_atividade"] = time.time()
+
+
+def ultima_atividade() -> float | None:
+    with _trava:
+        return _estado["ultima_atividade"]

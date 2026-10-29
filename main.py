@@ -63,6 +63,7 @@ _trava = None
 
 # ---------- utilidades ----------
 def responder(texto, confirmar, origem):
+    sessao.tocar()
     resp = cerebro.processar(texto, confirmar, origem)
     print(f"Ultron: {resp}")
     return resp
@@ -257,6 +258,7 @@ def modo_voz(bandeja=False, entrada_teclado=True, stop_event=None,
         Se o streaming não render nada, `finalizar()` cai no fluxo normal e a fala
         acontece depois — o comportamento anterior fica preservado.
         """
+        sessao.tocar()
         try:
             partes, finalizar = cerebro.processar_stream(comando, confirmar, origem)
         except Exception as erro:

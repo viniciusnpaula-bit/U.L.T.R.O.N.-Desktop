@@ -1,4 +1,5 @@
 import sys
+import time
 import unittest
 from pathlib import Path
 
@@ -15,7 +16,8 @@ class SessaoTests(unittest.TestCase):
         sessao.bloquear()
 
     def test_comeca_bloqueada(self):
-        self.assertEqual(sessao.estado(), {"desbloqueada": False, "metodo": None, "desde": None})
+        self.assertEqual(sessao.estado(), {"desbloqueada": False, "metodo": None, "desde": None,
+                                          "ultima_atividade": None})
 
     def test_desbloquear_hello_e_pin(self):
         for metodo in ("hello", "pin"):
@@ -40,7 +42,21 @@ class SessaoTests(unittest.TestCase):
     def test_bloquear_volta_ao_inicio(self):
         sessao.desbloquear("pin")
         sessao.bloquear()
-        self.assertEqual(sessao.estado(), {"desbloqueada": False, "metodo": None, "desde": None})
+        self.assertEqual(sessao.estado(), {"desbloqueada": False, "metodo": None, "desde": None,
+                                          "ultima_atividade": None})
+
+    def test_desbloquear_marca_atividade(self):
+        antes = time.time()
+        estado = sessao.desbloquear("pin")
+        self.assertGreaterEqual(estado["ultima_atividade"], antes)
+        self.assertEqual(sessao.ultima_atividade(), estado["ultima_atividade"])
+
+    def test_tocar_atualiza_a_atividade(self):
+        sessao.desbloquear("pin")
+        antiga = sessao.ultima_atividade()
+        time.sleep(0.01)
+        sessao.tocar()
+        self.assertGreater(sessao.ultima_atividade(), antiga)
 
 
 if __name__ == "__main__":

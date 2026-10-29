@@ -46,6 +46,8 @@ export class RealTransport {
         } else if (event.type === 'confirmation_request') {
           this.onEvent({ event: 'CONFIRMATION_REQUIRED', request_id: event.request_id,
             data: { message: event.message, risk: event.risk, requires_pin: event.requires_pin } });
+        } else if (event.type === 'session_locked') {
+          this.onEvent({ event: 'SESSION_LOCKED', data: { motivo: event.motivo } });
         } else if (event.type === 'palco_show') {
           this.onEvent({ event: 'PALCO_SHOW', data: event.palco || null });
         } else if (event.type === 'palco_hide') {

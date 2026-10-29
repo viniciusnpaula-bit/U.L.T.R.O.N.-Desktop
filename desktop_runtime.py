@@ -14,6 +14,7 @@ from pathlib import Path
 
 from microphone_devices import enumerate_input_devices
 
+import config
 import sessao
 
 # Limite de falhas de PIN e janela de espera (em memória, zerada ao reiniciar).
@@ -62,6 +63,7 @@ class DesktopRuntime:
         self._unlock_lock = threading.Lock()
         self._unlock_falhas = 0
         self._unlock_espera_ate = 0.0
+        self._session_thread: threading.Thread | None = None
 
     def start(self) -> None:
         with self._lifecycle_lock:
@@ -93,10 +95,45 @@ class DesktopRuntime:
             self._command_thread.start()
             self._started = True
             self._error = None
+            if self._inatividade_limite() > 0:
+                self._session_thread = threading.Thread(
+                    target=self._session_monitor, name="ultron-desktop-sessao", daemon=True)
+                self._session_thread.start()
             if self.start_voice:
                 self._voice_thread = threading.Thread(
                     target=self._voice_loop, name="ultron-desktop-voice", daemon=True)
                 self._voice_thread.start()
+
+    # ---- bloqueio por inatividade (ULTRON_SESSAO_MINUTOS)
+    def _inatividade_limite(self) -> float:
+        """Segundos sem uso até bloquear; 0 desliga o monitor."""
+        try:
+            return max(0.0, float(getattr(config, "SESSAO_MINUTOS", 15) or 0)) * 60
+        except (TypeError, ValueError):
+            return 15 * 60
+
+    def _verificar_inatividade(self) -> bool:
+        """Bloqueia a sessão se passou do limite. True quando acabou de bloquear."""
+        limite = self._inatividade_limite()
+        if limite <= 0:
+            return False
+        estado = sessao.estado()
+        if not estado.get("desbloqueada"):
+            return False
+        desde = estado.get("ultima_atividade") or estado.get("desde") or 0.0
+        if time.time() - desde < limite:
+            return False
+        sessao.bloquear()
+        self._log_seg("lock", "ALLOW", "inactivity_timeout")
+        self._events.put({"type": "session_locked", "motivo": "inatividade"})
+        return True
+
+    def _session_monitor(self) -> None:
+        while not self._stop.wait(5.0):
+            try:
+                self._verificar_inatividade()
+            except Exception:
+                pass
 
     def _voice_loop(self) -> None:
         try:
@@ -405,9 +442,10 @@ class DesktopRuntime:
             deadline = time.monotonic() + 4.0
             while ouvido is not None and ouvido.capturando.is_set() and time.monotonic() < deadline:
                 time.sleep(0.01)
-            for thread in (self._voice_thread, self._command_thread):
+            for thread in (self._voice_thread, self._command_thread, self._session_thread):
                 if thread is not None and thread is not threading.current_thread():
                     thread.join(timeout=4.5)
+            self._session_thread = None
             self._api_running = False
             self._started = False
             notifiers = getattr(self._cerebro, "NOTIFICADORES", None)

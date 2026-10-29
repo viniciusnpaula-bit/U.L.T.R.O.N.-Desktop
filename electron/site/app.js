@@ -678,6 +678,7 @@ function handleEvent(event) {
     adicionarTurno({ role: turno.role, text: turno.text, source: turno.source || 'voz', at: turno.at || Date.now() / 1000 });
   }
   if (event.event === 'CONFIRMATION_REQUIRED') confirmation(event);
+  if (event.event === 'SESSION_LOCKED') sessaoBloqueada();
   if (event.event === 'SPEECH_CONFIRM') confirmarFala(event);
   if (event.event === 'PALCO_SHOW') mostrarPalco(event.data || {});
   if (event.event === 'PALCO_HIDE') esconderPalco();
@@ -1675,12 +1676,14 @@ $('sessionButton').addEventListener('click', async () => {
   }
   desbloqueio.abrir();
 });
-transport.onSessionLocked(() => {
-  // bloqueio vindo do Windows (tela bloqueada/suspensão): o diário não fica na tela
+function sessaoBloqueada() {
+  // bloqueio vindo do Windows (tela bloqueada/suspensão) ou por inatividade:
+  // o diário não fica na tela
   state.status.session_desbloqueada = false;
   limparDiario();
   desbloqueio.abrir();
-});
+}
+transport.onSessionLocked(sessaoBloqueada);
 $('collapseChat').onclick = () => alternarRail('chat');
 $('collapseSystem').onclick = () => alternarRail('sys');
 $('undoAction').onclick = async () => {
