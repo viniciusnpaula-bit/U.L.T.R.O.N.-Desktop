@@ -268,7 +268,8 @@ local — nunca no código ou no histórico.
 ### Sessão local (1.19.0)
 
 O Desktop abre bloqueado. A tela de desbloqueio usa o Windows Hello quando o PC
-tem sensor; sem ele, use o `ULTRON_PIN` do `.env`. A sessão fica só em memória:
+tem sensor; sem ele, use o PIN do `.env` (rode `python tools/definir_pin.py` para
+guardar só o hash). A sessão fica só em memória:
 fechar o app ou bloquear/suspender o Windows volta ao estado bloqueado. Com a
 sessão liberada, ações de risco ALTO locais e reversíveis rodam sem confirmação;
 as irreversíveis e as que capturam tela/webcam ou tomam o mouse continuam
@@ -284,3 +285,7 @@ antigo é automática na primeira operação de memória.
 **Backup:** copie `dados/ultron.db` **e** `dados/.cofre.chave` juntos, na mesma
 conta Windows do mesmo PC. Sem a chave, o histórico fica ilegível; o ULTRON não
 gera outra por cima. Em outra conta ou outro PC, a DPAPI não decifra a chave.
+
+Para gerar o par em um ZIP: `python tools/backup_dados.py` (o arquivo sai em
+`backups/`; guarde em local seguro). Restaurar: feche o ULTRON, copie
+`dados/ultron.db` e `dados/.cofre.chave` de volta para `dados/` e abra o app.
