@@ -71,6 +71,7 @@ _GRUPOS = {
         "obsidian_ler", "obsidian_notas", "obsidian_status", "obsidian_tarefas",
     ),
     "automação": ("executar_fluxo", "listar_jogos"),
+    "skills": ("criar_skill", "descartar_skill", "listar_skills", "usar_skill"),
     "desfazer": ("desfazer",),
 }
 

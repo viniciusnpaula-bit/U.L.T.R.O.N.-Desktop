@@ -1903,3 +1903,63 @@ def mostrar_na_interface(tipo: str = "auto", alvo: str = "", titulo: str = ""):
     if not resultado.get("ok"):
         return f"Não consegui mostrar: {resultado.get('erro', 'motivo desconhecido')}."
     return resultado.get("mensagem", "Mostrado no palco.")
+
+
+# ---------- skills ----------
+def _skills_ativos() -> bool:
+    import config
+    return bool(getattr(config, "SKILLS_ATIVO", True))
+
+
+@ferramenta("Carrega o procedimento de uma skill aprovada pelo usuário. Use quando o "
+            "pedido casar com a descrição de uma skill do índice.",
+            params={"nome": "Nome ou slug da skill"})
+def usar_skill(nome: str) -> str:
+    import skills
+    if not _skills_ativos():
+        return "Skills estão desativadas."
+    texto = skills.corpo(nome)
+    if not texto:
+        return f"Skill não encontrada: {nome}"
+    skills.marcar_uso(skills.slugificar(nome))
+    return f"Skill {nome}:\n{texto}"
+
+
+@ferramenta("Lista as skills (ativas, obsoletas, arquivadas e pendentes) com o estado de cada uma.")
+def listar_skills() -> str:
+    import skills
+    if not _skills_ativos():
+        return "Skills estão desativadas."
+    linhas = [f"- {s.nome} [{skills.estado(s)}]" for s in skills.listar()]
+    linhas += [f"- {s.nome} [pendente de aprovação]" for s in skills.pendentes()]
+    return "\n".join(linhas) if linhas else "Nenhuma skill cadastrada."
+
+
+@ferramenta("Cria uma skill nova a partir de um procedimento que se repetiu. Ela fica "
+            "pendente até o usuário aprovar; não vale sozinha.",
+            params={"nome": "Nome curto", "descricao": "O que ela faz",
+                    "quando": "Quando usar", "corpo": "Passo a passo"},
+            risco=MEDIO,
+            classificar=lambda **_: Classificacao(MEDIO, "skill.criar"))
+def criar_skill(nome: str, descricao: str, quando: str, corpo: str) -> str:
+    import skills
+    if not _skills_ativos():
+        return "Skills estão desativadas."
+    try:
+        slug = skills.criar(nome, descricao, quando, corpo)
+    except ValueError as e:
+        return str(e)
+    return f"Skill '{slug}' guardada como pendente. O usuário precisa aprovar para ela valer."
+
+
+@ferramenta("Descarta uma skill pendente que você criou e não serve mais.",
+            params={"nome": "Nome ou slug da skill pendente"},
+            risco=MEDIO,
+            classificar=lambda **_: Classificacao(MEDIO, "skill.descartar"))
+def descartar_skill(nome: str) -> str:
+    import skills
+    if not _skills_ativos():
+        return "Skills estão desativadas."
+    slug = skills.slugificar(nome)
+    skills.descartar(slug)
+    return f"Skill pendente '{slug}' descartada."
