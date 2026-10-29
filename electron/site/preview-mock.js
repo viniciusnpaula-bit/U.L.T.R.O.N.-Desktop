@@ -60,7 +60,7 @@ window.ultron = {
     hello: { disponivel: true, motivo: 'Windows Hello pronto' },
     pin_configurado: true,
     irreversiveis: ['apagar_arquivo', 'executar_comando'],
-    versao: '1.19.0',
+    versao: '2.0.0',
     historico: { cifrado: true, algoritmo: 'AES-256-GCM', chave: 'DPAPI', migrado: true },
   }),
   unlockHello: async () => ({ unlocked: true, method: 'hello' }),

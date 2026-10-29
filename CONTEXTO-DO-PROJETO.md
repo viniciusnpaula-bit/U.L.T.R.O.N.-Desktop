@@ -1,6 +1,6 @@
 # U.L.T.R.O.N. Desktop — contexto completo do projeto
 
-> **Versão do produto:** 1.19.0
+> **Versão do produto:** 2.0.0
 > **Documento gerado em:** 28/10/2026
 > **Objetivo deste arquivo:** dar a uma pessoa (ou a outra IA) todo o contexto
 > necessário para entender, rodar, manter e evoluir o projeto sem depender do

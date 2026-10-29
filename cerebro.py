@@ -18,6 +18,7 @@ import nuance
 import obsidian
 import personalidade
 import memoria
+import registro
 import seguranca
 
 _clientes = {}
@@ -270,6 +271,7 @@ def _system():
     rotulo = personalidade.carregar().get("rotulo") or "ULTRON"
     return f"""Você é o assistente pessoal do usuário, por voz e texto, em português do Brasil. Seu nome é {rotulo}.
 {personalidade.frase_do_sistema()}
+{registro.INSTRUCAO_SISTEMA}
 {autoconhecimento.bloco()}
 {_bloco_skills()}
 Se não souber, diga que não sabe. Nunca invente um detalhe para parecer útil.
@@ -527,7 +529,9 @@ def _loop(msgs, confirmar, origem):
     for _ in range(MAX_PASSOS_FERRAMENTA):
         msg = _chamar(msgs)
         if not msg.tool_calls:
-            return (msg.content or "").strip() or f"Sem resposta, {config.NOME}."
+            # a marca emocional nunca chega à tela nem ao histórico
+            _, texto = registro.extrair(msg.content)
+            return texto.strip() or f"Sem resposta, {config.NOME}."
         chamadas = [(tc.id or f"call_{i}", tc) for i, tc in enumerate(msg.tool_calls)]
         msgs.append({"role": "assistant", "content": msg.content or "", "tool_calls": [
             {"id": cid, "type": "function",
@@ -651,6 +655,24 @@ def _executar_acao_rapida(acao, executar, confirmar, origem):
     return f"Modo jogo ativado. {etapa} {spotify} {janelas}"
 
 
+class _FrasesComRegistro:
+    """Itera as frases e expõe `.registro`, decidido no começo e mantido até o fim."""
+
+    def __init__(self, iterador, estado):
+        self._iterador = iter(iterador)
+        self._estado = estado
+        self.registro = registro.NEUTRO
+
+    def __iter__(self):
+        return self
+
+    def __next__(self):
+        frase = next(self._iterador)
+        # o primeiro item já passou pelo parser em `gerar()`
+        self.registro = self._estado.get("registro") or registro.NEUTRO
+        return frase
+
+
 def processar_stream(texto, confirmar, origem="desconhecida"):
     """Versão com streaming: devolve (gerador_de_frases, finalizar).
 
@@ -672,7 +694,7 @@ def processar_stream(texto, confirmar, origem="desconhecida"):
         msgs = [{"role": "system", "content": _system() + _contexto(texto, recentes)}] + recentes
         msgs.append({"role": "user", "content": texto})
         provedor = _provedor_para_stream()
-        estado = {"texto": "", "concluido": False, "falhou": False}
+        estado = {"texto": "", "concluido": False, "falhou": False, "registro": None}
 
         def gerar():
             if provedor is None:
@@ -680,6 +702,12 @@ def processar_stream(texto, confirmar, origem="desconhecida"):
                 return
             try:
                 for frase in _stream_frases(msgs, provedor):
+                    nome, frase = registro.extrair(frase)
+                    if estado["registro"] is None:
+                        estado["registro"] = nome
+                        registro.registrar(nome)
+                    if not frase:
+                        continue
                     estado["texto"] = (estado["texto"] + " " + frase).strip()
                     yield frase
                 estado["concluido"] = True
@@ -702,7 +730,7 @@ def processar_stream(texto, confirmar, origem="desconhecida"):
             memoria.salvar_msg("assistant", resposta)
             return resposta
 
-        return gerar(), finalizar
+        return _FrasesComRegistro(gerar(), estado), finalizar
 
 
 def processar(texto, confirmar, origem="desconhecida"):
