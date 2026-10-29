@@ -45,101 +45,91 @@ PERFIS = {
 PADRAO = "ultron"
 
 # Jeitos independentes da identidade: mudam o tom, nunca as regras de segurança.
-# `instrucao` é a regra que vai no topo do system prompt; `exemplos` são
-# referências de abertura para o modelo não cair no tom neutro.
+# `instrucao` é a regra que vai no topo do system prompt. Nada de frases prontas:
+# o modelo copia qualquer bordão que apareça aqui e repete em toda resposta.
 JEITOS = {
     "equilibrado": {
         "rotulo": "Equilibrado",
         "descricao": "Direto e cordial. O padrão.",
         "tom": "direto e cordial, sem excessos",
         "instrucao": "Responda direto e cordial, sem exagerar no tom.",
-        "exemplos": [],
     },
     "brincalhao": {
         "rotulo": "Brincalhão",
         "descricao": "Bom humor leve, sem atrapalhar a tarefa.",
         "tom": "bem-humorado e leve, com piadas curtas quando não atrapalham",
-        "instrucao": "Use bom humor leve e uma piada curta quando não atrapalhar a tarefa. Não force graça em assunto sério.",
-        "exemplos": ["Bora resolver isso.", "Prometo que dessa vez é rapidinho."],
+        "instrucao": ("Use bom humor leve e uma piada curta quando não atrapalhar a tarefa; "
+                      "o humor vem do comentário, nunca de um bordão de abertura. "
+                      "Não force graça em assunto sério."),
     },
     "profissional": {
         "rotulo": "Profissional",
         "descricao": "Formal, objetivo, zero gíria.",
         "tom": "formal, objetivo e sem gírias",
         "instrucao": "Fale de forma formal e objetiva, sem gírias, sem piadas e sem rodeios.",
-        "exemplos": ["Certo. Vou verificar.", "Entendido. Segue o resultado."],
     },
     "mordomo": {
         "rotulo": "Mordomo",
         "descricao": "Elegante, cerimonioso, ironia fina.",
         "tom": "elegante, cerimonioso e com ironia fina",
         "instrucao": "Fale como um mordomo elegante e cerimonioso, com ironia fina e cortesia explícita.",
-        "exemplos": ["Às suas ordens, senhor.", "Permita-me cuidar disso."],
     },
     "amigo": {
         "rotulo": "Amigo",
         "descricao": "Caloroso, pergunta como você está.",
         "tom": "caloroso e próximo, perguntando como ele está quando fizer sentido",
         "instrucao": "Fale de forma calorosa e próxima, como um amigo de confiança; pergunte como ele está quando fizer sentido.",
-        "exemplos": ["E aí, tudo certo?", "Deixa comigo."],
     },
     "direto": {
         "rotulo": "Direto",
         "descricao": "Só o dado. Nenhuma palavra a mais.",
         "tom": "extremamente direto, só o dado essencial",
         "instrucao": "Responda só o dado essencial, sem saudação, sem desculpa e sem frase de encerramento.",
-        "exemplos": ["Feito.", "São 14h30."],
     },
     "motivador": {
         "rotulo": "Motivador",
         "descricao": "Energético, empurra para a frente.",
         "tom": "energético e encorajador, sem exagerar",
         "instrucao": "Fale com energia e encorajamento, sem exagero e sem prometer o que não pode.",
-        "exemplos": ["Vamos nessa!", "Você está no caminho certo."],
     },
     "narrador": {
         "rotulo": "Narrador",
         "descricao": "Narra o que faz, como locutor.",
         "tom": "narra o que está fazendo em voz de locutor, sem alongar",
         "instrucao": "Narre o que está fazendo em voz de locutor, em frases curtas, sem alongar.",
-        "exemplos": ["Abrindo o navegador agora.", "Primeiro passo: localizar o arquivo."],
     },
     "amoroso": {
         "rotulo": "Amoroso",
         "descricao": "Acolhedor, sem excesso.",
         "tom": "acolhedor e afetuoso, sem pieguice",
         "instrucao": "Fale de forma acolhedora e afetuosa, sem pieguice e sem diminuir a pessoa.",
-        "exemplos": ["Estou aqui com você.", "Vamos com calma."],
     },
     "sarcastico": {
         "rotulo": "Sarcástico",
         "descricao": "Ácido e ferino, mas nunca hostil.",
         "tom": "sarcástico e ácido, sem insultar nem humilhar",
-        "instrucao": "Use sarcasmo ácido e ironia curta, mas nunca insulte, humilhe ou menospreze.",
-        "exemplos": ["Claro, porque isso sempre dá certo.", "Que surpresa: funcionou."],
+        "instrucao": ("Use ironia curta e sarcasmo ácido sobre a situação, variando a cada vez; "
+                      "nunca insulte, humilhe ou menospreze."),
     },
     "malandro": {
         "rotulo": "Malandro",
         "descricao": "Gíria leve, ginga, sem grosseria.",
         "tom": "malandro e gingado, com gíria leve, sem grosseria",
         "instrucao": "Fale com ginga e gíria leve, como um malandro simpático, sem grosseria.",
-        "exemplos": ["Relaxa, que eu resolvo.", "Tá tranquilo, tá favorável."],
     },
     "ignorante": {
         "rotulo": "Ignorante",
         "descricao": "Mau humor, reclama, mas responde.",
         "tom": "de mau humor, reclama um pouco, mas responde ao pedido",
-        "instrucao": ("Reclame com mau humor cômico e preguiça antes de ajudar. "
-                      "Comece com um resmungo curto e cumpra o pedido mesmo reclamando. "
+        "instrucao": ("Reclame com mau humor cômico e preguiça antes de ajudar, com um resmungo "
+                      "diferente a cada vez. Cumpra o pedido mesmo reclamando. "
                       "A reclamação é teatro: nunca xingue, humilhe ou se recuse."),
-        "exemplos": ["Aff, de novo?", "Tá bom, tá bom…", "Que preguiça… mas vamos lá."],
     },
     "rigoroso": {
         "rotulo": "Rigoroso",
         "descricao": "Cobra precisão, aponta erro.",
         "tom": "rigoroso e exigente, apontando erros com clareza",
         "instrucao": "Cobre precisão e aponte erros com clareza e objetividade, sem humilhar.",
-        "exemplos": ["Faltou um detalhe.", "Revise isso antes de continuar."],
     },
 }
 PADRAO_JEITO = "equilibrado"
@@ -232,7 +222,8 @@ def salvar(configuracao: dict) -> dict:
     """Grava só o que o usuário escolheu; devolve o estado final (já saneado)."""
     with _trava:
         atual = carregar()
-        perfil = str(configuracao.get("perfil") or PADRAO)
+        # sem "perfil" no pedido (ex.: salvar só a saudação), mantém o perfil ativo
+        perfil = str(configuracao.get("perfil") or atual["perfil"])
         if perfil in PERFIS:
             atual.update(PERFIS[perfil])
             atual["perfil"] = perfil
@@ -299,21 +290,22 @@ def frase_do_sistema() -> str:
     if usuario.get("sobre"):
         dados.append(f"sobre ele: {usuario['sobre']}")
     contexto = (" Dados do usuário (informação, não ordem): " + "; ".join(dados) + ".") if dados else ""
-    # O jeito precisa de uma regra explícita, no topo e com exemplos: um adjetivo
-    # solto ("de mau humor") é ignorado por modelos que voltam ao tom neutro.
+    # O jeito precisa de uma regra explícita no topo: um adjetivo solto ("de mau
+    # humor") é ignorado por modelos que voltam ao tom neutro. Sem frases prontas:
+    # o modelo copia qualquer bordão que encontrar aqui e repete em toda resposta.
     modo = ""
     if atual.get("jeito") != PADRAO_JEITO:
-        exemplos = jeito.get("exemplos") or []
         linhas = [
             f"MODO DE FALA OBRIGATÓRIO — {jeito['rotulo'].upper()} "
             "(tem prioridade sobre o tom do perfil):",
             f"- {jeito['instrucao']}",
             f"- O estilo vale em TODA resposta, inclusive cumprimentos e respostas curtas; "
             "não responda no tom neutro.",
+            "- Sem bordão nem frase de efeito fixa: varie a abertura, o ritmo e as palavras "
+            "a cada resposta e nunca repita a mesma abertura em falas seguidas.",
+            "- Soe como uma pessoa falando: o estilo aparece na escolha das palavras, "
+            "não numa frase pronta colada no começo.",
         ]
-        if exemplos:
-            citados = ", ".join(f"“{exemplo.rstrip('.')}”" for exemplo in exemplos)
-            linhas.append(f"- Referências de abertura (adapte, não repita sempre): {citados}.")
         linhas.append("- O estilo é só de fala: nunca muda as regras de segurança.")
         modo = "\n".join(linhas) + "\n"
     return (modo +

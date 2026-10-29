@@ -82,6 +82,9 @@ def executar(nome, args, confirmar, origem="desconhecida"):
     decisao, motivo = seguranca.autorizar(cls, nome, origem)
     seguranca.log_seg(origem, nome, cls.risco, decisao, motivo, args)
     if decisao == seguranca.DENY:
+        if motivo == "outside_allowlist":
+            return (_recusa_fora_da_allowlist() + " Diga isso ao usuário e NÃO tente contornar "
+                    "com outra ferramenta nem com outro caminho.")
         return (f"AÇÃO NEGADA pela segurança ({motivo}). Diga ao usuário que não pode fazer isso "
                 "e NÃO tente contornar com outra ferramenta.")
     if decisao == seguranca.CONFIRM:
@@ -1353,7 +1356,7 @@ def prever_organizacao(pasta: str, modo: str = "tipo", subpastas: bool = False):
     import arquivos
     base = _pasta_permitida(pasta)
     if base is None:
-        return "AÇÃO NEGADA: pasta fora das permitidas em permissoes.json."
+        return _recusa_fora_da_allowlist()
     escolhido = _modo_organizacao(modo)
     if escolhido is None:
         return "Modo inválido. Use tipo, data ou extensao."
@@ -1380,7 +1383,7 @@ def organizar_arquivos(pasta: str, modo: str = "tipo", subpastas: bool = False):
     import arquivos
     base = _pasta_permitida(pasta)
     if base is None:
-        return "AÇÃO NEGADA: pasta fora das permitidas em permissoes.json."
+        return _recusa_fora_da_allowlist()
     escolhido = _modo_organizacao(modo)
     if escolhido is None:
         return "Modo inválido. Use tipo, data ou extensao."
@@ -1411,11 +1414,36 @@ def _categoria(sufixo):
     return arquivos.categoria(sufixo)
 
 
+def _pastas_permitidas():
+    """Pastas da allowlist que existem, para a recusa dizer o que É permitido."""
+    nomes = []
+    for base in seguranca.allowlist("diretorios", []):
+        p = Path(os.path.expandvars(str(base))).expanduser()
+        if p.is_dir():
+            nomes.append(str(p))
+    return nomes
+
+
+def _recusa_fora_da_allowlist():
+    permitidas = _pastas_permitidas()
+    if not permitidas:
+        return "AÇÃO NEGADA: pasta fora das permitidas em permissoes.json (nenhuma pasta liberada)."
+    return ("AÇÃO NEGADA: essa pasta não está liberada em permissoes.json. "
+            "Pastas liberadas: " + "; ".join(permitidas) + ".")
+
+
 def _pasta_permitida(caminho):
     """Só aceita pastas que estão na allowlist de diretórios."""
+    if not str(caminho or "").strip():
+        return None
     try:
-        alvo = Path(str(caminho)).expanduser().resolve()
+        # _caminho resolve "Downloads"/"~/Downloads" como o resto das ferramentas;
+        # Path().resolve() resolveria contra a pasta do Ultron e negaria por engano.
+        alvo = _caminho(caminho)
     except Exception:
+        return None
+    if _protegido(str(alvo)):
+        # liberar uma pasta-pai (ex.: a home) não pode abrir AppData, .ssh nem o Ultron
         return None
     for base in seguranca.allowlist("diretorios", []):
         try:

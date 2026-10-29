@@ -1,4 +1,5 @@
 import sys
+import os
 import shutil
 import tempfile
 import unittest
@@ -26,6 +27,26 @@ class RiscosDasFerramentasNovasTests(unittest.TestCase):
         with patch.object(ferramentas, "_pasta_permitida", return_value=None):
             cls = ferramentas.FERRAMENTAS["organizar_arquivos"]["classificar"](pasta="C:/Windows")
         self.assertEqual(cls.negar, "outside_allowlist")
+
+    def test_nome_curto_de_pasta_resolve_na_home(self):
+        # "Downloads" tem de resolver como C:\Users\x\Downloads, não contra a pasta do Ultron
+        alvo = Path.home() / f"ultron_teste_{os.getpid()}"
+        alvo.mkdir(exist_ok=True)
+        self.addCleanup(shutil.rmtree, alvo, True)
+        with patch.object(ferramentas.seguranca, "allowlist", return_value=[str(alvo)]):
+            self.assertEqual(ferramentas._pasta_permitida(alvo.name), alvo.resolve())
+
+    def test_allowlist_nao_abre_appdata_ssh_nem_a_pasta_do_ultron(self):
+        for dentro in (Path.home() / "AppData" / "Local", Path.home() / ".ssh",
+                       ferramentas.seguranca.BASE):
+            with patch.object(ferramentas.seguranca, "allowlist", return_value=[str(Path.home())]):
+                self.assertIsNone(ferramentas._pasta_permitida(str(dentro)), dentro)
+
+    def test_recusa_diz_quais_pastas_sao_permitidas(self):
+        with patch.object(ferramentas, "_pastas_permitidas", return_value=[r"C:\Users\x\Downloads"]):
+            saida = ferramentas._recusa_fora_da_allowlist()
+        self.assertTrue(saida.startswith("AÇÃO NEGADA"), saida)
+        self.assertIn(r"C:\Users\x\Downloads", saida)
 
     def test_enviar_formulario_e_risco_alto(self):
         cls = ferramentas.FERRAMENTAS["enviar_formulario"]["classificar"]()

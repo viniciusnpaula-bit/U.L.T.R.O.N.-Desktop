@@ -156,7 +156,33 @@ def limpar(texto):
     return re.sub(r"\s+", " ", texto).strip()
 
 
+_URL_VOZ_NUVEM = "https://api.fish.audio/v1/tts"
+
+
+def _sintetizar_nuvem(texto, arquivo):
+    """Voz clonada no Fish Audio. Levanta exceção para o chamador cair no Edge."""
+    import requests
+    resposta = requests.post(
+        _URL_VOZ_NUVEM,
+        headers={"Authorization": f"Bearer {config.VOZ_NUVEM_CHAVE}",
+                 "Content-Type": "application/json",
+                 "model": config.VOZ_NUVEM_MODELO},
+        json={"text": texto, "reference_id": config.VOZ_NUVEM_ID, "format": "mp3"},
+        timeout=15,
+    )
+    resposta.raise_for_status()
+    if not resposta.content:
+        raise ValueError("resposta de áudio vazia")
+    Path(arquivo).write_bytes(resposta.content)
+
+
 async def _sintetizar(texto, arquivo):
+    if config.VOZ_NUVEM_CHAVE and config.VOZ_NUVEM_ID:
+        try:
+            _sintetizar_nuvem(texto, arquivo)
+            return
+        except Exception as e:
+            seguranca.log.warning(f"Voz clonada na nuvem falhou ({type(e).__name__}); usando Edge TTS.")
     import edge_tts
     await edge_tts.Communicate(texto, config.VOZ, rate=config.VOZ_RATE, pitch=config.VOZ_PITCH).save(arquivo)
 

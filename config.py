@@ -68,6 +68,10 @@ URLS = {
 VOZ = _env("VOZ", "pt-BR-AntonioNeural")
 VOZ_PITCH = _env("VOZ_PITCH", "-12Hz")
 VOZ_RATE = _env("VOZ_RATE", "+0%")
+# Voz clonada na nuvem (opcional): Fish Audio. Sem chave ou id, usa só o Edge TTS.
+VOZ_NUVEM_CHAVE = _env("VOZ_NUVEM_CHAVE")
+VOZ_NUVEM_ID = _env("VOZ_NUVEM_ID")
+VOZ_NUVEM_MODELO = _env("VOZ_NUVEM_MODELO", "s2.1-pro-free")
 LIMIAR_VOZ = float(_env("LIMIAR_VOZ", "0") or 0)
 # Fração do limiar calibrado que já conta como fala (0.35 capta fala a 30-50 cm
 # sem disparar com ruído estável). Suba para 0.5+ em ambientes muito ruidosos.

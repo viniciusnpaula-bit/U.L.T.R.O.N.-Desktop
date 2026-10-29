@@ -103,17 +103,11 @@ class PersonalidadeTests(unittest.TestCase):
             self.assertTrue(item["descricao"])
             self.assertTrue(item["tom"])
             self.assertTrue(item["instrucao"])
-            self.assertIsInstance(item["exemplos"], list)
+            self.assertNotIn("exemplos", item, item["id"])
 
     def test_cada_jeito_tem_regra_de_fala_concreta(self):
         for chave, jeito in personalidade.JEITOS.items():
             self.assertTrue(jeito["instrucao"].strip(), chave)
-            if chave == personalidade.PADRAO_JEITO:
-                self.assertEqual(jeito["exemplos"], [], chave)
-            else:
-                self.assertTrue(jeito["exemplos"], chave)
-                for exemplo in jeito["exemplos"]:
-                    self.assertTrue(exemplo.strip(), chave)
 
     def test_dados_do_usuario_sao_saneados(self):
         personalidade.salvar({"usuario": {
@@ -143,6 +137,14 @@ class PersonalidadeTests(unittest.TestCase):
         self.assertEqual(atual["usuario"]["nome"], "Ana")
         self.assertFalse(atual["saudacao"])
         self.assertEqual(atual["jeito"], "amigo")
+
+    def test_salvar_so_a_saudacao_preserva_o_perfil(self):
+        personalidade.salvar({"perfil": "visao", "tratamento": "doutor"})
+        personalidade.salvar({"saudacao": False})
+        atual = personalidade.carregar()
+        self.assertEqual(atual["perfil"], "visao")
+        self.assertEqual(atual["tratamento"], "doutor")
+        self.assertFalse(atual["saudacao"])
 
     def test_saudacao_desligada_e_persistida(self):
         personalidade.salvar({"saudacao": False})
@@ -176,8 +178,7 @@ class PersonalidadeTests(unittest.TestCase):
         self.assertLess(frase.index("MODO DE FALA OBRIGATÓRIO"), frase.index("Personalidade:"))
         self.assertIn("prioridade sobre o tom do perfil", frase)
         self.assertIn(personalidade.JEITOS["ignorante"]["instrucao"], frase)
-        for exemplo in personalidade.JEITOS["ignorante"]["exemplos"]:
-            self.assertIn(exemplo.rstrip("."), frase)
+        self.assertIn("Sem bordão nem frase de efeito fixa", frase)
         # vale em toda resposta e não fura a segurança
         self.assertIn("TODA resposta", frase)
         self.assertIn("não responda no tom neutro", frase)
@@ -193,6 +194,18 @@ class PersonalidadeTests(unittest.TestCase):
             self.assertTrue(
                 frase.startswith(f"MODO DE FALA OBRIGATÓRIO — {jeito['rotulo'].upper()}"), chave)
             self.assertIn(jeito["instrucao"], frase, chave)
+
+    def test_prompt_nao_ensina_bordao_fixo(self):
+        # frases prontas no prompt viram bordão repetido em toda resposta
+        frases_prontas = ("Bora resolver isso", "Prometo que dessa vez", "Vou verificar",
+                   "Às suas ordens", "Deixa comigo", "Vamos nessa",
+                   "Abrindo o navegador", "Estou aqui com você", "Claro, porque isso",
+                   "Relaxa, que eu resolvo", "Aff, de novo", "Faltou um detalhe")
+        for chave in personalidade.JEITOS:
+            personalidade.salvar({"jeito": chave})
+            frase = personalidade.frase_do_sistema()
+            for pronta in frases_prontas:
+                self.assertNotIn(pronta, frase, chave)
 
     def test_frase_de_saudacao_usa_perfil_e_tratamento(self):
         personalidade.salvar({"perfil": "jarvis", "tratamento": "meu senhor"})

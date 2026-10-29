@@ -188,8 +188,9 @@ Ajustes (`Ctrl+,`) → **Voz e Jeito** reúne quatro abas:
   rigoroso) independentes da identidade ULTRON/JARVIS/VISÃO/EDITH. O jeito muda
   o tom; **não** muda allowlist, confirmação, PIN nem qualquer regra de segurança.
   Todo estilo não neutro entra no prompt como um bloco de **modo de fala
-  obrigatório**, com instrução e exemplos, válido em toda resposta — é o que
-  impede o modelo de voltar sozinho ao tom neutro.
+  obrigatório**, com instrução e regra de variação, válido em toda resposta — é o
+  que impede o modelo de voltar sozinho ao tom neutro. O bloco não traz frases
+  prontas: bordão citado no prompt vira muleta repetida em toda resposta.
 - **microfone**: escolha da entrada e pausa/retomada da escuta do núcleo.
 - **sobre você**: nome, apelido, idade, gênero, como quer ser chamado e um texto
   livre. Tudo é opcional, fica em `dados/personalidade.json` e entra no prompt
