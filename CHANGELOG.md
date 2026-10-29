@@ -29,6 +29,10 @@ ULTRON Desktop 1.19.0 — interface espacial
   3D preenche o canvas: o cristal ficou ~50% maior, com as legendas ainda abaixo
   dele. Em janela baixa o conjunto encolhe junto, sem cortar anéis nem virar
   elipse quando os docks estão abertos.
+- Palco restilizado como janela de projeção: chip do tipo com ponto vivo, moldura
+  com halo do acento, mídia assentada numa vinheta e saída em fade (150 ms),
+  cancelada se outra mídia chegar. Texto ganha coluna de leitura; o selo do PDF
+  vira uma folha.
 - Sem bump de versão, sem mudança de CSP ou permissões.
 
 ULTRON Desktop 1.19.0 — sessão local e histórico cifrado

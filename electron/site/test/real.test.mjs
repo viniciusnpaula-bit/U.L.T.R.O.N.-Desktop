@@ -114,6 +114,9 @@ test('palco: interface usa textContent, CSP própria e protocolo privilegiado', 
   assert.match(app, /ultron-palco:\/\/media\//);
   assert.doesNotMatch(app, /palcoBody[^\n]*innerHTML/);
   assert.match(css, /\.palco\[hidden\]/);
+  // a saída do palco é um fade curto e cancelável, como a da gaveta
+  assert.match(css, /\.palco\.saindo/);
+  assert.match(app, /classList\.add\('saindo'\)/);
   assert.match(main, /registerSchemesAsPrivileged/);
   assert.match(main, /protocol\.handle\('ultron-palco'/);
   assert.match(preload, /palcoFechar: \(\) => ipcRenderer\.invoke\('palco:fechar'\)/);

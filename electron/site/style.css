@@ -530,64 +530,110 @@ button { cursor: pointer; border: 0; background: none; }
 }
 
 /* ── palco: mídia ocupa o lugar do núcleo ────────────────────────────────── */
+/* janela de projeção: canal no topo, moldura com halo do acento e a mídia
+   assentada numa vinheta. O que separa continua sendo espaço e fio de 1px. */
 .palco[hidden] { display: none !important; }
 .palco {
   grid-row: 1; grid-column: 1; align-self: stretch; justify-self: stretch;
-  display: flex; flex-direction: column; gap: 10px; min-height: 0; z-index: 2;
+  display: flex; flex-direction: column; gap: 12px; min-height: 0; z-index: 2;
   animation: rise 220ms var(--ease) both;
 }
-.chamber[data-palco="on"] .core-frame { display: none; }
-.palco-head { display: flex; align-items: flex-start; gap: 14px; }
-.palco-id { min-width: 0; }
+.palco.saindo { animation: palco-out 150ms var(--ease-io) both; pointer-events: none; }
+@keyframes palco-out { to { opacity: 0; transform: translateY(-4px); } }
+
+/* o palco apaga o halo do núcleo: a mídia é a única luz da câmara */
+.chamber[data-palco="on"] {
+  background:
+    radial-gradient(64% 54% at 50% 44%, color-mix(in srgb, var(--core) 5%, transparent), transparent 76%),
+    rgba(5, 6, 10, .26);
+}
+
+.palco-head {
+  display: flex; flex-wrap: wrap; align-items: center; gap: 8px 14px;
+  padding-bottom: 10px; border-bottom: 1px solid var(--line);
+}
+.palco-id { display: flex; align-items: center; gap: 10px; flex: 1 1 200px; min-width: 0; }
+.palco-id .eyebrow {
+  display: inline-flex; align-items: center; gap: 6px; flex: none;
+  padding: 3px 7px; border-radius: 999px; border: 1px solid var(--core-line);
+  background: var(--core-wash); color: var(--core);
+}
+.palco-id .eyebrow::before {
+  content: ""; width: 4px; height: 4px; border-radius: 50%;
+  background: var(--core); box-shadow: 0 0 8px var(--core-glow);
+}
 .palco-id h2 {
-  margin: 5px 0 0; font-size: 15px; font-weight: 500; letter-spacing: -.01em;
+  min-width: 0; margin: 0; font-size: 16px; font-weight: 500; letter-spacing: -.01em;
   white-space: nowrap; overflow: hidden; text-overflow: ellipsis;
 }
-.palco-actions { display: flex; gap: 6px; margin-left: auto; flex: none; }
+.palco-actions { display: flex; align-items: center; gap: 6px; margin-left: auto; flex: none; }
+.palco-actions .ghost[aria-pressed="true"] { color: var(--core); background: var(--core-wash); }
+
 .palco-body {
-  display: grid; place-items: center; flex: 1; min-height: 0;
-  border: 1px solid var(--line); border-radius: 12px;
-  overflow: hidden; background: #000;
+  position: relative; display: grid; place-items: center; flex: 1; min-height: 0;
+  border: 1px solid var(--line-strong); border-radius: 14px; overflow: hidden;
+  background:
+    radial-gradient(72% 62% at 50% 42%, color-mix(in srgb, var(--core) 7%, transparent), transparent 78%),
+    linear-gradient(180deg, #07080d, #04050a);
+  box-shadow: 0 26px 70px -48px var(--core-glow);
 }
+/* vinheta: assenta a mídia na moldura sem apagar as bordas do vídeo */
+.palco-body::after {
+  content: ""; position: absolute; inset: 0; pointer-events: none; border-radius: inherit;
+  box-shadow: inset 0 0 64px -24px #000, inset 0 0 0 1px rgba(255, 255, 255, .02);
+}
+.palco-body > * { animation: palco-media 320ms var(--ease) both; }
+@keyframes palco-media { from { opacity: 0; transform: scale(.985); } to { opacity: 1; transform: none; } }
 .palco-body video, .palco-body img {
-  display: block; width: 100%; height: 100%; object-fit: contain; background: #000;
+  display: block; width: 100%; height: 100%; object-fit: contain;
 }
 .palco-body iframe { display: block; width: 100%; height: 100%; border: 0; background: #000; }
 .palco-body pre {
-  margin: 0; width: 100%; height: 100%; overflow: auto; padding: 18px 20px;
-  font: 12px/1.65 var(--mono); color: #c9d0dc; white-space: pre-wrap;
+  margin: 0 auto; width: min(100%, 78ch); height: 100%; overflow: auto;
+  padding: clamp(18px, 3vw, 34px) clamp(18px, 4vw, 46px);
+  font: 12px/1.7 var(--mono); color: #c9d0dc; white-space: pre-wrap;
   overflow-wrap: anywhere; background: var(--ink-2);
+  border-left: 1px solid var(--core-line);
 }
 .palco-aviso {
-  margin: 0; padding: 24px; text-align: center;
+  margin: 0; padding: 24px; max-width: 42ch; text-align: center;
   font: 11px/1.6 var(--mono); color: var(--muted);
 }
 .palco-doc {
   display: grid; justify-items: center; gap: 2px; padding: 28px 24px;
   text-align: center;
 }
+/* selo = folha: fio de acento, linhas de texto e o rótulo do formato */
 .palco-doc-selo {
-  display: grid; place-items: center; width: 52px; height: 64px;
-  margin-bottom: 14px; border: 1px solid var(--line); border-radius: 10px;
-  background: var(--ink-2); color: var(--core);
-  font: 10px/1 var(--mono); letter-spacing: .14em;
+  display: grid; place-items: start center; width: 54px; height: 66px;
+  padding-top: 10px; margin-bottom: 16px; border: 1px solid var(--core-line); border-radius: 10px;
+  color: var(--core); font: 10px/1 var(--mono); letter-spacing: .14em;
+  background:
+    linear-gradient(var(--core-line), var(--core-line)) 13px 42px / 28px 1px no-repeat,
+    linear-gradient(var(--core-line), var(--core-line)) 13px 49px / 19px 1px no-repeat,
+    linear-gradient(160deg, var(--core-wash), var(--ink-2) 72%);
 }
 .palco-doc-nome {
-  margin: 0; max-width: 44ch; font-size: 13px; line-height: 1.5;
+  margin: 0; max-width: 44ch; font-size: 14px; line-height: 1.5;
   color: var(--text); overflow-wrap: anywhere;
 }
 .palco-doc-dica {
-  margin: 7px 0 0; max-width: 48ch;
+  margin: 8px 0 0; max-width: 48ch;
   font: 10px/1.6 var(--mono); color: var(--dim);
 }
 .palco-foot {
-  display: flex; align-items: center; gap: 12px; min-height: 14px;
+  display: flex; align-items: center; gap: 10px; min-height: 14px;
   font: 10px/1.4 var(--mono); letter-spacing: .06em; color: var(--dim);
 }
-.palco-foot #palcoSource {
-  margin-left: auto; max-width: 55%; overflow: hidden;
-  text-overflow: ellipsis; white-space: nowrap;
+.palco-foot #palcoNote {
+  min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
 }
+.palco-foot #palcoSource {
+  margin: 0 0 0 auto; padding-left: 10px; border-left: 1px solid var(--line);
+  max-width: 55%; font-size: 10px; color: var(--muted);
+  overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
+}
+.palco-foot #palcoSource:empty { display: none; }
 
 /* ── resposta: a única coisa grande da tela ──────────────────────────────── */
 .reply {
@@ -1186,7 +1232,7 @@ button { cursor: pointer; border: 0; background: none; }
   .unlock-scan { display: none; animation: none; }
   .vignette::before { animation: star-drift 60s linear infinite; opacity: .5; }
   :root { --t-press: 1ms; --t-panel: 140ms; }
-  .msg, .reply.arriving p, .modal, .palco { animation: none; }
+  .msg, .reply.arriving p, .modal, .palco, .palco.saindo, .palco-body > * { animation: none; }
   .comms-live.on::before, .reply-caret { animation: none; opacity: .8; }
   .theme-pill, .signal-bar i, .undo-action { transition: none; }
   .arena { transition: none; }

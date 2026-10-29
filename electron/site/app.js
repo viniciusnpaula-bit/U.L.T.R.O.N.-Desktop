@@ -486,6 +486,7 @@ const PALCO_ROTULO = Object.freeze({ video: 'vídeo', imagem: 'imagem', pdf: 'PD
 // Vídeo começa mudo (autoplay confiável e sem susto). Em player de outra origem
 // o som só liga recarregando sem o parâmetro de mudo — daí o estado fixo.
 let palcoSomLigado = false;
+let palcoSaindo = 0;
 
 function palcoElemento(tag, atributos = {}) {
   const node = document.createElement(tag);
@@ -508,9 +509,7 @@ function esconderPalco({ avisar = false } = {}) {
   state.palco = null;
   palcoSomLigado = false;
   const painel = $('palco');
-  painel.hidden = true;
   $('chamber').dataset.palco = 'off';
-  $('palcoBody').replaceChildren();
   $('palcoSound').hidden = true;
   $('palcoSound').disabled = false;
   $('palcoSound').textContent = 'som';
@@ -524,6 +523,20 @@ function esconderPalco({ avisar = false } = {}) {
   $('palcoTitle').textContent = '—';
   $('palcoNote').textContent = '—';
   $('palcoSource').textContent = '';
+  // sai com o mesmo fade da gaveta; reabrir no meio cancela a saída
+  clearTimeout(palcoSaindo);
+  palcoSaindo = 0;
+  const terminar = () => {
+    painel.hidden = true;
+    painel.classList.remove('saindo');
+    $('palcoBody').replaceChildren();
+  };
+  if (painel.hidden || window.matchMedia?.('(prefers-reduced-motion: reduce)')?.matches) {
+    terminar();
+  } else {
+    painel.classList.add('saindo');
+    palcoSaindo = setTimeout(terminar, 150);
+  }
   if (avisar) transport.palcoFechar().catch(() => {});
 }
 
@@ -610,7 +623,11 @@ function mostrarPalco(dados) {
     : (local ? 'arquivo local' : '');
   state.palco = dados;
   state.palcoIgnorado = null;
-  $('palco').hidden = false;
+  const painel = $('palco');
+  clearTimeout(palcoSaindo);
+  palcoSaindo = 0;
+  painel.classList.remove('saindo');
+  painel.hidden = false;
   $('chamber').dataset.palco = 'on';
 }
 
