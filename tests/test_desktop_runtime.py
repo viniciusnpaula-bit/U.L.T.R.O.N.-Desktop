@@ -114,6 +114,12 @@ class RuntimeTests(unittest.TestCase):
             "voz": self.voz, "biometria": self.biometria, "memoria": self.memoria,
         })
         self.modules.start()
+        self.session_file = tempfile.TemporaryDirectory()
+        self.addCleanup(self.session_file.cleanup)
+        self.session_patch = patch.object(
+            desktop_runtime, "ARQUIVO_SESSAO",
+            Path(self.session_file.name) / "sessao.json")
+        self.session_patch.start()
         self.runtime = DesktopRuntime()
         self.runtime.start()
 
@@ -121,6 +127,7 @@ class RuntimeTests(unittest.TestCase):
         sessao.bloquear()
         self.runtime.shutdown()
         self.modules.stop()
+        self.session_patch.stop()
 
     def events_until(self, predicate, timeout=1.0):
         deadline = time.monotonic() + timeout

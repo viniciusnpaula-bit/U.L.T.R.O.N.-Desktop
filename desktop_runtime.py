@@ -17,9 +17,10 @@ from microphone_devices import enumerate_input_devices
 import config
 import sessao
 
-# Limite de falhas de PIN e janela de espera (em memória, zerada ao reiniciar).
+# Limite de falhas de PIN e janela de espera (persistidos em dados/sessao.json).
 UNLOCK_FALHAS_MAX = 5
 UNLOCK_ESPERA_S = 30.0
+ARQUIVO_SESSAO = config.BASE / "dados" / "sessao.json"
 
 
 class DesktopRuntime:
@@ -61,8 +62,7 @@ class DesktopRuntime:
         self._notification_callback = None
 
         self._unlock_lock = threading.Lock()
-        self._unlock_falhas = 0
-        self._unlock_espera_ate = 0.0
+        self._unlock_falhas, self._unlock_espera_ate = self._ler_estado_unlock()
         self._session_thread: threading.Thread | None = None
 
     def start(self) -> None:
@@ -693,8 +693,31 @@ class DesktopRuntime:
         self._log_seg("unlock", "ALLOW", "hello_verified")
         return {"unlocked": True, "method": "hello", "session": estado}
 
+    # ---- tentativas de PIN persistidas entre reinícios (dados/sessao.json)
+    @staticmethod
+    def _ler_estado_unlock() -> tuple[int, float]:
+        try:
+            value = json.loads(ARQUIVO_SESSAO.read_text(encoding="utf-8"))
+            falhas = int(value.get("unlock_falhas", 0))
+            espera = float(value.get("unlock_espera_ate", 0.0))
+            return max(0, falhas), max(0.0, espera)
+        except (OSError, ValueError, TypeError, AttributeError):
+            return 0, 0.0
+
+    @staticmethod
+    def _gravar_estado_unlock(falhas: int, espera_ate: float) -> None:
+        try:
+            ARQUIVO_SESSAO.parent.mkdir(parents=True, exist_ok=True)
+            temporary = ARQUIVO_SESSAO.with_suffix(".tmp")
+            temporary.write_text(json.dumps({"unlock_falhas": int(falhas),
+                                             "unlock_espera_ate": float(espera_ate)}),
+                                 encoding="utf-8")
+            temporary.replace(ARQUIVO_SESSAO)
+        except OSError:
+            pass          # sem arquivo o bloqueio continua valendo nesta execução
+
     def unlock_pin(self, pin: str) -> dict:
-        if time.monotonic() < self._unlock_espera_ate:
+        if time.time() < self._unlock_espera_ate:
             self._log_seg("unlock", "DENY", "pin_locked_out")
             return {"unlocked": False, "error": "too_many_attempts"}
         try:
@@ -716,12 +739,14 @@ class DesktopRuntime:
                 bloqueado = self._unlock_falhas >= UNLOCK_FALHAS_MAX
                 if bloqueado:
                     self._unlock_falhas = 0
-                    self._unlock_espera_ate = time.monotonic() + UNLOCK_ESPERA_S
+                    self._unlock_espera_ate = time.time() + UNLOCK_ESPERA_S
+                self._gravar_estado_unlock(self._unlock_falhas, self._unlock_espera_ate)
             self._log_seg("unlock", "DENY", "pin_locked_out" if bloqueado else "pin_invalid_or_missing")
             return {"unlocked": False, "error": "too_many_attempts" if bloqueado else "pin_invalid"}
         with self._unlock_lock:
             self._unlock_falhas = 0
             self._unlock_espera_ate = 0.0
+            self._gravar_estado_unlock(0, 0.0)
         estado = sessao.desbloquear("pin")
         self._log_seg("unlock", "ALLOW", "pin_verified")
         return {"unlocked": True, "method": "pin", "session": estado}
