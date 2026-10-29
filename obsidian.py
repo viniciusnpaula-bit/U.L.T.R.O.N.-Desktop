@@ -22,6 +22,7 @@ import hashlib
 import os
 import re
 import threading
+import time
 import unicodedata
 from pathlib import Path
 
@@ -44,6 +45,8 @@ _MAX_NOTAS = 3000               # teto de arquivos varridos por busca
 _MAX_TRECHO = 280
 
 _cache: dict[str, tuple[int, int, str]] = {}
+_notas_cache: dict = {}
+_NOTAS_TTL = 2.0                # edições de conteúdo aparecem em até 2s
 _trava = threading.Lock()
 
 
@@ -187,6 +190,14 @@ def notas() -> list[dict]:
     base = raiz()
     if not base.is_dir():
         return []
+    try:
+        mtime = base.stat().st_mtime_ns
+    except OSError:
+        mtime = 0
+    agora = time.monotonic()
+    if (_notas_cache.get("base") == str(base) and _notas_cache.get("mtime") == mtime
+            and agora - _notas_cache.get("ts", 0.0) < _NOTAS_TTL):
+        return [dict(item) for item in _notas_cache["itens"]]
     saida: list[dict] = []
     for pasta, dirs, arquivos in os.walk(base, followlinks=False):
         dirs[:] = [d for d in dirs
@@ -212,8 +223,9 @@ def notas() -> list[dict]:
                           "tags": _tags(texto), "mtime": info.st_mtime,
                           "tamanho": info.st_size})
             if len(saida) >= _MAX_NOTAS:
-                return saida
-    return saida
+                break
+    _notas_cache.update(base=str(base), ts=agora, mtime=mtime, itens=saida)
+    return [dict(item) for item in saida]
 
 
 def listar(limite: int = 20) -> list[dict]:

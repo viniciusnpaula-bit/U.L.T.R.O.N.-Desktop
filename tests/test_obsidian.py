@@ -28,7 +28,9 @@ class ObsidianTests(unittest.TestCase):
             patcher.start()
             self.addCleanup(patcher.stop)
         obsidian._cache.clear()
+        obsidian._notas_cache.clear()
         self.addCleanup(obsidian._cache.clear)
+        self.addCleanup(obsidian._notas_cache.clear)
 
     # ---------------------------------------------------------- nomes
     def test_nome_recusa_absoluto_parenteses_e_pastas_internas(self):
@@ -49,6 +51,21 @@ class ObsidianTests(unittest.TestCase):
         with self.assertRaises(FileExistsError):
             obsidian.criar("Projetos/ULTRON", "outra")
         self.assertIn("memória local", p.read_text(encoding="utf-8"))
+
+    def test_notas_reaproveita_cache_e_invalida_por_mtime_e_ttl(self):
+        obsidian.criar("A", "# Um")
+        primeira = obsidian.notas()
+        self.assertEqual([n["nota"] for n in primeira], ["A.md"])
+        self.assertIsNot(primeira, obsidian.notas())      # devolve cópia, não o cache
+        # novo arquivo muda o mtime da pasta: aparece na hora, sem esperar o TTL
+        obsidian.criar("B", "# Dois")
+        self.assertEqual(len(obsidian.notas()), 2)
+        # edição de conteúdo só é vista quando o TTL vence
+        obsidian.caminho("A").write_text("# Um editado", encoding="utf-8")
+        self.assertEqual({n["nota"]: n["titulo"] for n in obsidian.notas()}["A.md"], "Um")
+        with patch.object(obsidian, "_NOTAS_TTL", 0.0):
+            self.assertEqual({n["nota"]: n["titulo"] for n in obsidian.notas()}["A.md"],
+                             "Um editado")
 
     def test_busca_encontra_titulo_tag_e_conteudo(self):
         obsidian.criar("Sistema/Backup",
