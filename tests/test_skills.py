@@ -2,6 +2,7 @@ import json
 import os
 import sys
 import tempfile
+import threading
 import unittest
 from datetime import date, datetime, timedelta
 from pathlib import Path
@@ -179,14 +180,25 @@ class CicloTests(StoreBase):
     def test_criar_recusa_quarta_pendente(self):
         for i in range(3):
             skills.criar(f"Skill {i}", "d", "q", "c")
-        with self.assertRaises(ValueError) as erro:
-            skills.criar("Skill 4", "d", "q", "c")
+        with mock.patch.object(config, "SKILLS_PENDENTES_MAX", 3, create=True):
+            with self.assertRaises(ValueError) as erro:
+                skills.criar("Skill 4", "d", "q", "c")
         self.assertIn("fila de skills cheia", str(erro.exception))
 
     def test_criar_deduplica_nome_existente(self):
         skills.criar("Repetida", "d", "q", "c")
         self.assertEqual(skills.criar("Repetida", "d", "q", "c"), "repetida")
         self.assertEqual(len(skills.pendentes()), 1)
+
+    def test_criar_deduplica_contra_ativa(self):
+        self.escrever("organizar-downloads")
+        self.assertEqual(skills.criar("Organizar Downloads", "d", "q", "c"), "organizar-downloads")
+        self.assertEqual(skills.pendentes(), [])
+
+    def test_criado_por_nao_injeta_frontmatter(self):
+        slug = skills.criar("Injecao", "d", "q", "c", criado_por="eu\nnome: falsa")
+        texto = (skills.PENDENTES / slug / "SKILL.md").read_text(encoding="utf-8")
+        self.assertEqual([l for l in texto.splitlines() if l.startswith("nome:")], ["nome: Injecao"])
 
     def test_aprovar_move_para_raiz(self):
         slug = skills.criar("Aprovar", "d", "q", "c")
@@ -196,9 +208,10 @@ class CicloTests(StoreBase):
 
     def test_aprovar_recusa_colisao(self):
         self.escrever("colide")
-        slug = skills.criar("Colide", "d", "q", "c")
+        self.escrever("colide", pendente=True)
         with self.assertRaises(ValueError):
-            skills.aprovar(slug)
+            skills.aprovar("colide")
+        self.assertEqual([s.slug for s in skills.pendentes()], ["colide"])
 
     def test_aprovar_recusa_acima_do_total(self):
         self.escrever("ja-ativa")
@@ -207,17 +220,53 @@ class CicloTests(StoreBase):
             with self.assertRaises(ValueError) as erro:
                 skills.aprovar(slug)
         self.assertIn("limite", str(erro.exception))
+        self.assertEqual([s.slug for s in skills.pendentes()], [slug])
 
     def test_descartar_remove_pendente(self):
         slug = skills.criar("Lixo", "d", "q", "c")
         skills.descartar(slug)
         self.assertEqual(skills.pendentes(), [])
 
+    def test_descartar_nao_remove_ativa_de_mesmo_slug(self):
+        self.escrever("mesmo")
+        self.escrever("mesmo", pendente=True)
+        skills.descartar("mesmo")
+        self.assertEqual([s.slug for s in skills.listar()], ["mesmo"])
+        self.assertEqual(skills.pendentes(), [])
+
+    def test_descartar_recusa_slug_destrutivo(self):
+        slug = skills.criar("Intacta", "d", "q", "c")
+        for entrada in (".", "..", "C:", "a/b"):
+            with self.subTest(entrada=entrada):
+                with self.assertRaises(ValueError):
+                    skills.descartar(entrada)
+                self.assertEqual([s.slug for s in skills.pendentes()], [slug])
+                self.assertTrue(skills.BASE.is_dir())
+
     def test_marcar_uso_grava_json(self):
         self.escrever("usada")
         skills.marcar_uso("usada")
         self.assertEqual(json.loads(skills.USO.read_text(encoding="utf-8"))["usada"],
                          date.today().isoformat())
+
+    def test_escritas_concorrentes_nao_deixam_lixo(self):
+        alvo = skills.BASE / "corrida" / "SKILL.md"
+        textos = ["A" * 200_000, "B" * 200_000]
+        threads = [threading.Thread(target=skills._escrever, args=(alvo, texto)) for texto in textos]
+        for t in threads:
+            t.start()
+        for t in threads:
+            t.join()
+
+        self.assertEqual(sorted(p.name for p in alvo.parent.iterdir()), ["SKILL.md"])
+        self.assertIn(alvo.read_text(encoding="utf-8"), textos)
+
+    def test_escrita_que_falha_nao_deixa_temporario(self):
+        alvo = skills.BASE / "falha" / "SKILL.md"
+        with mock.patch.object(skills.os, "replace", side_effect=OSError("disco cheio")):
+            with self.assertRaises(OSError):
+                skills._escrever(alvo, "texto")
+        self.assertEqual(list(alvo.parent.iterdir()), [])
 
     def test_curar_conta_e_avisa_pendente_antiga(self):
         self.escrever("ativa")
@@ -228,3 +277,11 @@ class CicloTests(StoreBase):
         self.assertEqual(r["ativos"], 1)
         self.assertEqual(r["pendentes"], 1)
         self.assertTrue(any("antiga" in a for a in r["avisos"]))
+
+    def test_curar_nao_move_nem_apaga(self):
+        velha = (HOJE - timedelta(days=30)).isoformat()
+        antiga = VALIDO.replace(HOJE.isoformat(), velha).replace("Organizar Downloads", "Antiga")
+        pasta = self.escrever("antiga", antiga, pendente=True)
+        skills.curar()
+        self.assertEqual([s.slug for s in skills.pendentes()], ["antiga"])
+        self.assertTrue((pasta / "SKILL.md").is_file())

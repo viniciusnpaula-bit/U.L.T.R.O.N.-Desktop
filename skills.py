@@ -9,6 +9,7 @@ import json
 import os
 import re
 import shutil
+import tempfile
 import unicodedata
 from dataclasses import dataclass
 from datetime import date, datetime
@@ -190,16 +191,21 @@ def corpo(slug: str) -> str:
 
 
 def _pasta(base: Path, slug: str) -> Path:
-    if not slug or ".." in slug or "/" in slug or "\\" in slug:
+    if not re.fullmatch(r"[a-z0-9][a-z0-9-]{0,39}", slug or ""):
         raise ValueError("nome de skill inválido")
     return base / slug
 
 
 def _escrever(caminho: Path, texto: str) -> None:
     caminho.parent.mkdir(parents=True, exist_ok=True)
-    tmp = caminho.with_suffix(".tmp")
-    tmp.write_text(texto, encoding="utf-8")
-    os.replace(tmp, caminho)
+    fd, tmp = tempfile.mkstemp(dir=caminho.parent, prefix=caminho.name + ".", suffix=".tmp")
+    try:
+        with os.fdopen(fd, "w", encoding="utf-8") as arquivo:
+            arquivo.write(texto)
+        os.replace(tmp, caminho)
+    except BaseException:
+        Path(tmp).unlink(missing_ok=True)
+        raise
 
 
 def criar(nome, descricao, quando, corpo, criado_por="agente") -> str:
@@ -216,7 +222,7 @@ def criar(nome, descricao, quando, corpo, criado_por="agente") -> str:
         f"nome: {' '.join(str(nome).split())[:80]}\n"
         f"descricao: {' '.join(str(descricao).split())[:160]}\n"
         f"quando: {' '.join(str(quando).split())[:160]}\n"
-        f"criado_por: {criado_por}\n"
+        f"criado_por: {' '.join(str(criado_por).split())}\n"
         f"criado_em: {date.today().isoformat()}\n"
         "---\n\n"
         f"{str(corpo).strip()[:_limite_corpo()]}\n"
@@ -251,10 +257,7 @@ def descartar(slug: str) -> None:
 def marcar_uso(slug: str) -> None:
     dados = _uso()
     dados[slug] = date.today().isoformat()
-    USO.parent.mkdir(parents=True, exist_ok=True)
-    tmp = USO.with_suffix(".tmp")
-    tmp.write_text(json.dumps(dados, ensure_ascii=False), encoding="utf-8")
-    os.replace(tmp, USO)
+    _escrever(USO, json.dumps(dados, ensure_ascii=False))
     invalidar()  # cache de _uso() é por (mtime, size): não depender do filesystem
 
 
