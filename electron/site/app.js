@@ -1615,9 +1615,6 @@ $('coreMode').onclick = () => aplicarModoNucleo(modoNucleo === '3d' ? '2d' : '3d
 document.querySelectorAll('[data-core]').forEach(node => node.onclick = () => aplicarModoNucleo(node.dataset.core, { avisar: true }));
 document.querySelectorAll('[data-theme-pill]').forEach(node => node.onclick = () => applyTheme(node.dataset.themePill));
 document.querySelectorAll('#themeSwatches .swatch').forEach(node => node.onclick = () => applyTheme(node.dataset.theme));
-document.querySelectorAll('[data-theme-pill]').forEach(node => node.onclick = () => applyTheme(node.dataset.themePill));
-$('coreMode').onclick = () => aplicarModoNucleo(modoNucleo === '3d' ? '2d' : '3d', { avisar: true });
-document.querySelectorAll('[data-core]').forEach(node => node.onclick = () => aplicarModoNucleo(node.dataset.core, { avisar: true }));
 document.querySelectorAll('[data-command]').forEach(button => button.onclick = () => send(button.dataset.command));
 
 $('consoleForm').addEventListener('submit', event => {

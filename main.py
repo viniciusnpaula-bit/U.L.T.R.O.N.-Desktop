@@ -15,6 +15,8 @@ from pathlib import Path
 from typing import Callable
 
 import config
+import sessao
+import biometria
 
 # Sem janela (pythonw) não existe saída de texto: manda tudo para um arquivo.
 if sys.stdout is None or sys.stderr is None or "--bandeja" in sys.argv:
@@ -162,8 +164,53 @@ def remover_inicio():
         print("O início automático não estava ativado.")
 
 
+# ---------- sessão local ----------
+
+
+def _desbloquear_inicial() -> bool:
+    """Exige desbloqueio local antes de usar o ULTRON.
+
+    Tenta o Windows Hello primeiro; sem sensor ou com falha, pede o PIN do .env.
+    Devolve True quando a sessão fica desbloqueada, False quando não há como.
+    """
+    if sessao.estado().get("desbloqueada"):
+        return True
+    hello = biometria.disponivel() if biometria else {"disponivel": False}
+    if hello.get("disponivel"):
+        try:
+            if biometria.verificar() is True:
+                sessao.desbloquear("hello")
+                print("Sessão desbloqueada pelo Windows Hello.")
+                return True
+        except biometria.Ocupado:
+            print("Windows Hello ocupado. Use o PIN ou tente de novo.")
+        except Exception:
+            pass
+    try:
+        import seguranca
+        tem_pin = bool(getattr(config, "PIN", ""))
+    except Exception:
+        tem_pin = False
+    if tem_pin:
+        pin = input("PIN de desbloqueio: ").strip()
+        try:
+            if seguranca.pin_valido(pin):
+                sessao.desbloquear("pin")
+                print("Sessão desbloqueada pelo PIN.")
+                return True
+        except Exception:
+            pass
+        print("PIN incorreto.")
+    print("Sessão bloqueada. O ULTRON não pode ser usado sem desbloqueio.")
+    return False
+
+
 # ---------- modos ----------
+
+
 def modo_texto():
+    if not _desbloquear_inicial():
+        return
     cerebro.NOTIFICADORES.append(lambda t: print(f"\nUltron: {t}"))
     print("Ultron em modo texto. Digite 'sair' para encerrar.")
     while True:
@@ -260,6 +307,13 @@ def modo_voz(bandeja=False, entrada_teclado=True, stop_event=None,
         erro_audio = None
         ultimo_texto_usuario = None   # último reconhecimento do usuário (para correções pessoais)
         while stop_event is None or not stop_event.is_set():
+            if not sessao.estado().get("desbloqueada"):
+                publicar_estado("bloqueado")
+                if stop_event is not None:
+                    stop_event.wait(0.2)
+                else:
+                    time.sleep(0.2)
+                continue
             if pausado.is_set():
                 if not pausado_reportado:
                     publicar_estado("pausado")
