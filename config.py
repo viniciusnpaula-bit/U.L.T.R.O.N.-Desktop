@@ -144,6 +144,9 @@ try:
 except ValueError:
     JANELA_SEGUIMENTO = 6.0
 PIN = _env("ULTRON_PIN")   # opcional: exigido em ações CRÍTICAS (digitado no teclado/Telegram, nunca por voz)
+# Preferido: hash PBKDF2 do PIN (tools/definir_pin.py). Quando presente, ULTRON_PIN
+# em texto é ignorado; o texto só continua valendo por compatibilidade.
+PIN_HASH = _env("ULTRON_PIN_HASH")
 TELEGRAM_TOKEN = _env("TELEGRAM_TOKEN")
 _uid = _env("TELEGRAM_USER_ID")
 TELEGRAM_USER_ID = int(_uid) if _uid.isdigit() else 0

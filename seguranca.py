@@ -3,7 +3,9 @@
 Fluxo (ferramentas.executar é o único portão):
   ferramenta -> classificação (risco + operação + alvo) -> autorizar() -> ALLOW | CONFIRM | DENY -> log -> execução
 """
+import base64
 import copy
+import hashlib
 import hmac
 import json
 import logging
@@ -29,7 +31,8 @@ _SEGREDOS = re.compile(r"(?:gsk_|AIza|sk-|ghp_|xox[bap]-)[A-Za-z0-9_\-]{8,}|\b\d
 def redigir(texto):
     """Troca por *** qualquer chave de API, token ou PIN que apareça em um texto."""
     t = str(texto)
-    for s in (*config.CHAVES.values(), config.TELEGRAM_TOKEN, config.PIN, *SEGREDOS_COFRE):
+    for s in (*config.CHAVES.values(), config.TELEGRAM_TOKEN, config.PIN,
+              getattr(config, "PIN_HASH", ""), *SEGREDOS_COFRE):
         if s and len(s) >= 4:
             t = t.replace(s, "***")
     return _SEGREDOS.sub("***", t)
@@ -264,8 +267,43 @@ def autorizar(cls, ferramenta="", origem="desconhecida"):
     return DENY, "unknown_risk_level"
 
 
+def pin_configurado():
+    """True quando há PIN utilizável: hash (preferido) ou texto por compatibilidade."""
+    return bool(getattr(config, "PIN_HASH", "") or config.PIN)
+
+
+_avisou_pin_texto = False
+
+
+def _pin_por_hash(texto, guardado):
+    """Confere o PIN contra 'pbkdf2_sha256$iteracoes$salt$hash' (base64 urlsafe)."""
+    try:
+        esquema, iteracoes, salt_b64, hash_b64 = guardado.split("$")
+        if esquema != "pbkdf2_sha256":
+            return False
+        salt = base64.urlsafe_b64decode(salt_b64 + "=" * (-len(salt_b64) % 4))
+        esperado = base64.urlsafe_b64decode(hash_b64 + "=" * (-len(hash_b64) % 4))
+        calculado = hashlib.pbkdf2_hmac("sha256", texto.encode(), salt, int(iteracoes))
+        return hmac.compare_digest(calculado, esperado)
+    except (ValueError, TypeError):
+        return False
+
+
 def pin_valido(texto):
-    return bool(config.PIN) and hmac.compare_digest(str(texto).strip().encode(), config.PIN.encode())
+    global _avisou_pin_texto
+    texto = str(texto).strip()
+    if not texto:
+        return False
+    guardado = getattr(config, "PIN_HASH", "")
+    if guardado:
+        return _pin_por_hash(texto, guardado)
+    if config.PIN:
+        if not _avisou_pin_texto:
+            _avisou_pin_texto = True
+            log.warning("PIN em texto no .env (ULTRON_PIN); rode tools/definir_pin.py "
+                        "para guardar só o hash.")
+        return hmac.compare_digest(texto.encode(), config.PIN.encode())
+    return False
 
 
 def novo_pedido(ferramenta, args, cls, origem):
@@ -277,7 +315,7 @@ def novo_pedido(ferramenta, args, cls, origem):
     desbloqueada = origem in ORIGENS_LOCAIS and sessao.estado()["desbloqueada"]
     return {"id": uuid.uuid4().hex[:8], "acao": ferramenta, "risco": cls.risco, "origem": origem,
             "args": sanitizar_args(args), "ts": agora, "expira": agora + timeout("confirmacao_telegram"),
-            "exige_pin": cls.risco == CRITICO and bool(config.PIN) and not desbloqueada,
+            "exige_pin": cls.risco == CRITICO and pin_configurado() and not desbloqueada,
             "mensagem": f"{aviso}Posso {resumo}? Confirma?"}
 
 

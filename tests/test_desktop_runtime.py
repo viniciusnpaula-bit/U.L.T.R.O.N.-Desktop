@@ -51,6 +51,7 @@ class RuntimeTests(unittest.TestCase):
         self.main = FakeMain()
         self.security = types.SimpleNamespace(
             pin_valido=lambda value: value == "2468",
+            pin_configurado=lambda: bool(config.PIN),
             timeout=lambda name: 0.06,
             log_seg=lambda *args, **kwargs: None,
             redigir=lambda text: text,

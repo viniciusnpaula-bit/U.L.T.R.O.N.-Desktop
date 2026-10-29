@@ -188,8 +188,7 @@ def _desbloquear_inicial() -> bool:
         except Exception:
             pass
     try:
-        import seguranca
-        tem_pin = bool(getattr(config, "PIN", ""))
+        tem_pin = bool(seguranca.pin_configurado())
     except Exception:
         tem_pin = False
     if tem_pin:

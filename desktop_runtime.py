@@ -598,12 +598,14 @@ class DesktopRuntime:
         except Exception:
             hello = {"disponivel": False, "motivo": "Windows Hello indisponível"}
         try:
-            import config
-            pin_configurado = bool(getattr(config, "PIN", ""))
+            security = self._security or importlib.import_module("seguranca")
+        except Exception:
+            security = None
+        try:
+            pin_configurado = bool(security.pin_configurado())
         except Exception:
             pin_configurado = False
         try:
-            security = self._security or importlib.import_module("seguranca")
             irreversiveis = sorted(getattr(security, "IRREVERSIVEIS", ()))
         except Exception:
             irreversiveis = []
@@ -658,15 +660,15 @@ class DesktopRuntime:
             self._log_seg("unlock", "DENY", "pin_locked_out")
             return {"unlocked": False, "error": "too_many_attempts"}
         try:
-            import config
-            tem_pin = bool(getattr(config, "PIN", ""))
+            security = self._security or importlib.import_module("seguranca")
+            tem_pin = bool(security.pin_configurado())
         except Exception:
+            security = None
             tem_pin = False
         if not tem_pin:
             self._log_seg("unlock", "DENY", "no_method_configured")
             return {"unlocked": False, "error": "no_method_configured"}
         try:
-            security = self._security or importlib.import_module("seguranca")
             valido = bool(security.pin_valido(pin))
         except Exception:
             valido = False
