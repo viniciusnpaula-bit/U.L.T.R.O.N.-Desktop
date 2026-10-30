@@ -171,6 +171,11 @@ TELEGRAM_TOKEN = _env("TELEGRAM_TOKEN")
 _uid = _env("TELEGRAM_USER_ID")
 TELEGRAM_USER_ID = int(_uid) if _uid.isdigit() else 0
 
+# Integrações opcionais (configuráveis pelo cofre). Vazio = recurso desligado.
+SPOTIFY_CLIENT_ID = _env("SPOTIFY_CLIENT_ID")
+SPOTIFY_CLIENT_SECRET = _env("SPOTIFY_CLIENT_SECRET")
+SPOTIFY_REFRESH = _env("SPOTIFY_REFRESH")
+
 # O cofre cifrado (dados/cofre.json) tem precedência sobre o .env. Falha aqui nunca
 # impede o app de abrir: o .env continua valendo.
 try:

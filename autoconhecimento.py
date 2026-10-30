@@ -64,7 +64,8 @@ _GRUPOS = {
     "câmera e gestos": (
         "controlar_mouse_com_gesto", "detectar_gestos_mao", "detectar_objetos", "webcam_foto",
     ),
-    "mídia e palco": ("controlar_midia", "mostrar_na_interface", "youtube"),
+    "mídia e palco": ("controlar_midia", "mostrar_na_interface", "spotify_buscar",
+                      "spotify_estado", "spotify_tocar", "youtube"),
     "memória e lembretes": (
         "cancelar_lembrete", "criar_lembrete", "esquecer_fato", "lembrar_fato", "listar_lembretes",
         "obsidian_anexar", "obsidian_buscar", "obsidian_criar", "obsidian_diario",

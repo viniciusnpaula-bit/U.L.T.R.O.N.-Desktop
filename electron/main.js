@@ -21,7 +21,7 @@ const LINK_HOSTS = Object.freeze([
   'aistudio.google.com', 'console.groq.com', 'build.nvidia.com',
   'platform.openai.com', 'openrouter.ai', 'console.mistral.ai',
   'platform.deepseek.com', 'cloud.cerebras.ai', 'api.together.xyz',
-  'console.x.ai', 't.me',
+  'console.x.ai', 't.me', 'myaccount.google.com', 'developer.spotify.com',
 ]);
 const quickActions = Object.freeze({
   browser: 'Abra o navegador', spotify: 'Abra o Spotify', media: 'Pause ou retome a música',

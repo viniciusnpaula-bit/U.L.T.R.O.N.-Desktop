@@ -1282,6 +1282,48 @@ def controlar_midia(acao: str, vezes: int = 1):
     return "Feito."
 
 
+@ferramenta("Toca no Spotify a primeira faixa que corresponde à busca.", risco=BAIXO,
+            params={"consulta": "Faixa, artista ou playlist"})
+def spotify_tocar(consulta: str):
+    import spotify
+    if not spotify.configurado():
+        return "O Spotify não está configurado (client id, secret e refresh token no cofre)."
+    try:
+        return spotify.tocar(consulta)
+    except Exception as e:      # noqa: BLE001 - a mensagem ao usuário não pode virar traceback
+        return f"Não consegui falar com o Spotify: {e}"
+
+
+@ferramenta("Busca faixas, artistas e playlists no Spotify.", risco=BAIXO,
+            params={"consulta": "Faixa, artista ou playlist"})
+def spotify_buscar(consulta: str):
+    import spotify
+    if not spotify.configurado():
+        return "O Spotify não está configurado (client id, secret e refresh token no cofre)."
+    try:
+        resultado = spotify.buscar(consulta)
+    except Exception as e:      # noqa: BLE001
+        return f"Não consegui falar com o Spotify: {e}"
+    linhas = [f"- {x['nome']} — {x['artista']}" for x in resultado["faixas"]]
+    if not linhas:
+        return "Nada encontrado no Spotify."
+    return _dados("Faixas no Spotify:\n" + "\n".join(linhas))
+
+
+@ferramenta("Diz o que está tocando no Spotify agora.", risco=BAIXO)
+def spotify_estado():
+    import spotify
+    if not spotify.configurado():
+        return "O Spotify não está configurado (client id, secret e refresh token no cofre)."
+    try:
+        atual = spotify.estado()
+    except Exception as e:      # noqa: BLE001
+        return f"Não consegui falar com o Spotify: {e}"
+    if not atual["tocando"]:
+        return "Nada tocando no Spotify agora."
+    return _dados(f"Tocando {atual['faixa']} — {atual['artista']} em {atual['dispositivo']}.")
+
+
 @ferramenta("Informações do PC: CPU, memória e bateria.")
 def info_sistema():
     import psutil
