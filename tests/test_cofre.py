@@ -148,6 +148,12 @@ class CofreTests(unittest.TestCase):
         cofre.remover("groq")
         self.assertEqual(cerebro._clientes, {})
 
+    def test_tela_oferece_todas_as_credenciais_para_salvar(self):
+        html = (Path(__file__).resolve().parents[1] / "electron" / "site" / "index.html")
+        html = html.read_text(encoding="utf-8")
+        for nome in cofre.CREDENCIAIS:
+            self.assertIn(f'value="{nome}"', html, nome)
+
     def test_provedor_com_chave_fora_da_ordem_ainda_e_usado(self):
         import cerebro
         with patch.object(cerebro.config, "PROVEDORES", ["groq"]):
