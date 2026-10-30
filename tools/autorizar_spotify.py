@@ -23,7 +23,10 @@ from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
 
+import cofre
 import config
+
+cofre.aplicar_na_config()          # o client id salvo pela interface vale aqui
 
 REDIRECT = "http://127.0.0.1:8888/callback"
 ESCOPOS = "user-modify-playback-state user-read-playback-state"

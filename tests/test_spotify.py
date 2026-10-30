@@ -72,5 +72,19 @@ class SpotifyTests(unittest.TestCase):
         self.assertEqual(ferramentas.FERRAMENTAS["spotify_tocar"]["risco"], "BAIXO")
 
 
+class IntencaoSpotifyTests(unittest.TestCase):
+    def test_pedido_com_conteudo_vai_para_o_nucleo(self):
+        import cerebro
+        for texto in ("toca Daft Punk no Spotify", "toque Daft Punk no Spotify",
+                      "toca uma música no Spotify", "abra o Spotify e toque Daft Punk"):
+            self.assertFalse(cerebro._pedido_abrir_spotify(texto), texto)
+
+    def test_abrir_o_app_continua_no_atalho(self):
+        import cerebro
+        for texto in ("abre o Spotify", "Ultron, abra o Spotify", "toque Spotify",
+                      "inicie o spotify"):
+            self.assertTrue(cerebro._pedido_abrir_spotify(texto), texto)
+
+
 if __name__ == "__main__":
     unittest.main()

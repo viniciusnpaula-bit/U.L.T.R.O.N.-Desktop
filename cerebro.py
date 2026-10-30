@@ -551,13 +551,11 @@ def _loop(msgs, confirmar, origem):
 
 
 def _pedido_abrir_spotify(texto):
-    """Reconhece pedidos explícitos de abrir/tocar no Spotify sem acionar mídia global."""
-    normalizado = seguranca.normalizar(texto)
-    normalizado = re.sub(r"[^a-z0-9]+", " ", normalizado).strip()
-    return bool(re.search(r"\bspotify\b", normalizado) and
-                re.search(r"\b(abra|abrir|abre|inicie|iniciar|inicia|toque|toca|tocar|reproduza|reproduzir|play|open)\b",
-                          normalizado) and
-                not re.search(r"\b(pause|pausar|pausa|pare|parar|stop)\b", normalizado))
+    """Só "abra o Spotify"/"toque Spotify" abre o app; "toca X no Spotify" fica com o núcleo."""
+    normalizado = re.sub(r"[^a-z0-9]+", " ", seguranca.normalizar(texto)).strip()
+    verbo = (r"(?:abra|abrir|abre|inicie|iniciar|inicia|toque|toca|tocar|reproduza|"
+             r"reproduzir|play|open)")
+    return bool(re.fullmatch(rf"(?:ei |ok )?(?:ultron )?{verbo} (?:o |a )?spotify", normalizado))
 
 
 def _pedido_noticia(texto):
