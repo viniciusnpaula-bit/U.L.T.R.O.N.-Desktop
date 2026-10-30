@@ -308,6 +308,29 @@ class DesktopRuntime:
         import personalidade
         return {"instrucao": personalidade.frase_do_sistema(), "atual": personalidade.carregar()}
 
+    def skills_listar(self) -> dict:
+        import skills
+        return {
+            "skills": [
+                {"slug": s.slug, "nome": s.nome, "descricao": s.descricao,
+                 "quando": s.quando, "estado": skills.estado(s)}
+                for s in skills.listar()
+            ],
+            "pendentes": [
+                {"slug": s.slug, "nome": s.nome, "quando": s.quando, "corpo": s.corpo}
+                for s in skills.pendentes()
+            ],
+        }
+
+    def skills_aprovar(self, nome: str) -> dict:
+        import skills
+        return {"ok": True, "slug": skills.aprovar(nome)}
+
+    def skills_descartar(self, nome: str) -> dict:
+        import skills
+        skills.descartar(nome)
+        return {"ok": True}
+
     def _confirmar_interpretacao(self, fala: str, incerteza: dict, timeout: float = 20.0) -> bool:
         """Pede confirmação ao painel quando o reconhecimento ficou ambíguo.
 

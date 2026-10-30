@@ -567,7 +567,7 @@ function mostrarPalco(dados) {
       corpo.append(palcoElemento('iframe', {
         src: fonte, title: titulo, allowfullscreen: '',
         allow: 'autoplay; encrypted-media; picture-in-picture; fullscreen',
-        referrerpolicy: 'no-referrer',
+        referrerpolicy: 'strict-origin-when-cross-origin',
         sandbox: 'allow-scripts allow-same-origin allow-presentation',
       }));
     } else {

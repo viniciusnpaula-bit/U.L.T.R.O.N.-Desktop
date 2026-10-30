@@ -1,3 +1,32 @@
+ULTRON Desktop 2.0.0 — skills + registro emocional na voz
+
+- Skills em Markdown (`dados/skills/<slug>/SKILL.md`): índice injetado no prompt
+  do sistema, fila de aprovação (voz/terminal e Telegram), curador por último uso
+  com estado derivado (ativo/obsoleto/arquivado) e quatro ferramentas
+  (`usar_skill`, `listar_skills`, `criar_skill`, `descartar_skill`).
+- Registro emocional na voz (1.20.0): o modelo abre a resposta com um registro
+  curto e reconhece o sentimento, com delta de tom e velocidade limitado a 15%.
+- Nenhuma chamada extra de IA: habilidades e registro saem da mesma resposta;
+  parser local remove marcas do texto da tela e da fala.
+- Testes: suíte existente + novos casos de skills e registro emocional, sem IA
+  real (respostas simuladas).
+
+ULTRON Desktop 1.20.0 — registro emocional na voz
+
+- O modelo passa a abrir a resposta com um registro curto (`neutro`, `lamento`,
+  `encorajador`, `alerta`, `comemorando`, `serio`, `duvida`) e a reconhecer o
+  sentimento em uma frase antes da solução. Exemplo: diante de "perdi uma
+  venda", responde "Lamento, senhor. Vamos melhorar a ideia para vender mais."
+- Nenhuma chamada extra de IA: o registro sai da mesma resposta, e um parser
+  local determinístico remove a marca do texto da tela e da fala.
+- A mesma voz do painel **Voz e Jeito** ganha um delta de tom e velocidade por
+  registro, limitado a 15%; `neutro` mantém exatamente a voz configurada. O mapa
+  fica em `registros_emocionais.json` e valores absurdos são cortados.
+- Os 13 estilos de personalidade continuam iguais: o estilo define o
+  vocabulário, o registro ajusta só a prosódia de cada resposta.
+- Logs continuam sem o texto da conversa; no máximo o nome do registro.
+- Testes: suíte existente + 17 novos casos, sem IA real (respostas simuladas).
+
 ULTRON Desktop 1.19.0 — interface espacial
 
 - Nova casca espacial: campo estelar, HUD de vidro, dock de bate-papo, dock de

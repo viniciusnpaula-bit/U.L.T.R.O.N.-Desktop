@@ -1,4 +1,6 @@
 """Voz: fala (edge-tts, voz grave) e escuta (microfone + reconhecimento do Google, grátis)."""
+from __future__ import annotations
+
 import asyncio
 import json
 import collections
@@ -20,6 +22,7 @@ import sounddevice as sd
 import speech_recognition as sr
 
 import config
+import registro
 import seguranca
 from microphone_devices import resolve_input_device
 
@@ -176,7 +179,7 @@ def _sintetizar_nuvem(texto, arquivo):
     Path(arquivo).write_bytes(resposta.content)
 
 
-async def _sintetizar(texto, arquivo):
+async def _sintetizar(texto, arquivo, emocao=registro.NEUTRO):
     if config.VOZ_NUVEM_CHAVE and config.VOZ_NUVEM_ID:
         try:
             _sintetizar_nuvem(texto, arquivo)
@@ -184,7 +187,9 @@ async def _sintetizar(texto, arquivo):
         except Exception as e:
             seguranca.log.warning(f"Voz clonada na nuvem falhou ({type(e).__name__}); usando Edge TTS.")
     import edge_tts
-    await edge_tts.Communicate(texto, config.VOZ, rate=config.VOZ_RATE, pitch=config.VOZ_PITCH).save(arquivo)
+    # o delta é somado à voz do painel "Voz e Jeito", nunca a substitui
+    rate, pitch = registro.aplicar_voz(emocao, config.VOZ_RATE, config.VOZ_PITCH)
+    await edge_tts.Communicate(texto, config.VOZ, rate=rate, pitch=pitch).save(arquivo)
 
 
 def _tocar(arquivo):
@@ -240,11 +245,16 @@ def falar_partes(partes, eco=0.3):
         base = os.path.join(tempfile.gettempdir(), f"ultron_{os.getpid()}_{uuid.uuid4().hex[:6]}")
         fila, parou = queue.Queue(), threading.Event()
         completo = []
+        tom = {"nome": registro.NEUTRO, "decidido": False}
 
         def produzir():
             indice = 0
             try:
                 for bruto in partes:
+                    if not tom["decidido"]:
+                        # decidido UMA vez para a resposta inteira, no primeiro item
+                        tom["nome"] = getattr(partes, "registro", registro.NEUTRO) or registro.NEUTRO
+                        tom["decidido"] = True
                     if parou.is_set() or _parar.is_set():
                         break
                     for frase in _frases(str(bruto or "").strip()):
@@ -254,7 +264,7 @@ def falar_partes(partes, eco=0.3):
                         arq = f"{base}_{indice}.mp3"
                         indice += 1
                         try:
-                            asyncio.run(_sintetizar(frase, arq))
+                            asyncio.run(_sintetizar(frase, arq, tom["nome"]))
                         except Exception as e:
                             seguranca.log.warning(f"Voz online falhou ({e}); usando voz offline.")
                             fila.put((None, " ".join(completo[indice - 1:])))
@@ -325,7 +335,7 @@ def testar_voz(texto="Ultrason, testes de voz concluídos."):
                 "detalhe": type(e).__name__}
 
 
-def falar(texto, eco=0.5):
+def falar(texto, eco=0.5, emocao=registro.NEUTRO):
     texto = limpar(texto)
     if not texto:
         return
@@ -342,7 +352,7 @@ def falar(texto, eco=0.5):
                     break
                 arq = f"{base}_{i}.mp3"
                 try:
-                    asyncio.run(_sintetizar(f, arq))
+                    asyncio.run(_sintetizar(f, arq, emocao))
                 except Exception as e:
                     seguranca.log.warning(f"Voz online falhou ({e}); usando voz offline.")
                     fila.put((None, " ".join(frases[i:])))

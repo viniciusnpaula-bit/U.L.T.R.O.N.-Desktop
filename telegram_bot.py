@@ -143,6 +143,31 @@ async def _botao(update, ctx):
         await q.answer("Confirmação expirada ou já usada.", show_alert=True)
 
 
+def _comando_skills(texto: str):
+    """Comandos de skill, resolvidos fora do LLM (o modelo não aprova nada)."""
+    partes = (texto or "").strip().split()
+    if not partes or not partes[0].startswith("/"):
+        return None
+    comando = partes[0].lower()
+    if comando == "/skills":
+        import skills
+        pendentes = skills.pendentes()
+        if not pendentes:
+            return "Nenhuma skill pendente."
+        return "\n\n".join(f"*{s.slug}* — {s.quando}\n{s.corpo}" for s in pendentes)
+    if comando in ("/aprovar", "/descartar") and len(partes) == 2:
+        import skills
+        try:
+            if comando == "/aprovar":
+                slug = skills.aprovar(partes[1])
+                return f"Skill '{slug}' aprovada.\n\n{skills.corpo(slug)}"
+            skills.descartar(partes[1])
+            return f"Skill pendente '{partes[1]}' descartada."
+        except ValueError as e:
+            return str(e)
+    return None
+
+
 async def _mensagem(update, ctx):
     from telegram import InlineKeyboardButton, InlineKeyboardMarkup
     if not update.effective_user or not autorizado(update.effective_user.id):
@@ -192,6 +217,11 @@ async def _mensagem(update, ctx):
                 _pin_espera["evento"] = None
                 _pin_espera["valor"] = None
         return valor
+
+    atalho = _comando_skills(texto)
+    if atalho is not None:
+        await update.message.reply_text(atalho)
+        return
 
     resposta = await asyncio.to_thread(cerebro.processar, texto, Confirmador(enviar, pedir_pin), "telegram")
     if resposta:

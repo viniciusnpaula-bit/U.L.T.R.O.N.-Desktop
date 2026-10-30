@@ -31,6 +31,11 @@ def criar_backup(destino: Path, dados: Path = DADOS) -> Path:
     with zipfile.ZipFile(temporario, "w", zipfile.ZIP_DEFLATED) as pacote:
         for arquivo in presentes:
             pacote.write(arquivo, arcname=f"dados/{arquivo.name}")
+        raiz_skills = dados / "skills"
+        if raiz_skills.is_dir():
+            for caminho in raiz_skills.rglob("*"):
+                if caminho.is_file():
+                    pacote.write(caminho, arcname=f"dados/skills/{caminho.relative_to(raiz_skills).as_posix()}")
     temporario.replace(destino)
     return destino
 

@@ -1,0 +1,9 @@
+{
+  "neutro": { "rate": 0, "pitch": 0 },
+  "lamento": { "rate": -8, "pitch": -8 },
+  "encorajador": { "rate": 5, "pitch": 4 },
+  "alerta": { "rate": 10, "pitch": 3 },
+  "comemorando": { "rate": 8, "pitch": 6 },
+  "serio": { "rate": -5, "pitch": -5 },
+  "duvida": { "rate": -3, "pitch": 0 }
+}

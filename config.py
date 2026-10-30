@@ -131,6 +131,17 @@ except ValueError:
     FATO_MAX_TOTAL = 50
 FATO_MIN_BUSCA = 3   # caracteres úteis para apagar com segurança
 
+# Skills: procedimentos em dados/skills. Desligar não toca no disco.
+SKILLS_ATIVO = (_env("SKILLS_ATIVO", "1") or "1").lower() not in (
+    "0", "nao", "não", "false", "off")
+SKILLS_MAX_INDICE = max(1, _num_env("SKILLS_MAX_INDICE", 15, int))
+SKILLS_CORPO_MAX = max(200, _num_env("SKILLS_CORPO_MAX", 2000, int))
+SKILLS_PENDENTES_MAX = max(1, _num_env("SKILLS_PENDENTES_MAX", 3, int))
+SKILLS_PENDENTE_DIAS = max(1, _num_env("SKILLS_PENDENTE_DIAS", 7, int))
+SKILLS_STALE_DIAS = max(1, _num_env("SKILLS_STALE_DIAS", 30, int))
+SKILLS_ARQUIVAR_DIAS = max(2, _num_env("SKILLS_ARQUIVAR_DIAS", 90, int))
+SKILLS_MAX_TOTAL = max(1, _num_env("SKILLS_MAX_TOTAL", 100, int))
+
 # Memória no Obsidian: pasta do vault (vazio = Documents/ULTRON-Vault), quantas
 # notas entram no contexto de cada resposta (0 desliga a leitura automática) e
 # se a integração está ligada.

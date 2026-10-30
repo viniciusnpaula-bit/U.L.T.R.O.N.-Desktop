@@ -32,7 +32,7 @@ class FalarPartesTests(unittest.TestCase):
             if len(tocadas) == 1:
                 liberar.set()          # depois de tocar a 1ª, o gerador pode soltar a 2ª
 
-        async def sintetizar_async(texto, arquivo):
+        async def sintetizar_async(texto, arquivo, *_args):
             sintetizar(texto, arquivo)
 
         with patch.object(voz, "_sintetizar", sintetizar_async), \
@@ -49,7 +49,7 @@ class FalarPartesTests(unittest.TestCase):
         import voz
 
         tocadas = []
-        async def sintetizar_async(_t, arquivo):
+        async def sintetizar_async(_t, arquivo, *_args):
             Path(arquivo).write_bytes(b"mp3")
         def tocar(_arquivo):
             tocadas.append(1)
@@ -151,7 +151,9 @@ class SegurarParaFalarTests(unittest.TestCase):
                 return "ligar as luzes"
 
         ouvido.rec = Rec()
-        with patch.object(voz, "sr", fake_sr), patch.object(voz, "seguranca"):
+        # sem o motor remoto: o teste quer exercitar o reconhecimento "normal"
+        with patch.object(voz, "sr", fake_sr), patch.object(voz, "seguranca"), \
+                patch.object(voz, "transcricao", None):
             texto = ouvido.escutar_manual()
         self.assertEqual(texto, "ligar as luzes")
         self.assertIs(vistos["gatilho"], ouvido.pedido_manual)

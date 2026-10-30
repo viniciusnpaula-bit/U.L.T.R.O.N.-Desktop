@@ -240,14 +240,39 @@ _FEEDS = {
 }
 
 
-@ferramenta("Últimas manchetes de notícias.", params={"tema": "geral, tecnologia, economia, esporte ou mundo"})
+def _imagem_da_entrada(e):
+    """Extrai a URL da imagem de uma entrada de feed (media_content > summary > None)."""
+    mc = e.get("media_content") or []
+    for item in mc:
+        if isinstance(item, dict) and item.get("url"):
+            return item["url"]
+    summary = e.get("summary") or ""
+    achado = re.search(r'<img[^>]+src="([^"]+)"', summary)
+    return achado.group(1) if achado else None
+
+
+@ferramenta("Últimas manchetes de notícias. Expõe a imagem da notícia de destaque "
+            "para ser mostrada no palco.", params={"tema": "geral, tecnologia, economia, esporte ou mundo"})
 def noticias(tema: str = "geral"):
     import feedparser
     feed = feedparser.parse(_FEEDS.get(tema.lower().strip(), _FEEDS["geral"]))
-    itens = [e.get("title", "") for e in feed.entries[:6]]
-    if not itens:
+    linhas = []
+    imagem_destaque = None
+    titulo_destaque = ""
+    for e in feed.entries[:6]:
+        titulo = e.get("title", "")
+        linhas.append(f"- {titulo}")
+        if imagem_destaque is None:
+            img = _imagem_da_entrada(e)
+            if img:
+                imagem_destaque = img
+                titulo_destaque = titulo
+    if not linhas:
         return "Não consegui carregar as notícias agora."
-    return _dados("\n".join(f"- {t}" for t in itens))
+    texto = "\n".join(linhas)
+    if imagem_destaque:
+        texto += f"\n\n[IMAGEM_DESTAQUE] {titulo_destaque} || {imagem_destaque}"
+    return _dados(texto)
 
 
 @ferramenta("Pesquisa geral na web (DuckDuckGo) para informações atuais.", params={"consulta": "O que pesquisar"})
@@ -1903,3 +1928,69 @@ def mostrar_na_interface(tipo: str = "auto", alvo: str = "", titulo: str = ""):
     if not resultado.get("ok"):
         return f"Não consegui mostrar: {resultado.get('erro', 'motivo desconhecido')}."
     return resultado.get("mensagem", "Mostrado no palco.")
+
+
+# ---------- skills ----------
+def _skills_ativos() -> bool:
+    import config
+    return bool(getattr(config, "SKILLS_ATIVO", True))
+
+
+@ferramenta("Carrega o procedimento de uma skill aprovada pelo usuário. Use quando o "
+            "pedido casar com a descrição de uma skill do índice.",
+            params={"nome": "Nome ou slug da skill"})
+def usar_skill(nome: str) -> str:
+    import skills
+    if not _skills_ativos():
+        return "Skills estão desativadas."
+    texto = skills.corpo(nome)
+    if not texto:
+        if skills.slugificar(nome) in [s.slug for s in skills.pendentes()]:
+            return f"Skill pendente de aprovação: {nome}"
+        return f"Skill não encontrada: {nome}"
+    skills.marcar_uso(skills.slugificar(nome))
+    return f"Skill {nome}:\n{texto}"
+
+
+@ferramenta("Lista as skills (ativas, obsoletas, arquivadas e pendentes) com o estado de cada uma.")
+def listar_skills() -> str:
+    import skills
+    if not _skills_ativos():
+        return "Skills estão desativadas."
+    linhas = [f"- {s.nome} [{skills.estado(s)}]" for s in skills.listar()]
+    linhas += [f"- {s.nome} [pendente de aprovação]" for s in skills.pendentes()]
+    return "\n".join(linhas) if linhas else "Nenhuma skill cadastrada."
+
+
+@ferramenta("Cria uma skill nova a partir de um procedimento que se repetiu. Ela fica "
+            "pendente até o usuário aprovar; não vale sozinha.",
+            params={"nome": "Nome curto", "descricao": "O que ela faz",
+                    "quando": "Quando usar", "corpo": "Passo a passo"},
+            risco=MEDIO,
+            classificar=lambda **_: Classificacao(MEDIO, "skill.criar"))
+def criar_skill(nome: str, descricao: str, quando: str, corpo: str) -> str:
+    import skills
+    if not _skills_ativos():
+        return "Skills estão desativadas."
+    slug = skills.slugificar(nome)
+    if any(s.slug == slug for s in skills.listar() + skills.pendentes()):
+        return f"Já existe skill com esse nome: {slug}"
+    try:
+        slug = skills.criar(nome, descricao, quando, corpo)
+    except ValueError as e:
+        return str(e)
+    return f"Skill '{slug}' guardada como pendente. O usuário precisa aprovar para ela valer."
+
+
+@ferramenta("Descarta uma skill pendente que você criou e não serve mais.",
+            params={"nome": "Nome ou slug da skill pendente"},
+            risco=MEDIO,
+            classificar=lambda **_: Classificacao(MEDIO, "skill.descartar"))
+def descartar_skill(nome: str) -> str:
+    import skills
+    if not _skills_ativos():
+        return "Skills estão desativadas."
+    slug = skills.slugificar(nome)
+    if not skills.descartar(slug):
+        return f"Skill pendente não encontrada: {slug}"
+    return f"Skill pendente '{slug}' descartada."

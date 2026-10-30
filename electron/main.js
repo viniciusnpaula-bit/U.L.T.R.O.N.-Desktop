@@ -326,6 +326,24 @@ function createMiniWindow() {
   return miniWindow;
 }
 
+// No build empacotado a interface vem de file://, então o embed do YouTube sai
+// sem Referer e com origem nula; o player recusa com o erro 153. Reaplica as
+// headers que o YouTube espera apenas nas requisições do embed.
+function fixYoutubeEmbedHeaders() {
+  session.defaultSession.webRequest.onBeforeSendHeaders(
+    { urls: ['https://*.youtube.com/embed/*', 'https://*.youtube-nocookie.com/embed/*'] },
+    (details, callback) => {
+      const requestHeaders = { ...details.requestHeaders };
+      if (!details.referrer || details.referrer.startsWith('file://')) {
+        const origem = new URL(details.url).origin;
+        requestHeaders.Referer = `${origem}/`;
+        requestHeaders.Origin = origem;
+      }
+      callback({ requestHeaders });
+    },
+  );
+}
+
 function createWindow() {
   const indexFile = path.join(__dirname, 'site', 'index.html');
   mainWindow = new BrowserWindow({
@@ -354,6 +372,7 @@ app.whenReady().then(() => {
     }
   });
   registerApiHandlers();
+  fixYoutubeEmbedHeaders();
   createWindow();
   registrarEnergia();
   restringirCamera();

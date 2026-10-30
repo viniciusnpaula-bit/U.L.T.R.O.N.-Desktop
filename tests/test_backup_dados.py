@@ -27,6 +27,13 @@ class BackupDadosTests(unittest.TestCase):
             self.assertEqual(pacote.read("dados/ultron.db"), b"banco")
             self.assertEqual(pacote.read("dados/.cofre.chave"), b"chave")
 
+    def test_zip_leva_skills(self):
+        raiz = self.dados / "skills" / "minha-skill"
+        raiz.mkdir(parents=True)
+        (raiz / "SKILL.md").write_text("---\nnome: x\n---\n", encoding="utf-8")
+        with zipfile.ZipFile(criar_backup(self.zip, self.dados)) as pacote:
+            self.assertIn("dados/skills/minha-skill/SKILL.md", pacote.namelist())
+
     def test_sem_banco_falha_sem_criar_zip(self):
         (self.dados / "ultron.db").unlink()
         with self.assertRaises(FileNotFoundError):

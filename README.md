@@ -200,6 +200,28 @@ Ajustes (`Ctrl+,`) → **Voz e Jeito** reúne quatro abas:
 O botão **ver instrução** mostra exatamente o trecho de personalidade que a IA
 recebe, sem chamar nenhum provedor.
 
+### Registro emocional (1.20.0)
+
+O modelo já escolhe, na mesma resposta e sem chamada extra, um registro curto
+(`neutro`, `lamento`, `encorajador`, `alerta`, `comemorando`, `serio` ou
+`duvida`) e reconhece o sentimento em uma frase antes de resolver o problema. A
+marca `[[registro:NOME]]` é removida do texto na tela e na fala por um parser
+local; o nome só ajusta o tom e a velocidade da **mesma** voz escolhida em
+**Voz e Jeito**, com desvio máximo de 15% (o `neutro` não muda nada). O mapa
+`registro -> {rate, pitch}` fica em `registros_emocionais.json`; valores fora do
+limite são cortados. Os 13 estilos continuam valendo: o estilo dá o vocabulário,
+o registro ajusta só a prosódia de cada resposta.
+
+### Skills (2.0.0)
+
+Procedimentos em Markdown ficam em `dados/skills/<slug>/SKILL.md` (frontmatter
+com `nome`, `descricao`, `quando`). O ULTRON vê só o índice no prompt e carrega
+o corpo quando precisa, via ferramenta `usar_skill(nome)`. Skills criadas pelo
+próprio agente entram como **pendentes**: valem só depois de aprovadas por você
+(voz: "aprova a skill X"; Telegram: `/skills` e `/aprovar X`; Desktop:
+`POST /api/v1/skills/approve`). Sem uso por 30 dias vira obsoleta; 90 dias,
+arquivada — nada é apagado. `SKILLS_ATIVO=0` desliga tudo.
+
 ## Atualizações
 
 Ajustes (`Ctrl+,`) → **verificar atualização**. O ULTRON consulta o último Release
