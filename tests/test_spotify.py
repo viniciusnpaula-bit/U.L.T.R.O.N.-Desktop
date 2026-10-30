@@ -40,6 +40,22 @@ class SpotifyTests(unittest.TestCase):
              mock.patch("spotify._pedir", return_value=(403, {"reason": "PREMIUM_REQUIRED"})):
             self.assertIn("Premium", spotify.tocar("x"))
 
+    def test_tocar_confirma_antes_de_dizer_que_toca(self):
+        with mock.patch("spotify.buscar", return_value={"faixas": [
+                {"nome": "One More Time", "artista": "Daft Punk", "uri": "spotify:track:1"}]}), \
+             mock.patch("spotify._pedir", side_effect=[
+                (204, {}), (200, {"is_playing": True, "item": {"uri": "spotify:track:1"}})]):
+            self.assertEqual(spotify.tocar("daft punk"), "Tocando One More Time — Daft Punk.")
+
+    def test_tocar_nao_mente_quando_o_204_nao_inicia(self):
+        with mock.patch("spotify.buscar", return_value={"faixas": [
+                {"nome": "x", "artista": "y", "uri": "spotify:track:2"}]}), \
+             mock.patch("spotify._pedir", return_value=(204, {"is_playing": False, "item": None})), \
+             mock.patch("spotify.time.sleep"):
+            saida = spotify.tocar("x")
+        self.assertIn("não confirmei", saida)
+        self.assertNotIn("Tocando", saida)
+
     def test_buscar_devolve_faixas_e_artistas(self):
         corpo = {"tracks": {"items": [{"name": "One More Time", "uri": "spotify:track:1",
                                        "artists": [{"name": "Daft Punk"}]}]},

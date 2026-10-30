@@ -81,6 +81,18 @@ def buscar(consulta: str) -> dict:
     }
 
 
+def _confirmado(uri: str) -> bool:
+    """Confirma que a faixa pedida começou: o 204 do PUT sozinho não prova."""
+    for tentativa in range(3):
+        if tentativa:
+            time.sleep(0.4)
+        _, corpo = _pedir("GET", "/me/player")
+        item = corpo.get("item") or {}
+        if corpo.get("is_playing") and item.get("uri") == uri:
+            return True
+    return False
+
+
 def tocar(consulta: str) -> str:
     resultado = buscar(consulta)
     if not resultado["faixas"]:
@@ -99,6 +111,9 @@ def tocar(consulta: str) -> str:
         return "A conta não permite controlar a reprodução; o Spotify Premium é necessário."
     if status not in (200, 204):
         return f"Não consegui tocar no Spotify (HTTP {status})."
+    if not _confirmado(faixa["uri"]):
+        return ("O Spotify aceitou a faixa, mas não confirmei que começou. "
+                "Abra o Spotify e toque algo para ativar o dispositivo; aí eu troco a faixa.")
     return f"Tocando {faixa['nome']} — {faixa['artista']}."
 
 
