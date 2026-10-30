@@ -343,6 +343,29 @@ def create_server(runtime, token: str, host: str = "127.0.0.1", port: int = PREF
                         self._send(409, {"error": "no_backup_available"})
                         return
                     self._send(200, {"rolled_back": True})
+                elif path == _PREFIX + "cofre":
+                    import cofre
+                    if set(body) != {"nome", "valor"}:
+                        self._send(400, {"error": "invalid_cofre_payload"})
+                        return
+                    nome, valor = body["nome"], body["valor"]
+                    if (not isinstance(nome, str) or not isinstance(valor, str)
+                            or nome not in cofre.CREDENCIAIS or not 1 <= len(valor) <= 400):
+                        self._send(400, {"error": "invalid_cofre_payload"})
+                        return
+                    self._send(200, runtime.cofre_guardar(nome, valor))
+                elif path == _PREFIX + "cofre/remover":
+                    import cofre
+                    if set(body) != {"nome"} or body["nome"] not in cofre.CREDENCIAIS:
+                        self._send(400, {"error": "invalid_cofre_payload"})
+                        return
+                    self._send(200, runtime.cofre_remover(body["nome"]))
+                elif path == _PREFIX + "cofre/testar":
+                    import cofre
+                    if set(body) != {"nome"} or body["nome"] not in cofre.PROVEDORES:
+                        self._send(400, {"error": "not_testable"})
+                        return
+                    self._send(200, runtime.cofre_testar(body["nome"]))
                 elif path == _PREFIX + "conversation/clear":
                     if body:
                         self._send(400, {"error": "empty_payload_required"})

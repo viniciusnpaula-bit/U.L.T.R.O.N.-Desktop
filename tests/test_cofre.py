@@ -109,9 +109,28 @@ class CofreTests(unittest.TestCase):
         self.assertIn("AES-256-GCM", status["protecao"])
 
     def test_toda_plataforma_tem_link_oficial_https(self):
-        for nome in cofre.PROVEDORES + cofre.OUTROS:
+        for nome in cofre.CREDENCIAIS:
             self.assertIn(nome, cofre.LINKS, nome)
             self.assertTrue(cofre.LINKS[nome].startswith("https://"), nome)
+
+    def test_senha_de_app_do_gmail_ignora_espacos(self):
+        cofre.guardar("email_senha", "abcd efgh ijkl mnop")
+        self.assertEqual(cofre.obter("email_senha"), "abcdefghijklmnop")
+
+    def test_status_inclui_servicos_sem_testavel(self):
+        itens = {item["nome"]: item for item in cofre.status()["itens"]}
+        for nome in ("email_endereco", "email_senha", "spotify_client_id",
+                     "spotify_client_secret", "spotify_refresh"):
+            self.assertIn(nome, itens)
+            self.assertFalse(itens[nome]["testavel"])
+
+    def test_aplicar_na_config_leva_credenciais_de_servico(self):
+        import config
+        cofre.guardar("spotify_client_id", "id-de-teste")
+        with patch.object(config, "SPOTIFY_CLIENT_ID", "", create=True):
+            aplicadas = cofre.aplicar_na_config()["aplicadas"]
+            self.assertEqual(config.SPOTIFY_CLIENT_ID, "id-de-teste")
+        self.assertIn("spotify_client_id", aplicadas)
 
     def test_status_informa_link_e_quais_podem_ser_testados(self):
         itens = {item["nome"]: item for item in cofre.status()["itens"]}

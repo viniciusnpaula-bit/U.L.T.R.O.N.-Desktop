@@ -22,6 +22,7 @@ class FakeRuntime:
         }
         self.events = [{"type": "notification", "message": "online"}]
         self.commands = []
+        self.chamadas = []
         self.confirmations = []
         self.pause_requests = []
         self.shutdown_requested = False
@@ -163,6 +164,16 @@ class FakeRuntime:
     def skills_descartar(self, nome):
         self.skills_descartadas.append(nome)
         return {"ok": True}
+
+    def cofre_guardar(self, nome, valor):
+        self.chamadas.append(("cofre_guardar", nome))
+        return {"itens": [], "precedencia": "cofre → .env"}
+
+    def cofre_remover(self, nome):
+        return {"itens": [], "precedencia": "cofre → .env"}
+
+    def cofre_testar(self, nome):
+        return {"ok": True, "mensagem": "ok"}
 
 
 class DesktopApiTests(unittest.TestCase):
@@ -345,6 +356,20 @@ class DesktopApiTests(unittest.TestCase):
             status, body = self.call(path)
             self.assertEqual(status, 404, path)
             self.assertEqual(body["error"], "not_found")
+
+    def test_cofre_routes_validate_and_persist(self):
+        self.assertEqual(self.call("/api/v1/cofre", "POST", {"nome": "gemini"})[0], 400)
+        self.assertEqual(self.call("/api/v1/cofre", "POST", {"nome": "gemini", "valor": "x" * 401})[0], 400)
+        self.assertEqual(self.call("/api/v1/cofre", "POST", {"nome": "nao_existe", "valor": "x"})[0], 400)
+        self.assertEqual(self.call("/api/v1/cofre", "POST", {"nome": "gemini", "valor": 1})[0], 400)
+        status, corpo = self.call("/api/v1/cofre", "POST", {"nome": "gemini", "valor": "abc"})
+        self.assertEqual(status, 200)
+        self.assertNotIn("abc", json.dumps(corpo))
+        self.assertEqual(self.runtime.chamadas, [("cofre_guardar", "gemini")])
+        self.assertEqual(self.call("/api/v1/cofre/remover", "POST", {"nome": "gemini"})[0], 200)
+        self.assertEqual(self.call("/api/v1/cofre/remover", "POST", {"nome": "nao_existe"})[0], 400)
+        self.assertEqual(self.call("/api/v1/cofre/testar", "POST", {"nome": "gemini"})[0], 200)
+        self.assertEqual(self.call("/api/v1/cofre/testar", "POST", {"nome": "email_senha"})[0], 400)
 
     def test_get_fatos_lists_and_post_corrects_or_deletes(self):
         status, data = self.call("/api/v1/fatos")
