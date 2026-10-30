@@ -133,6 +133,57 @@ test('palco: interface usa textContent, CSP própria e protocolo privilegiado', 
   assert.match(main, /shell\.openPath\(arquivo\)/);
   assert.match(protocol, /entrada\.mime !== 'application\/pdf'/);
   assert.match(preload, /palcoAbrir: id => ipcRenderer\.invoke\('palco:abrir', id\)/);
+  // YouTube erro 153: o iframe de vídeo não pode usar referrerpolicy=no-referrer
+  const videoBranch = app.slice(app.indexOf("tipo === 'video'"), app.indexOf("tipo === 'imagem'"));
+  assert.ok(videoBranch.length > 0);
+  assert.doesNotMatch(videoBranch, /referrerpolicy:\s*'no-referrer'/);
+  assert.match(videoBranch, /referrerpolicy:\s*'strict-origin-when-cross-origin'/);
+});
+
+test('youtube: embed vindo de file:// recebe Referer e Origin', async () => {
+  const main = await readFile(fileURLToPath(new URL('../../main.js', import.meta.url)), 'utf8');
+  const inicio = main.indexOf('function fixYoutubeEmbedHeaders()');
+  const fim = main.indexOf('function createWindow()');
+  assert.ok(inicio > -1 && fim > inicio, 'fixYoutubeEmbedHeaders deve existir antes de createWindow');
+
+  let filtro;
+  let handler;
+  const fakeSession = {
+    defaultSession: {
+      webRequest: {
+        onBeforeSendHeaders: (f, fn) => { filtro = f; handler = fn; },
+      },
+    },
+  };
+  new Function('session', `${main.slice(inicio, fim)}\nfixYoutubeEmbedHeaders();`)(fakeSession);
+
+  assert.deepEqual(filtro.urls, [
+    'https://*.youtube.com/embed/*',
+    'https://*.youtube-nocookie.com/embed/*',
+  ]);
+
+  const enviados = fn => {
+    let resultado;
+    fn(details => { resultado = details; });
+    return resultado;
+  };
+
+  const deFile = enviados(cb => handler({
+    url: 'https://www.youtube-nocookie.com/embed/dQw4w9WgXcQ?autoplay=1',
+    referrer: '',
+    requestHeaders: { Accept: '*/*' },
+  }, cb));
+  assert.equal(deFile.requestHeaders.Referer, 'https://www.youtube-nocookie.com/');
+  assert.equal(deFile.requestHeaders.Origin, 'https://www.youtube-nocookie.com');
+  assert.equal(deFile.requestHeaders.Accept, '*/*');
+
+  const deHttps = enviados(cb => handler({
+    url: 'https://www.youtube-nocookie.com/embed/dQw4w9WgXcQ',
+    referrer: 'https://exemplo.com/',
+    requestHeaders: {},
+  }, cb));
+  assert.equal(deHttps.requestHeaders.Origin, undefined);
+  assert.equal(deHttps.requestHeaders.Referer, undefined);
 });
 
 test('health failure stays offline and never enables a mock transport', async () => {

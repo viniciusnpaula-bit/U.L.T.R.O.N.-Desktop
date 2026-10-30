@@ -137,9 +137,11 @@ class PalcoTests(unittest.TestCase):
         dados = resultado["palco"]
         self.assertTrue(dados["embed"])
         self.assertEqual(dados["fonte"],
-                         "https://www.youtube-nocookie.com/embed/dQw4w9WgXcQ?autoplay=1&mute=1&rel=0")
+                         "https://www.youtube-nocookie.com/embed/dQw4w9WgXcQ?autoplay=1&mute=1&rel=0"
+                         "&origin=https%3A%2F%2Fwww.youtube-nocookie.com")
         self.assertEqual(dados["fonte_com_som"],
-                         "https://www.youtube-nocookie.com/embed/dQw4w9WgXcQ?autoplay=1&rel=0")
+                         "https://www.youtube-nocookie.com/embed/dQw4w9WgXcQ?autoplay=1&rel=0"
+                         "&origin=https%3A%2F%2Fwww.youtube-nocookie.com")
         self.assertTrue(dados["mudo"])
         self.assertEqual(dados["url"], "https://www.youtube.com/watch?v=dQw4w9WgXcQ")
 

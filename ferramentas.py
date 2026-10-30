@@ -240,14 +240,39 @@ _FEEDS = {
 }
 
 
-@ferramenta("Últimas manchetes de notícias.", params={"tema": "geral, tecnologia, economia, esporte ou mundo"})
+def _imagem_da_entrada(e):
+    """Extrai a URL da imagem de uma entrada de feed (media_content > summary > None)."""
+    mc = e.get("media_content") or []
+    for item in mc:
+        if isinstance(item, dict) and item.get("url"):
+            return item["url"]
+    summary = e.get("summary") or ""
+    achado = re.search(r'<img[^>]+src="([^"]+)"', summary)
+    return achado.group(1) if achado else None
+
+
+@ferramenta("Últimas manchetes de notícias. Expõe a imagem da notícia de destaque "
+            "para ser mostrada no palco.", params={"tema": "geral, tecnologia, economia, esporte ou mundo"})
 def noticias(tema: str = "geral"):
     import feedparser
     feed = feedparser.parse(_FEEDS.get(tema.lower().strip(), _FEEDS["geral"]))
-    itens = [e.get("title", "") for e in feed.entries[:6]]
-    if not itens:
+    linhas = []
+    imagem_destaque = None
+    titulo_destaque = ""
+    for e in feed.entries[:6]:
+        titulo = e.get("title", "")
+        linhas.append(f"- {titulo}")
+        if imagem_destaque is None:
+            img = _imagem_da_entrada(e)
+            if img:
+                imagem_destaque = img
+                titulo_destaque = titulo
+    if not linhas:
         return "Não consegui carregar as notícias agora."
-    return _dados("\n".join(f"- {t}" for t in itens))
+    texto = "\n".join(linhas)
+    if imagem_destaque:
+        texto += f"\n\n[IMAGEM_DESTAQUE] {titulo_destaque} || {imagem_destaque}"
+    return _dados(texto)
 
 
 @ferramenta("Pesquisa geral na web (DuckDuckGo) para informações atuais.", params={"consulta": "O que pesquisar"})

@@ -560,6 +560,33 @@ def _pedido_abrir_spotify(texto):
                 not re.search(r"\b(pause|pausar|pausa|pare|parar|stop)\b", normalizado))
 
 
+def _pedido_noticia(texto):
+    """Reconhece pedidos explícitos de mostrar/ver notícias."""
+    normalizado = re.sub(r"[^a-z0-9]+", " ", seguranca.normalizar(texto)).strip()
+    verbo = r"\b(?:mostre|mostra|mostrar|veja|ver|abrir|abre|exiba|exibir)\b"
+    alvo = r"\b(?:noticia|noticias|manchetes?)\b"
+    # shortcut: pedido genérico; assunto específico ("notícia sobre X") fica com o núcleo
+    if re.search(r"\b(?:sobre|a respeito de)\b", normalizado):
+        return False
+    return bool(re.search(rf"{verbo}.{{0,20}}{alvo}", normalizado) or
+                re.search(r"\bultimas noticias\b", normalizado))
+
+
+def _executar_noticia(executar, confirmar, origem, tema="geral"):
+    """Mostra a notícia principal no palco e devolve as manchetes para falar."""
+    res = executar("noticias", {"tema": tema}, confirmar, origem)
+    res = re.sub(r"^\[DADOS EXTERNOS:[^\]]*\]\n", "", res)
+    if "\n\n[IMAGEM_DESTAQUE] " in res:
+        manchetes, destaque = res.split("\n\n[IMAGEM_DESTAQUE] ", 1)
+        titulo, _, imagem = destaque.partition(" || ")
+        res = manchetes
+        if imagem.strip():
+            executar("mostrar_na_interface",
+                     {"tipo": "imagem", "alvo": imagem.strip(), "titulo": titulo.strip()},
+                     confirmar, origem)
+    return res
+
+
 def _pedido_hora(texto):
     normalizado = re.sub(r"[^a-z0-9]+", " ", seguranca.normalizar(texto)).strip()
     padroes = (
@@ -595,6 +622,10 @@ def _acao_rapida(texto):
             re.search(r"\b(abra|abrir|abre|inicie|iniciar|inicia|lance|lancar|execute|executar|jogue|jogar|play)\b",
                       normalizado)):
         return "rocket"
+    if _pedido_noticia(texto):
+        tema = next((c for c in ("tecnologia", "economia", "esporte", "mundo")
+                     if re.search(rf"\b{c}\b", normalizado)), "")
+        return "noticia" + (":" + tema if tema else "")
     return None
 
 
@@ -625,6 +656,9 @@ def _executar_skill_rapida(acao, nome):
 
 
 def _executar_acao_rapida(acao, executar, confirmar, origem):
+    if acao == "noticia" or acao.startswith("noticia:"):
+        return _executar_noticia(executar, confirmar, origem,
+                                 acao.partition(":")[2] or "geral")
     if acao == "desfazer":
         return _executar_etapa(executar, acao, "desfazer", "desfazer", {},
                                confirmar, origem,

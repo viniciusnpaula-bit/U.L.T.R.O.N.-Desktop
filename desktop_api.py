@@ -158,6 +158,8 @@ def create_server(runtime, token: str, host: str = "127.0.0.1", port: int = PREF
                     self._send(200, runtime.personalidade_info())
                 elif path == _PREFIX + "personalidade/previa":
                     self._send(200, runtime.personalidade_previa())
+                elif path == _PREFIX + "skills":
+                    self._send(200, runtime.skills_listar())
                 elif path == _PREFIX + "update":
                     self._send(200, runtime.update_info())
                 elif path == _PREFIX + "update/check":
@@ -307,6 +309,19 @@ def create_server(runtime, token: str, host: str = "127.0.0.1", port: int = PREF
                         self._send(400, {"error": "empty_payload_required"})
                         return
                     self._send(200, runtime.personalidade_restaurar())
+                elif path == _PREFIX + "skills/approve":
+                    if set(body) != {"nome"} or not isinstance(body.get("nome"), str):
+                        self._send(400, {"error": "invalid_skills_payload"})
+                        return
+                    try:
+                        self._send(200, runtime.skills_aprovar(body["nome"]))
+                    except ValueError as e:
+                        self._send(409, {"error": "conflict", "detail": str(e)})
+                elif path == _PREFIX + "skills/discard":
+                    if set(body) != {"nome"} or not isinstance(body.get("nome"), str):
+                        self._send(400, {"error": "invalid_skills_payload"})
+                        return
+                    self._send(200, runtime.skills_descartar(body["nome"]))
                 elif path == _PREFIX + "update/apply":
                     if set(body) - {"restart_after"} or ("restart_after" in body and type(body["restart_after"]) is not bool):
                         self._send(400, {"error": "invalid_update_payload"})

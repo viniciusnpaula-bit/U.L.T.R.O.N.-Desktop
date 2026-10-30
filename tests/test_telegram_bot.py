@@ -1,5 +1,6 @@
 import time
 import unittest
+from types import SimpleNamespace
 from unittest.mock import patch
 
 import telegram_bot
@@ -58,6 +59,29 @@ class ConfirmadorTests(unittest.TestCase):
                 lambda _texto, cid: telegram_bot.resolver(111, cid, "s"),
                 lambda _texto: None)
             self.assertFalse(confirmar("Confirmar?", pedido(exige_pin=True)))
+
+
+class SkillsTelegramTests(unittest.TestCase):
+    def test_skills_lista_pendentes(self):
+        with patch("skills.pendentes", return_value=[SimpleNamespace(
+                slug="x", nome="X", quando="quando", corpo="passo 1")]):
+            self.assertIn("passo 1", telegram_bot._comando_skills("/skills"))
+
+    def test_skills_sem_pendentes(self):
+        with patch("skills.pendentes", return_value=[]):
+            self.assertIn("Nenhuma skill pendente", telegram_bot._comando_skills("/skills"))
+
+    def test_aprovar_devolve_corpo(self):
+        with patch("skills.aprovar", return_value="x"), \
+             patch("skills.corpo", return_value="passo 1"):
+            self.assertIn("passo 1", telegram_bot._comando_skills("/aprovar x"))
+
+    def test_erro_de_aprovacao_vira_mensagem(self):
+        with patch("skills.aprovar", side_effect=ValueError("já existe skill com esse nome: x")):
+            self.assertIn("já existe", telegram_bot._comando_skills("/aprovar x"))
+
+    def test_desconhecido_devolve_none(self):
+        self.assertIsNone(telegram_bot._comando_skills("oi"))
 
 
 if __name__ == "__main__":

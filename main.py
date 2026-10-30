@@ -213,6 +213,18 @@ def _desbloquear_inicial() -> bool:
 # ---------- modos ----------
 
 
+def _curar_skills() -> None:
+    try:
+        import skills
+        resumo = skills.curar()
+        print(f"skills: {resumo['ativos']} ativas, {resumo['obsoletos']} obsoletas, "
+              f"{resumo['arquivados']} arquivadas, {resumo['pendentes']} pendentes")
+        for aviso in resumo["avisos"]:
+            print(aviso)
+    except Exception:
+        pass
+
+
 def modo_texto():
     if not _desbloquear_inicial():
         return
@@ -498,6 +510,7 @@ if __name__ == "__main__":
         print("O Ultron já está rodando (veja o ícone perto do relógio).")
         sys.exit(0)
     preparar_windows()
+    _curar_skills()
     threading.Thread(target=loop_lembretes, daemon=True).start()
     atalho_parada()
     import telegram_bot

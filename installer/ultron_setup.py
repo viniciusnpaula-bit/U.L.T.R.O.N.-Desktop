@@ -383,7 +383,11 @@ def step_electron(root: Path, console: Console, npm: Path) -> None:
     if completed.returncode != 0 or not electron_exe.is_file():
         raise SetupError(
             "Não consegui instalar o Electron. Confira a internet (ou um proxy) e veja\n"
-            "      logs\\setup.log."
+            "      logs\\setup.log.\n"
+            "      O npm instalou os pacotes, mas o binário do Electron (~120 MB) não foi\n"
+            "      baixado do GitHub. Se o GitHub estiver bloqueado/lento nesta rede, defina\n"
+            "      a variável de ambiente ELECTRON_MIRROR com um espelho (exemplo:\n"
+            "      https://cdn.npmmirror.com/binaries/electron/) e rode o instalador de novo."
         )
     marker.write_text(json.dumps({"electron": wanted}), encoding="utf-8")
     console.ok("Interface Electron instalada.")

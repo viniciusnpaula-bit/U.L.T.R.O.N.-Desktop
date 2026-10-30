@@ -11,6 +11,7 @@ from unittest.mock import patch
 sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
 
 from desktop_api import create_server
+from desktop_runtime import DesktopRuntime
 
 
 class FakeRuntime:
@@ -52,6 +53,13 @@ class FakeRuntime:
         }
         self.pins = []
         self.locked = False
+        self.skills = {
+            "skills": [{"slug": "a", "nome": "A", "descricao": "d", "quando": "q",
+                        "estado": "ativo"}],
+            "pendentes": [{"slug": "b", "nome": "B", "quando": "q", "corpo": "passo 1"}],
+        }
+        self.skills_aprovadas = []
+        self.skills_descartadas = []
 
     def get_snapshot(self):
         return self.snapshot
@@ -144,6 +152,17 @@ class FakeRuntime:
     def personalidade_restaurar(self):
         self.personalidade_salva.append({"restaurar": True})
         return dict(self.personalidade)
+
+    def skills_listar(self):
+        return dict(self.skills)
+
+    def skills_aprovar(self, nome):
+        self.skills_aprovadas.append(nome)
+        return {"ok": True, "slug": nome}
+
+    def skills_descartar(self, nome):
+        self.skills_descartadas.append(nome)
+        return {"ok": True}
 
 
 class DesktopApiTests(unittest.TestCase):
@@ -439,6 +458,52 @@ class DesktopApiTests(unittest.TestCase):
     def test_server_rejects_non_loopback_bind_address(self):
         with self.assertRaises(ValueError):
             create_server(self.runtime, self.token, host="0.0.0.0")
+
+
+    def test_get_skills_devolve_pendentes_com_corpo(self):
+        status, corpo = self.call("/api/v1/skills")
+        self.assertEqual(status, 200)
+        self.assertEqual(corpo["pendentes"][0]["corpo"], "passo 1")
+
+    def test_approve_aceita_nome_e_devolve_ok(self):
+        status, corpo = self.call("/api/v1/skills/approve", "POST", {"nome": "b"})
+        self.assertEqual(status, 200)
+        self.assertTrue(corpo["ok"])
+        self.assertEqual(self.runtime.skills_aprovadas, ["b"])
+
+    def test_approve_rejeita_payload_com_campo_extra(self):
+        status, _ = self.call("/api/v1/skills/approve", "POST", {"nome": "b", "x": 1})
+        self.assertEqual(status, 400)
+        self.assertEqual(self.runtime.skills_aprovadas, [])
+
+    def test_approve_devolve_409_quando_ha_colisao(self):
+        self.runtime.skills_aprovar = lambda nome: (_ for _ in ()).throw(ValueError("já existe"))
+        status, corpo = self.call("/api/v1/skills/approve", "POST", {"nome": "b"})
+        self.assertEqual(status, 409)
+        self.assertEqual(corpo["error"], "conflict")
+
+    def test_discard(self):
+        status, _ = self.call("/api/v1/skills/discard", "POST", {"nome": "b"})
+        self.assertEqual(status, 200)
+        self.assertEqual(self.runtime.skills_descartadas, ["b"])
+
+
+class RuntimeSkillsTests(unittest.TestCase):
+    def setUp(self):
+        self.runtime = DesktopRuntime.__new__(DesktopRuntime)
+
+    def test_listar_vazio(self):
+        with patch("skills.listar", return_value=[]), patch("skills.pendentes", return_value=[]):
+            self.assertEqual(self.runtime.skills_listar(), {"skills": [], "pendentes": []})
+
+    def test_aprovar_devolve_slug(self):
+        with patch("skills.aprovar", return_value="x"):
+            self.assertEqual(self.runtime.skills_aprovar("x"), {"ok": True, "slug": "x"})
+
+    def test_aprovar_colisao_propaga_erro(self):
+        with patch("skills.aprovar", side_effect=ValueError("já existe")):
+            with self.assertRaises(ValueError):
+                self.runtime.skills_aprovar("x")
 
 
 if __name__ == "__main__":

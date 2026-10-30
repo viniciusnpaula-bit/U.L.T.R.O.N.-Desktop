@@ -346,11 +346,14 @@ def mostrar(tipo: str = "auto", alvo: str = "", titulo: str = "") -> dict:
                 if video_id:
                     # Começa mudo: o Chromium só garante autoplay sem som, e o
                     # usuário liga o áudio quando quiser (botão do palco).
-                    embed = f"https://www.youtube-nocookie.com/embed/{video_id}?autoplay=1&mute=1&rel=0"
+                    # origin= satisfaz a checagem do YouTube quando a página é file://
+                    # (build empacotado), onde o Referer sai vazio.
+                    origem = "https%3A%2F%2Fwww.youtube-nocookie.com"
+                    embed = f"https://www.youtube-nocookie.com/embed/{video_id}?autoplay=1&mute=1&rel=0&origin={origem}"
                     dados = {
                         "id": secrets.token_hex(16), "tipo": "video",
                         "titulo": titulo or "vídeo do YouTube", "fonte": embed,
-                        "fonte_com_som": f"https://www.youtube-nocookie.com/embed/{video_id}?autoplay=1&rel=0",
+                        "fonte_com_som": f"https://www.youtube-nocookie.com/embed/{video_id}?autoplay=1&rel=0&origin={origem}",
                         "url": url, "embed": True, "mudo": True,
                         "nota": "YouTube em modo de privacidade (youtube-nocookie), sem som até você pedir",
                     }
