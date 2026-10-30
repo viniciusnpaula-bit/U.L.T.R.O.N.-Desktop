@@ -66,15 +66,18 @@ def buscar(consulta: str) -> dict:
         "q": consulta, "type": "track,artist,playlist", "limit": 5, "market": "BR"})
     if status != 200:
         raise RuntimeError(f"a busca no Spotify falhou (HTTP {status})")
+    faixas = (corpo.get("tracks") or {}).get("items") or []
+    artistas = (corpo.get("artists") or {}).get("items") or []
+    playlists = (corpo.get("playlists") or {}).get("items") or []
     return {
         "faixas": [{"nome": item.get("name", ""),
-                    "artista": ", ".join(a.get("name", "") for a in item.get("artists", [])),
+                    "artista": ", ".join(a.get("name", "") for a in item.get("artists") or []),
                     "uri": item.get("uri", "")}
-                   for item in corpo.get("tracks", {}).get("items", [])],
+                   for item in faixas if item],
         "artistas": [{"nome": item.get("name", ""), "uri": item.get("uri", "")}
-                     for item in corpo.get("artists", {}).get("items", [])],
+                     for item in artistas if item],
         "playlists": [{"nome": item.get("name", ""), "uri": item.get("uri", "")}
-                      for item in corpo.get("playlists", {}).get("items", [])],
+                      for item in playlists if item],
     }
 
 

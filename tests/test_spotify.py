@@ -51,6 +51,16 @@ class SpotifyTests(unittest.TestCase):
                                                 "uri": "spotify:track:1"}])
         self.assertEqual(resultado["artistas"][0]["nome"], "Daft Punk")
 
+    def test_buscar_ignora_itens_nulos(self):
+        corpo = {"tracks": {"items": [None, {"name": "x", "uri": "u", "artists": None}]},
+                 "artists": {"items": [None]},
+                 "playlists": {"items": [None, {"name": "p", "uri": "pu"}]}}
+        with mock.patch("spotify._pedir", return_value=(200, corpo)):
+            resultado = spotify.buscar("x")
+        self.assertEqual([f["nome"] for f in resultado["faixas"]], ["x"])
+        self.assertEqual(resultado["artistas"], [])
+        self.assertEqual([p["nome"] for p in resultado["playlists"]], ["p"])
+
     def test_estado_sem_reproducao(self):
         with mock.patch("spotify._pedir", return_value=(204, {})):
             self.assertFalse(spotify.estado()["tocando"])
