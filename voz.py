@@ -1,4 +1,6 @@
 """Voz: fala (edge-tts, voz grave) e escuta (microfone + reconhecimento do Google, grátis)."""
+from __future__ import annotations
+
 import asyncio
 import json
 import collections
