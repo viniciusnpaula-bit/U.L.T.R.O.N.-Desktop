@@ -1,8 +1,8 @@
 python-dotenv>=1.2.4,<2
-openai>=3.35.1,<4
+openai>=3.40.0,<4
 requests>=2.34.2,<3
 feedparser>=6.0.14,<7
-ddgs>=9.16.0,<10
+ddgs>=9.16.1,<10
 edge-tts>=7.3.1,<8
 pygame-ce>=2.5.8,<3
 pyttsx3>=2.99,<3
@@ -13,12 +13,12 @@ pyautogui>=0.9.54,<1
 pyperclip>=1.11.0,<2
 psutil>=7.2.2,<8
 send2trash>=2.1.0,<3
-pywin32>=305; sys_platform == "win32"
+pywin32>=312; sys_platform == "win32"
 keyboard>=0.13.5,<1
 python-telegram-bot>=22.8,<23
 pillow>=13.0.0,<14
 pystray>=0.19.5,<1
 cryptography>=50.0.2,<51
-opencv-python-headless>=4.8,<6
+opencv-python-headless>=5.0.0.93,<6
 winrt-runtime>=4.0.3,<5; sys_platform == "win32"
 winrt-Windows.Security.Credentials.UI>=4!10.0.28000.2705,<5!0; sys_platform == "win32"
