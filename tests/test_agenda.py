@@ -70,7 +70,7 @@ def test_marcar_feito_remove_da_lista():
 
 
 def test_quando_do_texto_aceita_formatos():
-    from ferramentas import _quando_do_texto
+    from memoria import _quando_do_texto
 
     agora = time.time()
     assert abs(_quando_do_texto("em 30 minutos") - (agora + 1800)) < 5

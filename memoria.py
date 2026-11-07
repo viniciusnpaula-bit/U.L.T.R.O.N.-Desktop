@@ -616,6 +616,39 @@ def reagendar_evento(id_, repetir_minutos, base=None):
        (proxima_ocorrencia(base, repetir_minutos), int(id_)))
 
 
+def _quando_do_texto(quando: str) -> float:
+    """Converte datas faladas/escritas em timestamp. Nunca usa eval."""
+    texto = " ".join(str(quando or "").strip().split())
+    if not texto:
+        raise ValueError("Diga quando (ex.: 2026-11-07 14:30, 14:30 ou 'em 30 minutos').")
+    relativo = re.fullmatch(
+        r"(?:daqui a |em )?(\d+(?:[.,]\d+)?)\s*(minuto|minutos|min|hora|horas|h)",
+        texto.lower())
+    if relativo:
+        valor = float(relativo.group(1).replace(",", "."))
+        unidade = relativo.group(2)
+        segundos = valor * (3600 if unidade.startswith("h") or unidade.startswith("hora") else 60)
+        return time.time() + segundos
+    for formato in ("%Y-%m-%d %H:%M", "%d/%m/%Y %H:%M", "%d/%m %H:%M", "%H:%M"):
+        try:
+            data = datetime.datetime.strptime(texto, formato)
+        except ValueError:
+            continue
+        if formato == "%H:%M":
+            data = datetime.datetime.now().replace(
+                hour=data.hour, minute=data.minute, second=0, microsecond=0)
+            if data < datetime.datetime.now():
+                data += datetime.timedelta(days=1)
+        elif "%Y" not in formato:
+            data = data.replace(year=datetime.datetime.now().year)
+        return data.timestamp()
+    try:
+        return datetime.datetime.fromisoformat(texto).timestamp()
+    except ValueError:
+        raise ValueError(
+            "Não entendi a data. Use 2026-11-07 14:30, 07/11 14:30, 14:30 ou 'em 30 minutos'.") from None
+
+
 def status_criptografia() -> dict:
     """Estado honesto para a tela de desbloqueio; nunca levanta e não migra."""
     migrado = False
