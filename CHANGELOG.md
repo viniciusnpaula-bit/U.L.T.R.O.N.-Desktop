@@ -1,3 +1,13 @@
+ULTRON Desktop 2.1.0 — agenda, fluxos do usuário, briefing matinal e integração Spotify
+
+- Agenda local (`memoria.py`): criação, listagem e cancelamento de eventos com recorrência configurável (diária, semanal, mensal, intervalos em minutos).
+- Agendador e rotinas (`agendador.py`): rotina em segundo plano (tick a cada 5s) integrada a sessões seguras e loop principal.
+- Fluxos do usuário (`fluxos.py`): CRUD e execução automatizada de fluxos encadeados em `dados/fluxos.json` com validação de ferramentas e parada segura para confirmações.
+- Briefing matinal (`briefing.py`): composição inteligente de clima, notícias, eventos da agenda e lembretes com disparo automático no horário programado.
+- Ferramentas no núcleo (`ferramentas.py`): `criar_evento`, `listar_agenda`, `cancelar_evento`, `criar_fluxo`, `remover_fluxo`, `listar_fluxos`, `agendar_fluxo` e `briefing_matinal`.
+- Interface desktop e Electron: suporte completo na interface e endpoints em `desktop_api.py` / `desktop_runtime.py` para gerenciamento da agenda.
+- Integração Spotify Web API: pesquisa, reprodução e consulta de status via Web API (`spotify_buscar`, `spotify_tocar`, `spotify_estado`), gerenciamento seguro de tokens e credenciais no cofre via `tools/autorizar_spotify.py`.
+
 ULTRON Desktop 2.0.0 — skills + registro emocional na voz
 
 - Skills em Markdown (`dados/skills/<slug>/SKILL.md`): índice injetado no prompt
