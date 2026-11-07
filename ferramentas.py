@@ -1,5 +1,6 @@
 """Ferramentas do Ultron. Para criar uma nova, escreva uma função com @ferramenta(...)."""
 import contextvars
+import datetime
 import difflib
 import functools
 import inspect
@@ -1730,6 +1731,108 @@ def listar_lembretes():
     if not itens:
         return "Nenhum lembrete pendente."
     return "\n".join(f"{time.strftime('%d/%m %H:%M', time.localtime(d))}: {t}" for d, t in itens)
+
+
+# ---------- agenda e fluxos ----------
+@ferramenta("Cria um evento na agenda local, com recorrencia opcional.",
+            params={"texto": "O que acontecer", "quando": "Data/hora (ex.: 2026-11-07 14:30 ou 'em 2 horas')",
+                    "repetir": "vazio, diaria, semanal, mensal ou minutos"})
+def criar_evento(texto: str, quando: str, repetir: str = ""):
+    try:
+        minutos = memoria.minutos_de_recorrencia(repetir)
+        due = memoria._quando_do_texto(quando)
+    except (ValueError, memoria.MemoriaLimite) as erro:
+        return str(erro)
+    memoria.add_evento(due, texto, minutos)
+    quando_local = datetime.datetime.fromtimestamp(due).strftime("%d/%m %H:%M")
+    extra = f", repetindo a cada {minutos} minutos" if minutos else ""
+    return f"Evento criado para {quando_local}{extra}."
+
+
+@ferramenta("Lista os eventos da agenda local.")
+def listar_agenda():
+    eventos = memoria.eventos_numerados()
+    if not eventos:
+        return "A agenda esta vazia."
+    linhas = [f"{e['numero']}) {e['hora_local']} — {e['texto']}" for e in eventos]
+    return "Agenda:\n" + "\n".join(linhas) + \
+           "\nPara cancelar: diga 'cancele o evento 2' ou um trecho do texto."
+
+
+@ferramenta("Cancela um evento da agenda pelo numero da lista ou por um trecho do texto.",
+            params={"numero": "Numero mostrado em listar_agenda (opcional)",
+                    "trecho": "Trecho do texto do evento (opcional)"})
+def cancelar_evento(numero: int | None = None, trecho: str = ""):
+    return memoria.cancelar_evento(numero=numero, trecho=trecho)
+
+
+@ferramenta("Lista os fluxos disponiveis (fixos e criados pelo usuario).")
+def listar_fluxos():
+    import fluxos as _fluxos
+    itens = _fluxos.listar()
+    if not itens:
+        return "Nenhum fluxo disponivel."
+    return "\n".join(
+        f"- {f['id']}: {f['titulo']} — {f['descricao']} ({len(f['etapas'])} etapa(s))"
+        for f in itens)
+
+
+@ferramenta("Cria um fluxo nomeado do usuario. passos_json eh uma lista JSON; cada passo tem "
+            "'ferramenta', 'rotulo' e 'argumentos'.",
+            risco=MEDIO,
+            params={"fluxo_id": "id curto do fluxo", "titulo": "Nome do fluxo",
+                    "descricao": "O que ele faz", "passos_json": "lista JSON de passos"},
+            classificar=lambda **_: Classificacao(MEDIO, "fluxo.criar", True,
+                                                   resumo="criar um fluxo de acoes"))
+def criar_fluxo(fluxo_id: str, titulo: str, descricao: str, passos_json: str):
+    import fluxos as _fluxos
+    try:
+        passos = json.loads(passos_json)
+    except (TypeError, ValueError):
+        return "passos_json invalido: envie uma lista JSON."
+    try:
+        fluxo = _fluxos.criar(fluxo_id, titulo, descricao, passos)
+    except ValueError as erro:
+        return str(erro)
+    return f"Fluxo '{fluxo.titulo}' criado com {len(fluxo.passos)} passo(s)."
+
+
+@ferramenta("Remove um fluxo criado pelo usuario. Fluxos fixos nao podem ser removidos.",
+            risco=MEDIO, params={"fluxo": "id do fluxo"},
+            classificar=lambda **_: Classificacao(MEDIO, "fluxo.remover", True,
+                                                   resumo="remover um fluxo"))
+def remover_fluxo(fluxo: str):
+    import fluxos as _fluxos
+    try:
+        removido = _fluxos.remover(fluxo)
+    except ValueError as erro:
+        return str(erro)
+    return "Fluxo removido." if removido else "Nao achei esse fluxo do usuario."
+
+
+@ferramenta("Agenda um fluxo para um horario. Etapas que exigem confirmacao nao rodam sem "
+            "voce presente e o fluxo para na primeira que precisar.",
+            params={"fluxo": "id do fluxo", "quando": "Data/hora ou 'em 30 minutos'",
+                    "repetir": "vazio, diaria, semanal, mensal ou minutos"})
+def agendar_fluxo(fluxo: str, quando: str, repetir: str = ""):
+    import fluxos as _fluxos
+    alvo = _fluxos.obter(fluxo)
+    if alvo is None:
+        return "Fluxo desconhecido."
+    try:
+        minutos = memoria.minutos_de_recorrencia(repetir)
+        due = memoria._quando_do_texto(quando)
+    except (ValueError, memoria.MemoriaLimite) as erro:
+        return str(erro)
+    memoria.add_evento(due, alvo.titulo, minutos, fluxo_id=alvo.id)
+    quando_local = datetime.datetime.fromtimestamp(due).strftime("%d/%m %H:%M")
+    return f"Fluxo '{alvo.titulo}' agendado para {quando_local}."
+
+
+@ferramenta("Monta e fala o briefing matinal agora (clima, noticias, agenda e lembretes).")
+def briefing_matinal():
+    import briefing
+    return briefing.compor()
 
 
 # ---------- visão: webcam, detecção de objetos e gestos ----------
