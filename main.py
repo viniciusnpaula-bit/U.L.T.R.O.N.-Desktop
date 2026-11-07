@@ -70,14 +70,9 @@ def responder(texto, confirmar, origem):
 
 
 def loop_lembretes():
-    while True:
-        try:
-            for id_, texto in memoria.lembretes_vencidos():
-                memoria.marcar_feito(id_)
-                cerebro.notificar(f"Lembrete, {config.NOME}: {texto}")
-        except Exception as e:
-            seguranca.log.warning(f"Lembretes: {e}")
-        time.sleep(5)
+    """Thread única do núcleo para lembretes, agenda, fluxos agendados e briefing."""
+    import agendador
+    agendador.loop()
 
 
 def atalho_falar(evento):

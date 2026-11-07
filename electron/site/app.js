@@ -1349,6 +1349,55 @@ async function carregarLembretes() {
   }
 }
 
+function paginaAgenda(itens, aviso = '') {
+  const lista = $('agendaList');
+  lista.replaceChildren();
+  if (!itens || !itens.length) {
+    const vazio = document.createElement('span');
+    vazio.className = 'micro nano';
+    vazio.textContent = 'nenhum evento na agenda';
+    lista.append(vazio);
+  }
+  for (const item of itens || []) {
+    const linha = document.createElement('div');
+    linha.className = 'fact';
+    const texto = document.createElement('p');
+    const repeticao = item.repetir_minutos > 0 ? ` (repete a cada ${item.repetir_minutos} min)` : '';
+    texto.textContent = `${item.hora_local} — ${item.texto}${repeticao}`;
+    const acoes = document.createElement('div');
+    acoes.className = 'fact-actions';
+    const cancelar = document.createElement('button');
+    cancelar.type = 'button';
+    cancelar.textContent = 'cancelar';
+    cancelar.title = 'Apagar este evento';
+    cancelar.onclick = async () => {
+      if (!window.confirm(`Cancelar o evento “${item.texto}”?`)) return;
+      try {
+        const r = await window.ultron.agendaCancelar(item.numero, '');
+        paginaAgenda(r.eventos, r.mensagem);
+      } catch (error) {
+        $('agendaNote').textContent = `não consegui cancelar (${error.message})`;
+      }
+    };
+    acoes.append(cancelar);
+    linha.append(texto, acoes);
+    lista.append(linha);
+  }
+  if (aviso) $('agendaNote').textContent = `${aviso} · ${(itens || []).length} evento(s)`;
+}
+
+async function carregarAgenda() {
+  try {
+    const r = await window.ultron.agendaListar();
+    paginaAgenda(r.eventos, '');
+    $('agendaNote').textContent = (r.eventos || []).length
+      ? `${r.eventos.length} evento(s) · ${r.aviso}`
+      : r.aviso;
+  } catch {
+    $('agendaNote').textContent = 'não consegui ler a agenda';
+  }
+}
+
 /* Fluxos: o núcleo executa etapa por etapa e devolve o resultado de cada uma. */
 async function rodarFluxo(id) {
   const nota = $('fluxoNote');
@@ -1597,6 +1646,7 @@ function drawer(open, { focar = true } = {}) {
     carregarPersonalidade();
     carregarFatos();
     carregarLembretes();
+    carregarAgenda();
     carregarCofre();
     // ao abrir sozinha no carregamento não há interação: focar aqui desenharia
     // um anel de foco que ninguém pediu

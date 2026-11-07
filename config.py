@@ -176,6 +176,12 @@ SPOTIFY_CLIENT_ID = _env("SPOTIFY_CLIENT_ID")
 SPOTIFY_CLIENT_SECRET = _env("SPOTIFY_CLIENT_SECRET")
 SPOTIFY_REFRESH = _env("SPOTIFY_REFRESH")
 
+# Briefing matinal (desligado por padrão): compõe clima, notícias, agenda e lembretes.
+BRIEFING_ATIVO = (_env("BRIEFING_ATIVO", "0") or "0").lower() not in (
+    "0", "nao", "não", "false", "off")
+BRIEFING_HORA = _env("BRIEFING_HORA", "08:00")
+CIDADE = _env("CIDADE", "São Paulo")
+
 # O cofre cifrado (dados/cofre.json) tem precedência sobre o .env. Falha aqui nunca
 # impede o app de abrir: o .env continua valendo.
 try:

@@ -153,6 +153,15 @@ function registerApiHandlers() {
     if (numero !== null && numero !== undefined && !Number.isSafeInteger(numero)) return null;
     return api.lembreteCancelar(numero ?? null, trecho);
   });
+  ipcMain.handle('agenda:listar', event => {
+    if (!isSender(event, mainWindow)) return null;
+    return api.agendaListar();
+  });
+  ipcMain.handle('agenda:cancelar', (event, numero, trecho) => {
+    if (!isSender(event, mainWindow)) return null;
+    if (numero !== null && numero !== undefined && !Number.isSafeInteger(numero)) return null;
+    return api.agendaCancelar(numero ?? null, trecho);
+  });
   ipcMain.handle('fluxos:listar', event => {
     if (!isSender(event, mainWindow)) return null;
     return api.fluxosListar();

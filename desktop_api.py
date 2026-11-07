@@ -129,6 +129,18 @@ def create_server(runtime, token: str, host: str = "127.0.0.1", port: int = PREF
                 return None
             return value
 
+        @staticmethod
+        def _cancelar_payload_valido(body) -> bool:
+            if not isinstance(body, dict) or not set(body) <= {"numero", "trecho"}:
+                return False
+            numero = body.get("numero")
+            trecho = body.get("trecho")
+            if numero is not None and (type(numero) is not int or numero < 1):
+                return False
+            if trecho is not None and not isinstance(trecho, str):
+                return False
+            return numero is not None or bool(str(trecho or "").strip())
+
         def do_GET(self):
             if not self._authorized():
                 return
@@ -154,6 +166,8 @@ def create_server(runtime, token: str, host: str = "127.0.0.1", port: int = PREF
                     self._send(200, runtime.fluxos_listar())
                 elif path == _PREFIX + "lembretes":
                     self._send(200, runtime.lembretes_listar())
+                elif path == _PREFIX + "agenda":
+                    self._send(200, runtime.agenda_listar())
                 elif path == _PREFIX + "personalidade":
                     self._send(200, runtime.personalidade_info())
                 elif path == _PREFIX + "personalidade/previa":
@@ -279,6 +293,31 @@ def create_server(runtime, token: str, host: str = "127.0.0.1", port: int = PREF
                     self._send(200, runtime.fluxos_listar())
                 elif path == _PREFIX + "lembretes":
                     self._send(200, runtime.lembretes_listar())
+                elif path == _PREFIX + "lembretes/cancelar":
+                    if not self._cancelar_payload_valido(body):
+                        self._send(400, {"error": "invalid_lembrete_payload"})
+                        return
+                    self._send(200, runtime.lembrete_cancelar(body.get("numero"), body.get("trecho")))
+                elif path == _PREFIX + "agenda/cancelar":
+                    if not self._cancelar_payload_valido(body):
+                        self._send(400, {"error": "invalid_agenda_payload"})
+                        return
+                    self._send(200, runtime.agenda_cancelar(body.get("numero"), body.get("trecho")))
+                elif path == _PREFIX + "agenda":
+                    permitido = {"texto", "quando", "repetir"}
+                    if (not set(body) <= permitido
+                            or not isinstance(body.get("texto"), str)
+                            or not 1 <= len(body["texto"].strip()) <= 300
+                            or not isinstance(body.get("quando"), str)
+                            or not body["quando"].strip()
+                            or ("repetir" in body and not isinstance(body["repetir"], str))):
+                        self._send(400, {"error": "invalid_agenda_payload"})
+                        return
+                    try:
+                        self._send(200, runtime.agenda_criar(
+                            body["texto"].strip(), body["quando"].strip(), body.get("repetir") or ""))
+                    except ValueError:
+                        self._send(400, {"error": "invalid_agenda_payload"})
                 elif path == _PREFIX + "fatos":
                     permitido = {"id", "texto", "trecho"}
                     if not set(body) <= permitido or not ({"id"} & set(body)):

@@ -35,6 +35,10 @@ class FakeRuntime:
         self.palco_closed = False
         self.fatos = [{"id": 1, "texto": "gosta de café"}]
         self.fatos_apagados = []
+        self.agenda = [{"numero": 1, "texto": "reunião", "hora_local": "07/11 15:00"}]
+        self.agenda_criada = None
+        self.agenda_cancelada = None
+        self.lembrete_cancelado = None
         self.conversation_cleared = False
         self.personalidade = {
             "perfil": "ultron", "tratamento": "senhor", "jeito": "equilibrado",
@@ -134,6 +138,24 @@ class FakeRuntime:
         self.fatos = [fato for fato in self.fatos if fato["id"] != id]
         self.fatos_apagados.append(id)
         return {"ok": True, "apagado": id}
+
+    def lembretes_listar(self):
+        return {"lembretes": [], "aviso": "só com o ULTRON aberto"}
+
+    def lembrete_cancelar(self, numero=None, trecho=None):
+        self.lembrete_cancelado = (numero, trecho)
+        return {"mensagem": "cancelado", "lembretes": []}
+
+    def agenda_listar(self):
+        return {"eventos": list(self.agenda), "aviso": "só com o ULTRON aberto"}
+
+    def agenda_criar(self, texto, quando, repetir=""):
+        self.agenda_criada = (texto, quando, repetir)
+        return {"mensagem": "Evento criado.", "eventos": list(self.agenda)}
+
+    def agenda_cancelar(self, numero=None, trecho=None):
+        self.agenda_cancelada = (numero, trecho)
+        return {"mensagem": "cancelado", "eventos": []}
 
     def personalidade_info(self):
         return {
@@ -351,11 +373,31 @@ class DesktopApiTests(unittest.TestCase):
         self.assertTrue(self.runtime.palco_closed)
 
     def test_post_only_routes_are_not_reachable_by_get(self):
-        for path in ("/api/v1/lembretes/cancelar", "/api/v1/cofre/remover",
-                     "/api/v1/cofre/testar"):
+        for path in ("/api/v1/lembretes/cancelar", "/api/v1/agenda/cancelar",
+                     "/api/v1/cofre/remover", "/api/v1/cofre/testar"):
             status, body = self.call(path)
             self.assertEqual(status, 404, path)
             self.assertEqual(body["error"], "not_found")
+
+    def test_agenda_routes_and_lembrete_cancelar(self):
+        status, body = self.call("/api/v1/agenda")
+        self.assertEqual(status, 200)
+        self.assertEqual(body["eventos"], self.runtime.agenda)
+        self.assertEqual(self.call("/api/v1/agenda/cancelar", "POST", {})[0], 400)
+        self.assertEqual(self.call("/api/v1/agenda/cancelar", "POST", {"numero": 0})[0], 400)
+        status, _ = self.call("/api/v1/agenda/cancelar", "POST", {"numero": 1})
+        self.assertEqual(status, 200)
+        self.assertEqual(self.runtime.agenda_cancelada, (1, None))
+        self.assertEqual(self.call("/api/v1/agenda", "POST", {"texto": ""})[0], 400)
+        self.assertEqual(self.call("/api/v1/agenda", "POST", {"texto": "x", "quando": " "})[0], 400)
+        status, _ = self.call("/api/v1/agenda", "POST",
+                              {"texto": "dentista", "quando": "14:30", "repetir": "semanal"})
+        self.assertEqual(status, 200)
+        self.assertEqual(self.runtime.agenda_criada, ("dentista", "14:30", "semanal"))
+        self.assertEqual(self.call("/api/v1/lembretes/cancelar", "POST", {})[0], 400)
+        status, _ = self.call("/api/v1/lembretes/cancelar", "POST", {"trecho": "água"})
+        self.assertEqual(status, 200)
+        self.assertEqual(self.runtime.lembrete_cancelado, (None, "água"))
 
     def test_cofre_routes_validate_and_persist(self):
         self.assertEqual(self.call("/api/v1/cofre", "POST", {"nome": "gemini"})[0], 400)

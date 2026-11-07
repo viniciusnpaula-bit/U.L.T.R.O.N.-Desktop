@@ -1,8 +1,8 @@
-"""Memória do Ultron em SQLite: conversas, fatos e lembretes.
+"""Memória do Ultron em SQLite: conversas, fatos, lembretes e agenda.
 
-O conteúdo de `mensagens`, `fatos` e `lembretes` é cifrado em repouso com
-AES-256-GCM (prefixo `v1:`) usando a chave que o cofre protege com DPAPI.
-Metadados (id, ts, papel, due, feito) continuam visíveis.
+O conteúdo de `mensagens`, `fatos`, `lembretes` e `agenda` é cifrado em repouso
+com AES-256-GCM (prefixo `v1:`) usando a chave que o cofre protege com DPAPI.
+Metadados (id, ts, papel, due, quando, feito) continuam visíveis.
 """
 import datetime
 import functools
@@ -24,8 +24,32 @@ _db.execute("PRAGMA secure_delete=ON")
 _db.executescript("""
 CREATE TABLE IF NOT EXISTS mensagens(id INTEGER PRIMARY KEY, ts REAL, papel TEXT, texto TEXT);
 CREATE TABLE IF NOT EXISTS fatos(id INTEGER PRIMARY KEY, texto TEXT UNIQUE);
-CREATE TABLE IF NOT EXISTS lembretes(id INTEGER PRIMARY KEY, due REAL, texto TEXT, feito INTEGER DEFAULT 0);
+CREATE TABLE IF NOT EXISTS lembretes(id INTEGER PRIMARY KEY, due REAL, texto TEXT, feito INTEGER DEFAULT 0,
+                                     repetir_minutos INTEGER DEFAULT 0);
+CREATE TABLE IF NOT EXISTS agenda(id INTEGER PRIMARY KEY, quando REAL, texto TEXT,
+                                  repetir_minutos INTEGER DEFAULT 0, fluxo_id TEXT DEFAULT '',
+                                  feito INTEGER DEFAULT 0);
 """)
+
+
+def _garantir_esquema():
+    """Tabela/colunas novas em bancos antigos ou isolados por teste (idempotente)."""
+    _db.executescript("""
+    CREATE TABLE IF NOT EXISTS lembretes(id INTEGER PRIMARY KEY, due REAL, texto TEXT, feito INTEGER DEFAULT 0,
+                                         repetir_minutos INTEGER DEFAULT 0);
+    CREATE TABLE IF NOT EXISTS agenda(id INTEGER PRIMARY KEY, quando REAL, texto TEXT,
+                                      repetir_minutos INTEGER DEFAULT 0, fluxo_id TEXT DEFAULT '',
+                                      feito INTEGER DEFAULT 0);
+    """)
+    for tabela, coluna, tipo in (("lembretes", "repetir_minutos", "INTEGER DEFAULT 0"),
+                                 ("agenda", "repetir_minutos", "INTEGER DEFAULT 0"),
+                                 ("agenda", "fluxo_id", "TEXT DEFAULT ''")):
+        colunas = {linha[1] for linha in _db.execute(f"PRAGMA table_info({tabela})")}
+        if coluna not in colunas:
+            _db.execute(f"ALTER TABLE {tabela} ADD COLUMN {coluna} {tipo}")
+
+
+_garantir_esquema()
 
 
 def _x(sql, args=(), buscar=False):
@@ -76,6 +100,7 @@ def _historico(vazio):
 
 def _garantir_migracao():
     with _lock:
+        _garantir_esquema()
         if _db.execute("PRAGMA user_version").fetchone()[0] >= 1:
             return
     with _lock, _migracao_lock:
@@ -92,7 +117,7 @@ def _garantir_migracao():
             if _db.execute("PRAGMA user_version").fetchone()[0] >= 1:
                 _db.rollback()
                 return
-            tabelas = ("mensagens", "fatos", "lembretes")
+            tabelas = ("mensagens", "fatos", "lembretes", "agenda")
             linhas = {tabela: _db.execute(f"SELECT id, texto FROM {tabela}").fetchall()
                       for tabela in tabelas}
             tem_cifrado = any(
@@ -365,17 +390,64 @@ def apagar_fato(trecho):
 
 
 @_historico(None)
-def add_lembrete(due, texto):
-    return _x("INSERT INTO lembretes(due, texto) VALUES(?,?)",
-              (due, cofre.cifrar_dados(str(texto))))
+def add_lembrete(due, texto, repetir_minutos=0):
+    return _x("INSERT INTO lembretes(due, texto, repetir_minutos) VALUES(?,?,?)",
+              (due, cofre.cifrar_dados(str(texto)), max(0, int(repetir_minutos or 0))))
+
+
+# Recorrência simples: "diaria", "semanal", "mensal", "N" ou "minutos:N" em minutos.
+# shortcut: "mensal" = 30 dias fixos; troque por calendário se precisar do dia exato.
+def minutos_de_recorrencia(valor) -> int:
+    if valor is None or isinstance(valor, bool):
+        return 0
+    if isinstance(valor, (int, float)):
+        return max(0, int(valor))
+    texto = unicodedata.normalize("NFD", str(valor).strip().lower())
+    texto = "".join(c for c in texto if unicodedata.category(c) != "Mn")
+    if not texto:
+        return 0
+    mapa = {"diaria": 1440, "diario": 1440, "daily": 1440,
+            "semanal": 10080, "weekly": 10080,
+            "mensal": 43200, "monthly": 43200}
+    if texto in mapa:
+        return mapa[texto]
+    if texto.startswith("minutos:"):
+        texto = texto.split(":", 1)[1]
+    try:
+        return max(0, int(float(texto)))
+    except (TypeError, ValueError):
+        raise MemoriaLimite(
+            f"Recorrência inválida: {valor!r}. Use diaria, semanal, mensal ou minutos.") from None
+
+
+def proxima_ocorrencia(quando, repetir_minutos, agora=None) -> float | None:
+    """Próxima data futura; pula ocorrências perdidas enquanto o app estava fechado."""
+    minutos = max(0, int(repetir_minutos or 0))
+    if minutos <= 0:
+        return None
+    agora = time.time() if agora is None else float(agora)
+    proxima = float(quando) + minutos * 60
+    if proxima <= agora:
+        proxima += (int((agora - proxima) // (minutos * 60)) + 1) * minutos * 60
+    return proxima
+
+
+@_historico([])
+def lembretes_vencidos_detalhado():
+    linhas = _x("SELECT id, due, texto, COALESCE(repetir_minutos,0) FROM lembretes "
+                "WHERE feito=0 AND due<=? ORDER BY due", (time.time(),), True)
+    itens = []
+    for id_, due, guardado, repetir in linhas:
+        texto = _texto("lembretes", id_, guardado)
+        if texto is not None:
+            itens.append({"id": id_, "due": due, "texto": texto,
+                          "repetir_minutos": int(repetir or 0)})
+    return itens
 
 
 @_historico([])
 def lembretes_vencidos():
-    linhas = _x("SELECT id, texto FROM lembretes WHERE feito=0 AND due<=?",
-                (time.time(),), True)
-    return [(id_, texto) for id_, guardado in linhas
-            if (texto := _texto("lembretes", id_, guardado)) is not None]
+    return [(item["id"], item["texto"]) for item in lembretes_vencidos_detalhado()]
 
 
 @_historico([])
@@ -438,6 +510,110 @@ def lembretes_numerados():
 @_historico(None)
 def marcar_feito(id_):
     _x("UPDATE lembretes SET feito=1 WHERE id=?", (id_,))
+
+
+@_historico(None)
+def reagendar_lembrete(id_, repetir_minutos, base=None):
+    if base is None:
+        linha = _x("SELECT due FROM lembretes WHERE id=?", (int(id_),), True)
+        base = linha[0][0] if linha else time.time()
+    _x("UPDATE lembretes SET due=? WHERE id=?",
+       (proxima_ocorrencia(base, repetir_minutos), int(id_)))
+
+
+# ---------- agenda ----------
+@_historico(None)
+def add_evento(quando, texto, repetir_minutos=0, fluxo_id=""):
+    return _x("INSERT INTO agenda(quando, texto, repetir_minutos, fluxo_id) VALUES(?,?,?,?)",
+              (float(quando), cofre.cifrar_dados(str(texto)),
+               max(0, int(repetir_minutos or 0)), str(fluxo_id or "")))
+
+
+def _eventos(where="feito=0", args=(), limite=100):
+    linhas = _x("SELECT id, quando, texto, COALESCE(repetir_minutos,0), COALESCE(fluxo_id,'') "
+                "FROM agenda WHERE " + where + " ORDER BY quando LIMIT ?",
+                (*args, int(limite)), True)
+    itens = []
+    for id_, quando, guardado, repetir, fluxo in linhas:
+        texto = _texto("agenda", id_, guardado)
+        if texto is not None:
+            itens.append({"id": id_, "quando": quando, "texto": texto,
+                          "repetir_minutos": int(repetir or 0), "fluxo_id": fluxo,
+                          "hora_local": datetime.datetime.fromtimestamp(quando).strftime("%d/%m %H:%M")})
+    return itens
+
+
+@_historico([])
+def eventos_vencidos_detalhado():
+    return _eventos("feito=0 AND quando<=?", (time.time(),))
+
+
+@_historico([])
+def eventos_numerados(limite=100):
+    itens = []
+    for item in _eventos(limite=limite):
+        item = dict(item)
+        item["numero"] = len(itens) + 1
+        itens.append(item)
+    return itens
+
+
+@_historico([])
+def eventos_proximos(horas=24, limite=20):
+    return _eventos("feito=0 AND quando<=?", (time.time() + max(0, horas) * 3600,), limite)
+
+
+@_historico([])
+def eventos_do_dia(agora=None, limite=20):
+    """Eventos de hoje (até o fim do dia local), para o briefing."""
+    agora = time.time() if agora is None else float(agora)
+    fim = datetime.datetime.fromtimestamp(agora).replace(
+        hour=23, minute=59, second=59).timestamp()
+    return _eventos("feito=0 AND quando BETWEEN ? AND ?", (agora, fim), limite)
+
+
+@_historico("Histórico indisponível: restaure dados/.cofre.chave.")
+def cancelar_evento(numero=None, trecho=""):
+    """Cancela um evento da agenda. Sem alvo claro, recusa (nunca apaga todos)."""
+    pendentes = [(item["id"], item["texto"]) for item in _eventos()]
+    if not pendentes:
+        return "Não há eventos na agenda."
+    if numero is not None:
+        try:
+            indice = int(numero)
+        except (TypeError, ValueError):
+            raise MemoriaLimite("O número do evento precisa ser inteiro.") from None
+        if not 1 <= indice <= len(pendentes):
+            raise MemoriaLimite(f"Só existem {len(pendentes)} evento(s) na agenda.")
+        alvo_id, texto = pendentes[indice - 1]
+        _x("DELETE FROM agenda WHERE id = ?", (alvo_id,))
+        return f"Evento cancelado: {texto}"
+    limpo = " ".join(str(trecho or "").split())
+    if len([c for c in limpo if c.isalnum()]) < 3:
+        raise MemoriaLimite("Diga o número do evento ou um trecho com pelo menos 3 letras.")
+    alvo = limpo.casefold()
+    alvos = [(id_, texto) for id_, texto in pendentes if alvo in texto.casefold()]
+    if not alvos:
+        return "Não achei evento com esse trecho."
+    if len(alvos) > 1:
+        lista = "; ".join(f"{i + 1}) {texto}" for i, (_id, texto) in enumerate(pendentes))
+        raise MemoriaLimite(f"Mais de um evento combina. Diga o número: {lista}")
+    _x("DELETE FROM agenda WHERE id = ?", (alvos[0][0],))
+    return f"Evento cancelado: {alvos[0][1]}"
+
+
+@_historico(None)
+def marcar_evento_feito(id_):
+    _x("UPDATE agenda SET feito=1 WHERE id=?", (id_,))
+
+
+@_historico(None)
+def reagendar_evento(id_, repetir_minutos, base=None):
+    if base is None:
+        linha = _x("SELECT quando FROM agenda WHERE id=?", (int(id_),), True)
+        base = linha[0][0] if linha else time.time()
+    _x("UPDATE agenda SET quando=? WHERE id=?",
+       (proxima_ocorrencia(base, repetir_minutos), int(id_)))
 
 
 def status_criptografia() -> dict:
