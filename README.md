@@ -85,6 +85,23 @@ cada arquivo ao caminho original). Nada é sobrescrito — nome repetido vira
 download (`.tmp`, `.part`, `.crdownload`) ficam onde estão. A pasta precisa estar
 na allowlist, e organizar sempre pede confirmação.
 
+## Spotify
+
+O ULTRON controla o Spotify pela Web API oficial. Tocar e pausar exige Premium;
+buscar e consultar o que está tocando funciona em qualquer conta. As credenciais
+ficam no cofre cifrado (Configurações → Spotify):
+
+1. Crie um app em https://developer.spotify.com/dashboard e cadastre
+   `http://127.0.0.1:8888/callback` nas Redirect URIs.
+2. Copie o **client id** e o **client secret** para o cofre.
+3. Rode `python tools/autorizar_spotify.py`, autorize no navegador e copie o
+   **refresh token** impresso para o cofre.
+4. Peça **“toca Daft Punk no Spotify”** ou **“o que está tocando?”**.
+
+Ferramentas: `spotify_buscar`, `spotify_tocar` e `spotify_estado`, todas de risco
+baixo. Pausar e retomar continuam em `controlar_midia`. O modo DJ é um recurso do
+aplicativo do Spotify e não tem API pública — o ULTRON não o controla.
+
 ## Memória e nuances
 
 A conversa fica em SQLite (`dados/ultron.db`) e **não** é apagada por “limpar”:

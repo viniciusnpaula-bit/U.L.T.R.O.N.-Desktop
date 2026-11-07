@@ -26,6 +26,8 @@ contextBridge.exposeInMainWorld('ultron', Object.freeze({
   fatoCorrigir: (id, texto) => ipcRenderer.invoke('mem:fato-corrigir', id, texto),
   fatoApagar: id => ipcRenderer.invoke('mem:fato-apagar', id),
   lembreteCancelar: (numero, trecho) => ipcRenderer.invoke('mem:lembrete-cancelar', numero, trecho),
+  agendaListar: () => ipcRenderer.invoke('agenda:listar'),
+  agendaCancelar: (numero, trecho) => ipcRenderer.invoke('agenda:cancelar', numero, trecho),
   fluxosListar: () => ipcRenderer.invoke('fluxos:listar'),
   lembretesListar: () => ipcRenderer.invoke('mem:lembretes'),
   vozInfo: () => ipcRenderer.invoke('voz:info'),

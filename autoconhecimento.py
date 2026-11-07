@@ -64,13 +64,16 @@ _GRUPOS = {
     "câmera e gestos": (
         "controlar_mouse_com_gesto", "detectar_gestos_mao", "detectar_objetos", "webcam_foto",
     ),
-    "mídia e palco": ("controlar_midia", "mostrar_na_interface", "youtube"),
+    "mídia e palco": ("controlar_midia", "mostrar_na_interface", "spotify_buscar",
+                      "spotify_controlar", "spotify_estado", "spotify_tocar", "youtube"),
     "memória e lembretes": (
-        "cancelar_lembrete", "criar_lembrete", "esquecer_fato", "lembrar_fato", "listar_lembretes",
+        "briefing_matinal", "cancelar_evento", "cancelar_lembrete", "criar_evento",
+        "criar_lembrete", "esquecer_fato", "lembrar_fato", "listar_agenda", "listar_lembretes",
         "obsidian_anexar", "obsidian_buscar", "obsidian_criar", "obsidian_diario",
         "obsidian_ler", "obsidian_notas", "obsidian_status", "obsidian_tarefas",
     ),
-    "automação": ("executar_fluxo", "listar_jogos"),
+    "automação": ("agendar_fluxo", "criar_fluxo", "executar_fluxo", "listar_fluxos",
+                  "listar_jogos", "remover_fluxo"),
     "skills": ("criar_skill", "descartar_skill", "listar_skills", "usar_skill"),
     "desfazer": ("desfazer",),
 }

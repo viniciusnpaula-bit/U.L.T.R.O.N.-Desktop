@@ -10,6 +10,11 @@ ULTRON Desktop 2.0.0 — skills + registro emocional na voz
   parser local remove marcas do texto da tela e da fala.
 - Testes: suíte existente + novos casos de skills e registro emocional, sem IA
   real (respostas simuladas).
+- Integração com o Spotify (Web API): buscar, tocar e consultar o que está
+  tocando (`spotify_buscar`, `spotify_tocar`, `spotify_estado`), com credenciais
+  no cofre e refresh token gerado por `tools/autorizar_spotify.py`.
+- Cofre: rotas POST para salvar, remover e testar credenciais pela interface,
+  com validação estrita e sem devolver o valor.
 
 ULTRON Desktop 1.20.0 — registro emocional na voz
 

@@ -285,6 +285,24 @@ class DesktopRuntime:
         mensagem = memoria.cancelar_lembrete(numero=numero, trecho=trecho or "")
         return {"mensagem": mensagem, **self.lembretes_listar()}
 
+    def agenda_listar(self) -> dict:
+        import memoria
+        return {"eventos": memoria.eventos_numerados(),
+                "aviso": "Eventos e fluxos agendados só disparam com o ULTRON aberto."}
+
+    def agenda_criar(self, texto, quando, repetir="") -> dict:
+        import ferramentas
+        import memoria
+        minutos = memoria.minutos_de_recorrencia(repetir)
+        due = ferramentas._quando_do_texto(quando)
+        memoria.add_evento(due, texto, minutos)
+        return {"mensagem": "Evento criado.", **self.agenda_listar()}
+
+    def agenda_cancelar(self, numero=None, trecho=None) -> dict:
+        import memoria
+        mensagem = memoria.cancelar_evento(numero=numero, trecho=trecho or "")
+        return {"mensagem": mensagem, **self.agenda_listar()}
+
     def fluxos_listar(self) -> dict:
         import fluxos
         return {"fluxos": fluxos.listar()}

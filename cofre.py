@@ -36,12 +36,23 @@ _trava = threading.Lock()
 PROVEDORES = ("gemini", "groq", "nvidia", "openai", "openrouter", "mistral",
               "deepseek", "cerebras", "together", "xai")
 OUTROS = ("telegram_token", "telegram_uid")
+# Credenciais de serviços que não são provedores de IA: e-mail (IMAP/SMTP) e Spotify.
+SERVICOS = ("email_endereco", "email_senha", "spotify_client_id",
+            "spotify_client_secret", "spotify_refresh")
+CREDENCIAIS = PROVEDORES + OUTROS + SERVICOS
+_ATRIBUTO = {"email_endereco": "EMAIL_ENDERECO", "email_senha": "EMAIL_SENHA",
+             "spotify_client_id": "SPOTIFY_CLIENT_ID",
+             "spotify_client_secret": "SPOTIFY_CLIENT_SECRET",
+             "spotify_refresh": "SPOTIFY_REFRESH"}
 NOMES = {
     "gemini": "Gemini", "groq": "Groq", "nvidia": "NVIDIA Build",
     "openai": "OpenAI", "openrouter": "OpenRouter", "mistral": "Mistral",
     "deepseek": "DeepSeek", "cerebras": "Cerebras", "together": "Together AI",
     "xai": "xAI (Grok)",
     "telegram_token": "Telegram (token do bot)", "telegram_uid": "Telegram (seu ID)",
+    "email_endereco": "E-mail (endereço)", "email_senha": "E-mail (senha de app)",
+    "spotify_client_id": "Spotify (client ID)", "spotify_client_secret": "Spotify (client secret)",
+    "spotify_refresh": "Spotify (refresh token)",
 }
 # Página oficial onde cada serviço mostra/cria a chave. O processo principal do
 # Electron valida esta lista antes de abrir o navegador (nada de URL arbitrária).
@@ -58,6 +69,11 @@ LINKS = {
     "xai": "https://console.x.ai/",
     "telegram_token": "https://t.me/BotFather",
     "telegram_uid": "https://t.me/userinfobot",
+    "email_endereco": "https://myaccount.google.com/apppasswords",
+    "email_senha": "https://myaccount.google.com/apppasswords",
+    "spotify_client_id": "https://developer.spotify.com/dashboard",
+    "spotify_client_secret": "https://developer.spotify.com/dashboard",
+    "spotify_refresh": "https://developer.spotify.com/dashboard",
 }
 ENTROPIA_LABEL = b"ULTRON-Cofre-v1"
 
@@ -239,9 +255,11 @@ def _esquecer_cache() -> None:
 
 def guardar(nome: str, valor: str) -> dict:
     """Guarda (ou substitui) uma credencial cifrada. Não devolve o valor."""
-    if nome not in PROVEDORES + OUTROS:
+    if nome not in CREDENCIAIS:
         raise ValueError("Credencial desconhecida.")
     limpo = str(valor or "").strip()
+    if nome == "email_senha":       # senha de app do Gmail vem em blocos de 4
+        limpo = "".join(limpo.split())
     if not limpo:
         raise ValueError("A credencial está vazia.")
     if len(limpo) > 400:
@@ -269,6 +287,9 @@ def remover(nome: str) -> None:
             elif nome == "telegram_token":
                 import config
                 config.TELEGRAM_TOKEN = ""
+            elif nome in _ATRIBUTO:
+                import config
+                setattr(config, _ATRIBUTO[nome], "")
     _esquecer_cache()
 
 
@@ -292,18 +313,19 @@ def status() -> dict:
     except ChaveIndisponivel:
         modo = "indisponivel"
     itens = []
-    for nome in PROVEDORES + OUTROS:
+    for nome in CREDENCIAIS:
         guardado = dados.get(nome) if isinstance(dados.get(nome), dict) else None
         if nome in PROVEDORES:
-            do_env = bool(config.CHAVES.get(nome))
+            valor_env = config.CHAVES.get(nome, "")
         elif nome == "telegram_token":
-            do_env = bool(config.TELEGRAM_TOKEN)
+            valor_env = config.TELEGRAM_TOKEN
+        elif nome in _ATRIBUTO:
+            valor_env = getattr(config, _ATRIBUTO[nome], "")
         else:
-            do_env = bool(getattr(config, "TELEGRAM_USER_ID", 0))
+            valor_env = ""      # telegram_uid: o status só diz se está configurado
+        do_env = bool(valor_env) or (nome == "telegram_uid" and bool(config.TELEGRAM_USER_ID))
         fonte = "cofre" if guardado else ("env" if do_env else None)
-        dica = guardado.get("dica") if guardado else (mascarar(getattr(config, "CHAVES", {}).get(nome, "")
-                                                              or (config.TELEGRAM_TOKEN if nome == "telegram_token" else ""))
-                                                      if do_env else "")
+        dica = guardado.get("dica") if guardado else (mascarar(valor_env) if do_env else "")
         itens.append({"nome": nome, "rotulo": NOMES[nome], "configurada": bool(fonte),
                       "fonte": fonte, "dica": dica, "link": LINKS.get(nome, ""),
                       "testavel": nome in PROVEDORES})
@@ -336,6 +358,11 @@ def aplicar_na_config() -> dict:
     if uid.isdigit():
         config.TELEGRAM_USER_ID = int(uid)
         aplicadas.append("telegram_uid")
+    for nome, atributo in _ATRIBUTO.items():
+        valor = obter(nome)
+        if valor:
+            setattr(config, atributo, valor)
+            aplicadas.append(nome)
     return {"aplicadas": aplicadas}
 
 
@@ -343,7 +370,7 @@ def _redacao_extra() -> None:
     """Faz o redator de logs mascarar também o que está no cofre."""
     try:
         import seguranca
-        valores = [obter(n) for n in PROVEDORES + OUTROS]
+        valores = [obter(n) for n in CREDENCIAIS]
         seguranca.SEGREDOS_COFRE = tuple(v for v in valores if v and len(v) >= 4)
     except Exception:
         pass

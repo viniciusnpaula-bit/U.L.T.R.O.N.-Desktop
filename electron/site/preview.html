@@ -305,6 +305,11 @@
           <option value="xai">xAI (Grok)</option>
           <option value="telegram_token">Telegram (token do bot)</option>
           <option value="telegram_uid">Telegram (seu ID)</option>
+          <option value="email_endereco">E-mail (endereço)</option>
+          <option value="email_senha">E-mail (senha de app)</option>
+          <option value="spotify_client_id">Spotify (client ID)</option>
+          <option value="spotify_client_secret">Spotify (client secret)</option>
+          <option value="spotify_refresh">Spotify (refresh token)</option>
         </select>
         <label class="sr-only" for="cofreValor">Valor da chave</label>
         <input id="cofreValor" type="password" autocomplete="off" spellcheck="false" placeholder="cole a chave aqui (não aparece na tela)">
@@ -326,6 +331,13 @@
       <p class="micro nano" id="factsNote" role="status">—</p>
       <div id="lembretesList" class="facts-list" aria-live="polite"></div>
       <p class="muted nano" id="lembretesNote">—</p>
+    </section>
+
+    <section class="block">
+      <h3>Agenda</h3>
+      <p class="muted">Compromissos e fluxos agendados. Só disparam com o ULTRON aberto.</p>
+      <div id="agendaList" class="facts-list" aria-live="polite"></div>
+      <p class="muted nano" id="agendaNote">—</p>
     </section>
 
     <section class="block">

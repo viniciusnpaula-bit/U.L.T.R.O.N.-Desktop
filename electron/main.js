@@ -21,7 +21,7 @@ const LINK_HOSTS = Object.freeze([
   'aistudio.google.com', 'console.groq.com', 'build.nvidia.com',
   'platform.openai.com', 'openrouter.ai', 'console.mistral.ai',
   'platform.deepseek.com', 'cloud.cerebras.ai', 'api.together.xyz',
-  'console.x.ai', 't.me',
+  'console.x.ai', 't.me', 'myaccount.google.com', 'developer.spotify.com',
 ]);
 const quickActions = Object.freeze({
   browser: 'Abra o navegador', spotify: 'Abra o Spotify', media: 'Pause ou retome a música',
@@ -152,6 +152,15 @@ function registerApiHandlers() {
     if (!isSender(event, mainWindow)) return null;
     if (numero !== null && numero !== undefined && !Number.isSafeInteger(numero)) return null;
     return api.lembreteCancelar(numero ?? null, trecho);
+  });
+  ipcMain.handle('agenda:listar', event => {
+    if (!isSender(event, mainWindow)) return null;
+    return api.agendaListar();
+  });
+  ipcMain.handle('agenda:cancelar', (event, numero, trecho) => {
+    if (!isSender(event, mainWindow)) return null;
+    if (numero !== null && numero !== undefined && !Number.isSafeInteger(numero)) return null;
+    return api.agendaCancelar(numero ?? null, trecho);
   });
   ipcMain.handle('fluxos:listar', event => {
     if (!isSender(event, mainWindow)) return null;
