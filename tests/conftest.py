@@ -3,6 +3,8 @@
 Sem isto, qualquer teste que chame `memoria` sem patch usa `dados/ultron.db` de
 verdade — e a migração cifra o banco do usuário no meio de um `pytest`.
 """
+import os
+os.environ.setdefault("OPENBLAS_NUM_THREADS", "1")
 import sqlite3
 
 import pytest
@@ -13,7 +15,11 @@ import memoria
 ESQUEMA = """
 CREATE TABLE IF NOT EXISTS mensagens(id INTEGER PRIMARY KEY, ts REAL, papel TEXT, texto TEXT);
 CREATE TABLE IF NOT EXISTS fatos(id INTEGER PRIMARY KEY, texto TEXT UNIQUE);
-CREATE TABLE IF NOT EXISTS lembretes(id INTEGER PRIMARY KEY, due REAL, texto TEXT, feito INTEGER DEFAULT 0);
+CREATE TABLE IF NOT EXISTS lembretes(id INTEGER PRIMARY KEY, due REAL, texto TEXT, feito INTEGER DEFAULT 0,
+                                     repetir_minutos INTEGER DEFAULT 0);
+CREATE TABLE IF NOT EXISTS agenda(id INTEGER PRIMARY KEY, quando REAL, texto TEXT,
+                                  repetir_minutos INTEGER DEFAULT 0, fluxo_id TEXT DEFAULT '',
+                                  feito INTEGER DEFAULT 0);
 """
 
 

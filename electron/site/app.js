@@ -1,6 +1,12 @@
 import { RealTransport } from './src/real.js';
 import { criarOrbe, criarCampo, estadoDoOrbe, normalizarModo } from './src/orb.js';
 import { criarDesbloqueio } from './src/unlock.js';
+import { criarTelaCarregamento } from './src/boot-screen.js';
+import { criarGerenciadorSkills } from './src/skills.js';
+import { criarPainelPersonalidade } from './src/personalidade-painel.js';
+import { criarPainelMemoria } from './src/memoria-painel.js';
+import { criarPainelBlocos } from './src/bloco12-painel.js';
+import { renderPalcoNoticias } from './src/palco-noticias.js';
 
 /* Uma tela só. Nada aqui inventa estado: tudo desenhado vem do núcleo. */
 // Elemento ausente devolve um stub inerte: a interface nunca morre por causa de um id.
@@ -18,6 +24,8 @@ const hudActions = Object.freeze({
   minimize: 'Minimize tudo',
 });
 const THEMES = ['ultron', 'jarvis', 'amber', 'emerald'];
+const PERFIL_POR_TEMA = { ultron: 'ultron', jarvis: 'jarvis', amber: 'visao', emerald: 'edith' };
+const TEMA_POR_PERFIL = { ultron: 'ultron', jarvis: 'jarvis', visao: 'amber', edith: 'emerald' };
 const state = {
   connected: false, paused: false, history: [], commands: new Map(),
   pending: null, status: {}, lastResponse: '',
@@ -29,12 +37,41 @@ const state = {
   undo: [], undoErro: false, undoBusy: false, // diário read-only do dock direito
 };
 const transport = new RealTransport({ onEvent: handleEvent });
+let historicoPronto = false;
+async function carregarPosDesbloqueio() {
+  try {
+    await Promise.allSettled([carregarHistorico(), carregarDiario()]);
+  } finally {
+    historicoPronto = state.status.session_desbloqueada === true;
+    if (bootScreen.ativa()) bootScreen.atualizar(state.status, { historicoPronto });
+  }
+}
+const bootScreen = criarTelaCarregamento({
+  aoTentarNovamente: () => {
+    refreshStatus();
+    carregarPosDesbloqueio();
+  },
+  aoConcluir: () => {
+    if ($('commandInput') && !gavetaAberta) $('commandInput').focus();
+  },
+});
 const desbloqueio = criarDesbloqueio({
   transport,
   aoMudarSessao: desbloqueada => {
     const botao = $('sessionButton');
     botao.textContent = desbloqueada ? 'liberado' : 'bloqueado';
     botao.dataset.state = desbloqueada ? 'on' : 'off';
+    if (desbloqueada === true) {
+      state.status.session_desbloqueada = true;
+      historicoPronto = false;
+      bootScreen.iniciar();
+      bootScreen.atualizar(state.status, { historicoPronto });
+      refreshStatus();
+      carregarPosDesbloqueio();
+    } else {
+      historicoPronto = false;
+      bootScreen.cancelar();
+    }
   },
 });
 
@@ -360,6 +397,8 @@ function updateStatus(data) {
   setMetric('systemMicVal', mic);
   setMetric('coreState', data.core_running === true ? 'OPERACIONAL' : data.core_running === false ? 'NÚCLEO PARADO' : 'DESCONHECIDO');
   setMetric('signalCoreText', $('coreVal').textContent);
+  const signalAdmin = $('signalAdmin');
+  if (signalAdmin) signalAdmin.hidden = !data.admin_elevated;
   setMetric('autostartVal', typeof data.autostart_installed === 'boolean' ? (data.autostart_installed ? 'início automático ativo' : 'início automático desligado') : 'início —');
   if ($('authStatus') && data.api_running) $('authStatus').textContent = 'sessão autenticada';
   if ($('uptime')) $('uptime').textContent = data.core_running && data.api_running ? 'CORE + API ONLINE' : 'AGUARDANDO NÚCLEO';
@@ -412,11 +451,15 @@ function updateStatus(data) {
 
   if (state.pending === null) aplicarEstado(data);
   if (data.session_desbloqueada === true && sessaoAntes !== true) {
-    carregarHistorico();
-    carregarDiario();
+    carregarPosDesbloqueio();
+  }
+  if (data.session_desbloqueada !== true) {
+    historicoPronto = false;
+    bootScreen.cancelar();
   }
   if (data.session_desbloqueada !== true && (state.undo.length || state.undoErro)) limparDiario();
   if (data.session_desbloqueada !== true) $('dockHistorico').textContent = 'histórico local';
+  if (bootScreen.ativa()) bootScreen.atualizar(data, { historicoPronto });
   publishHudSnapshot();
 }
 
@@ -481,8 +524,8 @@ function confirmation(event) {
   (pin || approve).focus();
 }
 
-/* ── palco: vídeo, imagem, PDF, site ou texto no lugar do núcleo ─────────── */
-const PALCO_ROTULO = Object.freeze({ video: 'vídeo', imagem: 'imagem', pdf: 'PDF', site: 'site', texto: 'texto' });
+/* ── palco: vídeo, imagem, PDF, site, notícias ou texto no lugar do núcleo ─ */
+const PALCO_ROTULO = Object.freeze({ video: 'vídeo', imagem: 'imagem', pdf: 'PDF', site: 'site', texto: 'texto', noticias: 'notícias' });
 // Vídeo começa mudo (autoplay confiável e sem susto). Em player de outra origem
 // o som só liga recarregando sem o parâmetro de mudo — daí o estado fixo.
 let palcoSomLigado = false;
@@ -606,21 +649,51 @@ function mostrarPalco(dados) {
       src: fonte, title: titulo, referrerpolicy: 'no-referrer',
       sandbox: 'allow-scripts allow-same-origin allow-forms',
     }));
+  } else if (tipo === 'noticias') {
+    const abrirMateria = async url => {
+      if (!url) return false;
+      try {
+        const aberto = await window.ultron.abrirExterno(url);
+        if (!aberto) toast('Não abri esse endereço: ele não passou na verificação de segurança.');
+        return aberto;
+      } catch {
+        toast('Não foi possível abrir o navegador do sistema.');
+        return false;
+      }
+    };
+    renderPalcoNoticias({
+      corpo,
+      dados,
+      abrirExterno: abrirMateria,
+      onSelectItem: item => {
+        const link = typeof item?.url === 'string' && /^https?:\/\//i.test(item.url) ? item.url : '';
+        const botaoExterno = $('palcoExternal');
+        botaoExterno.hidden = !link;
+        botaoExterno.textContent = 'abrir no navegador';
+        botaoExterno.dataset.url = link;
+        botaoExterno.dataset.id = '';
+        $('palcoSource').textContent = link
+          ? (() => { try { return new URL(link).hostname; } catch { return ''; } })()
+          : '';
+      },
+    });
   }
 
   $('palcoKind').textContent = PALCO_ROTULO[tipo] || 'palco';
   $('palcoTitle').textContent = titulo;
   $('palcoNote').textContent = typeof dados.nota === 'string' ? dados.nota : '';
-  const externo = typeof dados.url === 'string' && /^https?:\/\//i.test(dados.url) ? dados.url : '';
-  const abrirPdf = tipo === 'pdf' && local && Boolean(dados.id);
-  const botaoExterno = $('palcoExternal');
-  botaoExterno.hidden = !(externo || abrirPdf);
-  botaoExterno.textContent = abrirPdf ? 'abrir PDF' : 'abrir no navegador';
-  botaoExterno.dataset.url = externo;
-  botaoExterno.dataset.id = abrirPdf ? String(dados.id) : '';
-  $('palcoSource').textContent = externo
-    ? (() => { try { return new URL(externo).hostname; } catch { return ''; } })()
-    : (local ? 'arquivo local' : '');
+  if (tipo !== 'noticias') {
+    const externo = typeof dados.url === 'string' && /^https?:\/\//i.test(dados.url) ? dados.url : '';
+    const abrirPdf = tipo === 'pdf' && local && Boolean(dados.id);
+    const botaoExterno = $('palcoExternal');
+    botaoExterno.hidden = !(externo || abrirPdf);
+    botaoExterno.textContent = abrirPdf ? 'abrir PDF' : 'abrir no navegador';
+    botaoExterno.dataset.url = externo;
+    botaoExterno.dataset.id = abrirPdf ? String(dados.id) : '';
+    $('palcoSource').textContent = externo
+      ? (() => { try { return new URL(externo).hostname; } catch { return ''; } })()
+      : (local ? 'arquivo local' : '');
+  }
   state.palco = dados;
   state.palcoIgnorado = null;
   const painel = $('palco');
@@ -700,12 +773,29 @@ function handleEvent(event) {
   if (event.event === 'PALCO_SHOW') mostrarPalco(event.data || {});
   if (event.event === 'PALCO_HIDE') esconderPalco();
   if (event.event === 'COMMAND_RESULT') {
+    const workflowId = event.data?.workflow_id;
+    if (typeof workflowId === 'string') {
+      fluxosEmExecucao.delete(workflowId);
+      document.querySelectorAll('[data-fluxo]').forEach(botao => {
+        if (botao.dataset.fluxo === workflowId) botao.disabled = false;
+      });
+      const value = event.data?.response;
+      const text = typeof value === 'string' && value ? value : 'O fluxo terminou sem resultado válido.';
+      const nota = $('fluxoNote');
+      nota.textContent = text;
+      nota.className = text.includes(' concluído (') ? 'micro nano ok' : 'micro nano err';
+      responder(text);
+      carregarDiario();
+      if (gavetaAberta) carregarSkills();
+      return;
+    }
     const command = state.commands.get(event.request_id) || 'comando por voz';
     state.commands.delete(event.request_id);
     const value = event.data?.response;
     const text = typeof value === 'string' && value ? value : 'O núcleo recebeu o comando.';
     responder(text);
     carregarDiario();
+    if (gavetaAberta) carregarSkills();
     const escrito = state.writing > 0;
     if (escrito) state.writing -= 1;
     if (escrito) adicionarTurno({ role: 'assistant', text, source: 'texto', at: Date.now() / 1000 });
@@ -727,6 +817,7 @@ async function send(text) {
     state.commands.set(result.operation_id, text);
     return true;
   } catch (error) {
+    if (state.writing > 0) state.writing -= 1;
     responder(error.message);
     toast(error.message);
     aplicarEstado(state.status);
@@ -931,171 +1022,22 @@ async function salvarVoz() {
 }
 
 /* ── personalidade: identidade, jeito, dados do usuário e saudação ────────── */
-let perfilAtual = 'ultron';
-let jeitoAtual = 'equilibrado';
-let jeitosCache = [];
-let saudacaoLigada = true;
-// tratamento guardado por perfil: trocar de perfil não herda o do anterior
-let tratamentosPorPerfil = {};
+const painelPersonalidade = criarPainelPersonalidade({
+  $,
+  onPerfilMudou: perfil => applyTheme(TEMA_POR_PERFIL[perfil] || 'ultron'),
+});
+const pintarPerfil = painelPersonalidade.pintarPerfil;
+const selecionarPerfil = painelPersonalidade.selecionarPerfil;
+const carregarPersonalidade = painelPersonalidade.carregarPersonalidade;
+const salvarPersonalidade = painelPersonalidade.salvarPersonalidade;
+const alternarSaudacao = painelPersonalidade.alternarSaudacao;
+const previaPersonalidade = painelPersonalidade.previaPersonalidade;
+const restaurarPersonalidade = painelPersonalidade.restaurarPersonalidade;
 
-function pintarPerfil(perfil) {
-  perfilAtual = perfil;
-  document.querySelectorAll('[data-profile]').forEach(node => {
-    node.setAttribute('aria-checked', String(node.dataset.profile === perfil));
-  });
-  const salvo = tratamentosPorPerfil[perfil];
-  if (typeof salvo === 'string') $('tratamentoInput').value = salvo;
-  $('headerProfile').textContent = String(perfil || 'ultron').toUpperCase();
-}
-
-function renderStyleCards(jeitos) {
-  const grade = $('styleCards');
-  if (!grade) return;
-  grade.replaceChildren();
-  for (const jeito of jeitos) {
-    const cartao = document.createElement('button');
-    cartao.type = 'button';
-    cartao.className = 'choice-card';
-    cartao.dataset.jeito = jeito.id;
-    cartao.setAttribute('role', 'radio');
-    cartao.setAttribute('aria-checked', 'false');
-    const titulo = document.createElement('b');
-    titulo.textContent = jeito.rotulo || jeito.id;
-    const nota = document.createElement('span');
-    nota.textContent = jeito.descricao || '';
-    cartao.append(titulo, nota);
-    cartao.addEventListener('click', () => escolherJeito(jeito.id));
-    grade.append(cartao);
-  }
-}
-
-function pintarJeito(jeito) {
-  jeitoAtual = jeito || 'equilibrado';
-  document.querySelectorAll('#styleCards [data-jeito]').forEach(node => {
-    node.setAttribute('aria-checked', String(node.dataset.jeito === jeitoAtual));
-  });
-  $('headerStyle').textContent = jeitosCache.find(j => j.id === jeitoAtual)?.rotulo || jeitoAtual;
-}
-
-function pintarSaudacao(ligada) {
-  saudacaoLigada = Boolean(ligada);
-  const botao = $('greetingToggle');
-  if (!botao) return;
-  botao.setAttribute('aria-checked', String(saudacaoLigada));
-  botao.textContent = `saudação ao abrir: ${saudacaoLigada ? 'ligada' : 'desligada'}`;
-}
-
-function preencherUsuario(usuario = {}) {
-  if ($('userName')) $('userName').value = usuario.nome || '';
-  if ($('userNickname')) $('userNickname').value = usuario.apelido || '';
-  if ($('userAge')) $('userAge').value = usuario.idade || '';
-  if ($('userGender')) $('userGender').value = usuario.genero || '';
-  if ($('userAbout')) $('userAbout').value = usuario.sobre || '';
-}
-
-function dadosDoUsuario() {
-  return {
-    nome: $('userName')?.value.trim() || '',
-    apelido: $('userNickname')?.value.trim() || '',
-    idade: $('userAge')?.value.trim() || '',
-    genero: $('userGender')?.value || '',
-    sobre: $('userAbout')?.value.trim() || '',
-  };
-}
-
-async function carregarPersonalidade() {
-  try {
-    const info = await window.ultron.personalidadeInfo();
-    const atual = info.atual || {};
-    tratamentosPorPerfil = { ...(atual.tratamentos || {}) };
-    for (const p of info.perfis || []) {
-      if (typeof p.tratamento === 'string') tratamentosPorPerfil[p.id] = p.tratamento;
-    }
-    jeitosCache = Array.isArray(info.jeitos) ? info.jeitos : [];
-    renderStyleCards(jeitosCache);
-    pintarPerfil(atual.perfil || 'ultron');
-    pintarJeito(atual.jeito || 'equilibrado');
-    $('tratamentoInput').value = atual.tratamento || tratamentosPorPerfil[atual.perfil] || '';
-    preencherUsuario(atual.usuario || {});
-    pintarSaudacao(atual.saudacao !== false);
-    $('profileNote').textContent = `perfil ${atual.perfil || 'ultron'} · jeito ${atual.jeito || 'equilibrado'} · tratamento “${atual.tratamento || '—'}”`;
-    $('profileNote').className = 'micro nano ok';
-  } catch (error) {
-    $('profileNote').textContent = `não consegui ler a personalidade (${error.message})`;
-    $('profileNote').className = 'micro nano err';
-  }
-}
-
-async function salvarPersonalidade({ usuario = false, saudacao = false } = {}) {
-  try {
-    const dados = {
-      perfil: perfilAtual,
-      tratamento: $('tratamentoInput').value.trim(),
-      jeito: jeitoAtual,
-    };
-    if (usuario) dados.usuario = dadosDoUsuario();
-    if (saudacao) dados.saudacao = saudacaoLigada;
-    const salvo = await window.ultron.personalidadeSalvar(dados);
-    tratamentosPorPerfil = { ...tratamentosPorPerfil, ...(salvo.tratamentos || {}) };
-    tratamentosPorPerfil[salvo.perfil] = salvo.tratamento;
-    pintarPerfil(salvo.perfil);
-    pintarJeito(salvo.jeito);
-    $('tratamentoInput').value = salvo.tratamento || '';
-    // só repinta os campos quando eles vieram do servidor (botão aplicar):
-    // salvar jeito/perfil/saudação não pode apagar o que ainda está sendo digitado
-    if (usuario && salvo.usuario) preencherUsuario(salvo.usuario);
-    pintarSaudacao(salvo.saudacao !== false);
-    const nomeJeito = jeitosCache.find(j => j.id === salvo.jeito)?.rotulo || salvo.jeito;
-    $('profileNote').textContent = `aplicado: ${salvo.perfil} · ${nomeJeito} · tratamento “${salvo.tratamento}”`;
-    $('profileNote').className = 'micro nano ok';
-    return salvo;
-  } catch (error) {
-    $('profileNote').textContent = `não consegui aplicar (${error.message})`;
-    $('profileNote').className = 'micro nano err';
-    return null;
-  }
-}
-
-async function escolherJeito(jeito) {
-  if (!jeito) return;
-  pintarJeito(jeito);
-  await salvarPersonalidade();
-}
-
-async function alternarSaudacao() {
-  pintarSaudacao(!saudacaoLigada);
-  try {
-    // caminho próprio: salva apenas a saudação, sem reenviar campos em edição
-    const salvo = await window.ultron.personalidadeSalvar({ saudacao: saudacaoLigada });
-    pintarSaudacao(salvo.saudacao !== false);
-    $('profileNote').textContent = `saudação ao abrir: ${saudacaoLigada ? 'ligada' : 'desligada'}`;
-    $('profileNote').className = 'micro nano ok';
-  } catch (error) {
-    pintarSaudacao(!saudacaoLigada);
-    $('profileNote').textContent = `não consegui salvar a saudação (${error.message})`;
-    $('profileNote').className = 'micro nano err';
-  }
-}
-
-async function previaPersonalidade() {
-  try {
-    const r = await window.ultron.personalidadePrevia();
-    $('profileNote').textContent = r.instrucao;
-    $('profileNote').className = 'micro nano';
-  } catch (error) {
-    $('profileNote').textContent = `não consegui montar a prévia (${error.message})`;
-    $('profileNote').className = 'micro nano err';
-  }
-}
-
-async function restaurarPersonalidade() {
-  try {
-    await window.ultron.personalidadeRestaurar();
-    await carregarPersonalidade();
-    $('profileNote').textContent = 'personalidade restaurada ao padrão.';
-  } catch (error) {
-    $('profileNote').textContent = `não consegui restaurar (${error.message})`;
-  }
+function sincronizarTemaEPerfil(tema) {
+  applyTheme(tema);
+  const perfil = PERFIL_POR_TEMA[tema];
+  if (perfil) selecionarPerfil(perfil);
 }
 
 /* abas internas: voz · jeito · microfone · sobre você */
@@ -1225,193 +1167,99 @@ async function salvarNoCofre() {
 }
 
 /* ── memória: consultar, corrigir e apagar fatos ─────────────────────────── */
-/* Nada é apagado sem confirmação: cada botão pede "sim" antes de agir. */
-function fatoLinha(fato) {
-  const item = document.createElement('div');
-  item.className = 'fact';
-  item.dataset.id = String(fato.id);
-  const texto = document.createElement('p');
-  texto.textContent = fato.texto;
-  const acoes = document.createElement('div');
-  acoes.className = 'fact-actions';
+const painelMemoria = criarPainelMemoria({ $ });
+const carregarFatos = painelMemoria.carregarFatos;
+const carregarLembretes = painelMemoria.carregarLembretes;
+const carregarAgenda = painelMemoria.carregarAgenda;
 
-  const editar = document.createElement('button');
-  editar.type = 'button';
-  editar.textContent = 'editar';
-  editar.title = 'Corrigir este fato';
-  editar.onclick = async () => {
-    const novo = window.prompt('Corrigir o fato:', fato.texto);
-    if (novo === null) return;
-    const limpo = novo.trim();
-    if (!limpo || limpo === fato.texto) return;
-    try {
-      const r = await window.ultron.fatoCorrigir(fato.id, limpo);
-      pintarFatos(r.fatos, 'fato corrigido.');
-    } catch (error) {
-      notaFatos(`não consegui corrigir (${error.message})`, 'err');
+/* Fluxos: a lista e a execução usam os contratos diretos do núcleo. */
+const fluxosEmExecucao = new Set();
+async function carregarFluxos() {
+  const lista = $("fluxosList");
+  const nota = $("fluxoNote");
+  if (!lista) return;
+  const carregando = document.createElement("span");
+  carregando.className = "micro nano";
+  carregando.textContent = "carregando fluxos…";
+  lista.replaceChildren(carregando);
+  try {
+    const resposta = await window.ultron.fluxosListar();
+    const fluxos = Array.isArray(resposta?.fluxos) ? resposta.fluxos : [];
+    const validos = fluxos.filter(fluxo => fluxo && typeof fluxo.id === "string" &&
+      /^[a-z0-9][a-z0-9._-]{0,39}$/.test(fluxo.id));
+    if (!validos.length) {
+      const vazio = document.createElement("span");
+      vazio.className = "micro nano";
+      vazio.textContent = "nenhum fluxo disponível";
+      lista.replaceChildren(vazio);
+      if (nota) nota.textContent = "";
+      return;
     }
-  };
-
-  const apagar = document.createElement('button');
-  apagar.type = 'button';
-  apagar.textContent = 'apagar';
-  apagar.title = 'Apagar este fato';
-  apagar.onclick = async () => {
-    if (!window.confirm(`Apagar este fato?\n\n“${fato.texto}”`)) return;
-    try {
-      const r = await window.ultron.fatoApagar(fato.id);
-      pintarFatos(r.fatos, 'fato apagado.');
-    } catch (error) {
-      notaFatos(`não consegui apagar (${error.message})`, 'err');
+    const fragmento = document.createDocumentFragment();
+    for (const fluxo of validos) {
+      const botao = document.createElement("button");
+      const titulo = typeof fluxo.titulo === "string" && fluxo.titulo.trim() ? fluxo.titulo : fluxo.id;
+      const quantidade = Array.isArray(fluxo.etapas) ? fluxo.etapas.length : 0;
+      botao.type = "button";
+      botao.className = "ghost";
+      botao.dataset.fluxo = fluxo.id;
+      botao.disabled = fluxosEmExecucao.has(fluxo.id);
+      botao.textContent = `${titulo} (${quantidade} etapa${quantidade === 1 ? "" : "s"})`;
+      botao.title = typeof fluxo.descricao === "string" ? fluxo.descricao : titulo;
+      botao.addEventListener("click", () => rodarFluxo(fluxo.id));
+      fragmento.append(botao);
     }
-  };
-
-  acoes.append(editar, apagar);
-  item.append(texto, acoes);
-  return item;
-}
-
-function notaFatos(texto, classe = '') {
-  const alvo = $('factsNote');
-  alvo.textContent = texto;
-  alvo.className = `micro nano ${classe}`;
-}
-
-function pintarFatos(fatos, aviso = '') {
-  const lista = $('factsList');
-  lista.replaceChildren();
-  if (!fatos || !fatos.length) {
-    const vazio = document.createElement('span');
-    vazio.className = 'micro nano';
-    vazio.textContent = 'nenhum fato guardado';
-    lista.append(vazio);
-  } else {
-    for (const fato of fatos) lista.append(fatoLinha(fato));
-  }
-  if (aviso) notaFatos(`${aviso} (${fatos?.length ?? 0} guardados)`, 'ok');
-}
-
-async function carregarFatos() {
-  try {
-    const r = await window.ultron.fatosListar($('factsSearch').value.trim());
-    pintarFatos(r.fatos, '');
-    notaFatos(`${r.fatos.length} de até ${r.limite} fatos`);
-  } catch (error) {
-    notaFatos(`não consegui ler a memória (${error.message})`, 'err');
-  }
-}
-
-function paginaLembretes(itens, aviso = '') {
-  const lista = $('lembretesList');
-  lista.replaceChildren();
-  if (!itens || !itens.length) {
-    const vazio = document.createElement('span');
-    vazio.className = 'micro nano';
-    vazio.textContent = 'nenhum lembrete pendente';
-    lista.append(vazio);
-  }
-  for (const item of itens || []) {
-    const linha = document.createElement('div');
-    linha.className = 'fact';
-    const texto = document.createElement('p');
-    texto.textContent = `${item.hora_local} — ${item.texto}`;
-    const acoes = document.createElement('div');
-    acoes.className = 'fact-actions';
-    const cancelar = document.createElement('button');
-    cancelar.type = 'button';
-    cancelar.textContent = 'cancelar';
-    cancelar.title = 'Apagar este lembrete';
-    cancelar.onclick = async () => {
-      if (!window.confirm(`Cancelar o lembrete “${item.texto}”?`)) return;
-      try {
-        const r = await window.ultron.lembreteCancelar(item.numero, '');
-        paginaLembretes(r.lembretes, r.mensagem);
-      } catch (error) {
-        $('lembretesNote').textContent = `não consegui cancelar (${error.message})`;
-      }
-    };
-    acoes.append(cancelar);
-    linha.append(texto, acoes);
-    lista.append(linha);
-  }
-  if (aviso) $('lembretesNote').textContent = `${aviso} · ${(itens || []).length} pendente(s)`;
-}
-
-async function carregarLembretes() {
-  try {
-    const r = await window.ultron.lembretesListar();
-    paginaLembretes(r.lembretes, '');
-    $('lembretesNote').textContent = (r.lembretes || []).length
-      ? `${r.lembretes.length} pendente(s) · ${r.aviso}`
-      : r.aviso;
+    lista.replaceChildren(fragmento);
+    if (nota) nota.textContent = `${validos.length} fluxo(s) disponível(is).`;
   } catch {
-    $('lembretesNote').textContent = 'não consegui ler os lembretes';
+    const erro = document.createElement("span");
+    erro.className = "micro nano err";
+    erro.textContent = "não consegui carregar os fluxos";
+    lista.replaceChildren(erro);
+    if (nota) nota.textContent = "verifique a conexão com o núcleo";
   }
 }
-
-function paginaAgenda(itens, aviso = '') {
-  const lista = $('agendaList');
-  lista.replaceChildren();
-  if (!itens || !itens.length) {
-    const vazio = document.createElement('span');
-    vazio.className = 'micro nano';
-    vazio.textContent = 'nenhum evento na agenda';
-    lista.append(vazio);
-  }
-  for (const item of itens || []) {
-    const linha = document.createElement('div');
-    linha.className = 'fact';
-    const texto = document.createElement('p');
-    const repeticao = item.repetir_minutos > 0 ? ` (repete a cada ${item.repetir_minutos} min)` : '';
-    texto.textContent = `${item.hora_local} — ${item.texto}${repeticao}`;
-    const acoes = document.createElement('div');
-    acoes.className = 'fact-actions';
-    const cancelar = document.createElement('button');
-    cancelar.type = 'button';
-    cancelar.textContent = 'cancelar';
-    cancelar.title = 'Apagar este evento';
-    cancelar.onclick = async () => {
-      if (!window.confirm(`Cancelar o evento “${item.texto}”?`)) return;
-      try {
-        const r = await window.ultron.agendaCancelar(item.numero, '');
-        paginaAgenda(r.eventos, r.mensagem);
-      } catch (error) {
-        $('agendaNote').textContent = `não consegui cancelar (${error.message})`;
-      }
-    };
-    acoes.append(cancelar);
-    linha.append(texto, acoes);
-    lista.append(linha);
-  }
-  if (aviso) $('agendaNote').textContent = `${aviso} · ${(itens || []).length} evento(s)`;
+const skillsManager = criarGerenciadorSkills({
+  confirmar: mensagem => window.confirm(mensagem),
+});
+function carregarSkills() {
+  return skillsManager.carregar();
 }
-
-async function carregarAgenda() {
-  try {
-    const r = await window.ultron.agendaListar();
-    paginaAgenda(r.eventos, '');
-    $('agendaNote').textContent = (r.eventos || []).length
-      ? `${r.eventos.length} evento(s) · ${r.aviso}`
-      : r.aviso;
-  } catch {
-    $('agendaNote').textContent = 'não consegui ler a agenda';
-  }
-}
-
-/* Fluxos: o núcleo executa etapa por etapa e devolve o resultado de cada uma. */
 async function rodarFluxo(id) {
+  if (typeof id !== 'string' || !/^[a-z0-9][a-z0-9._-]{0,39}$/.test(id) || fluxosEmExecucao.has(id)) return;
   const nota = $('fluxoNote');
-  nota.textContent = 'executando…';
+  if (!state.connected) {
+    nota.textContent = 'o núcleo está desconectado';
+    nota.className = 'micro nano err';
+    return;
+  }
+  fluxosEmExecucao.add(id);
+  document.querySelectorAll('[data-fluxo]').forEach(botao => {
+    if (botao.dataset.fluxo === id) botao.disabled = true;
+  });
+  nota.textContent = 'iniciando fluxo diretamente…';
   nota.className = 'micro nano';
   try {
-    await send(`Execute o fluxo ${id}`);
-    nota.textContent = `fluxo ${id} enviado ao núcleo — o resultado por etapa aparece na câmara e na conversa.`;
-    nota.className = 'micro nano ok';
+    const resultado = await transport.executarFluxo(id);
+    if (!resultado || typeof resultado.operation_id !== 'string' || !/^[a-f0-9]{32}$/.test(resultado.operation_id)) {
+      throw new Error('Resposta inválida do núcleo.');
+    }
+    if (fluxosEmExecucao.has(id)) nota.textContent = 'fluxo em execução…';
   } catch (error) {
+    fluxosEmExecucao.delete(id);
+    document.querySelectorAll('[data-fluxo]').forEach(botao => {
+      if (botao.dataset.fluxo === id) botao.disabled = false;
+    });
     nota.textContent = `não consegui iniciar o fluxo (${error.message})`;
     nota.className = 'micro nano err';
   }
 }
+
+/* ── automações de disco (bloco 1) e processos/hardware (bloco 2) ────────── */
+const painelBlocos = criarPainelBlocos({ $, transport, toast });
+const carregarBloco1 = painelBlocos.carregarBloco1;
+const carregarBloco2 = painelBlocos.carregarBloco2;
+painelBlocos.vincularControles();
 
 /* ── atualização pelo GitHub ─────────────────────────────────────────────── */
 /* Fluxo do botão "atualizar ULTRON":
@@ -1419,7 +1267,7 @@ async function rodarFluxo(id) {
      2. baixar, conferir o SHA-256 e aplicar;
      3. se sobrar arquivo em uso, pedir o reinício (ou reiniciar na hora, se o
         usuário confirmar). O progresso aparece na própria barra.               */
-const updateUi = { job: null, timer: null, version: '1.9.8', busy: false };
+const updateUi = { job: null, timer: null, version: window.ultron?.version || '2.1.0', busy: false };
 
 function updateLinha(texto, classe = '') {
   const alvo = $('updateState');
@@ -1472,6 +1320,7 @@ async function acompanharAtualizacao() {
         updateLinha(job.message || 'baixando…', 'warn');
       } else if (job.status === 'pronto') {
         clearInterval(updateUi.timer);
+        updateUi.timer = null;
         progresso(100);
         botaoAtualizar('livre');
         if (job.needs_restart) {
@@ -1484,11 +1333,13 @@ async function acompanharAtualizacao() {
         }
       } else if (job.status === 'erro') {
         clearInterval(updateUi.timer);
+        updateUi.timer = null;
         botaoAtualizar('livre');
         progresso(null);
         updateLinha(job.message || 'falhou', 'err');
       } else if (job.status === 'atualizado') {
         clearInterval(updateUi.timer);
+        updateUi.timer = null;
         botaoAtualizar('livre');
         updateLinha(job.message || 'já está atualizado', 'ok');
       }
@@ -1525,7 +1376,7 @@ async function atualizarUltron() {
   updateLinha('verificando no GitHub…');
   try {
     const info = await window.ultron.updateCheck();
-    if (info.status === 'erro') { updateLinha(info.message || 'falha ao consultar', 'err'); return; }
+    if (info.status === 'erro') { updateLinha(info.message || 'falha ao consultar', 'err'); progresso(null); return; }
     if (info.status === 'sem_release') { updateLinha('ainda não há release publicado', 'warn'); progresso(null); return; }
     if (!info.update_available) {
       progresso(100);
@@ -1647,7 +1498,11 @@ function drawer(open, { focar = true } = {}) {
     carregarFatos();
     carregarLembretes();
     carregarAgenda();
+    carregarFluxos();
+    carregarSkills();
     carregarCofre();
+    carregarBloco1();
+    carregarBloco2();
     // ao abrir sozinha no carregamento não há interação: focar aqui desenharia
     // um anel de foco que ninguém pediu
     if (focar) $('closeDrawer')?.focus();
@@ -1681,8 +1536,8 @@ applyTheme((() => { try { return localStorage.getItem('ultron-theme') || 'ultron
 aplicarModoNucleo(modoNucleo);
 $('coreMode').onclick = () => aplicarModoNucleo(modoNucleo === '3d' ? '2d' : '3d', { avisar: true });
 document.querySelectorAll('[data-core]').forEach(node => node.onclick = () => aplicarModoNucleo(node.dataset.core, { avisar: true }));
-document.querySelectorAll('[data-theme-pill]').forEach(node => node.onclick = () => applyTheme(node.dataset.themePill));
-document.querySelectorAll('#themeSwatches .swatch').forEach(node => node.onclick = () => applyTheme(node.dataset.theme));
+document.querySelectorAll('[data-theme-pill]').forEach(node => node.onclick = () => sincronizarTemaEPerfil(node.dataset.themePill));
+document.querySelectorAll('#themeSwatches .swatch').forEach(node => node.onclick = () => sincronizarTemaEPerfil(node.dataset.theme));
 document.querySelectorAll('[data-command]').forEach(button => button.onclick = () => send(button.dataset.command));
 
 $('consoleForm').addEventListener('submit', event => {
@@ -1700,18 +1555,16 @@ $('voiceStart').onclick = toggleMicrophone;
 $('refreshMicrophones').onclick = () => refreshMicrophones();
 $('saveMicrophone').onclick = saveMicrophone;
 $('testConnection').onclick = () => refreshStatus(true);
-document.querySelectorAll('[data-fluxo]').forEach(botao => botao.onclick = () => rodarFluxo(botao.dataset.fluxo));
+
 $('cofreSalvar').onclick = salvarNoCofre;
 $('cofreValor').addEventListener('keydown', event => { if (event.key === 'Enter') salvarNoCofre(); });
 $('factsRefresh').onclick = carregarFatos;
+$('skillsRefresh').onclick = carregarSkills;
 $('factsSearch').addEventListener('keydown', event => { if (event.key === 'Enter') carregarFatos(); });
 $('testMic').onclick = testarMicrofone;
 $('testVoice').onclick = testarVoz;
 $('saveVoice').onclick = salvarVoz;
-document.querySelectorAll('[data-profile]').forEach(node => node.onclick = () => {
-  pintarPerfil(node.dataset.profile);
-  salvarPersonalidade();
-});
+document.querySelectorAll('[data-profile]').forEach(node => node.onclick = () => selecionarPerfil(node.dataset.profile));
 $('savePersonality').onclick = () => salvarPersonalidade({ usuario: true, saudacao: true });
 $('greetingToggle').onclick = alternarSaudacao;
 $('tabVoice').onclick = () => mostrarAba('voz');
@@ -1739,6 +1592,8 @@ $('sessionButton').addEventListener('click', async () => {
   if (state.status.session_desbloqueada === true) {
     try { await transport.lock(); } catch { /* o polling reconcilia */ }
     state.status.session_desbloqueada = false;
+    historicoPronto = false;
+    bootScreen.cancelar();
     limparDiario();
   }
   desbloqueio.abrir();
@@ -1747,6 +1602,8 @@ function sessaoBloqueada() {
   // bloqueio vindo do Windows (tela bloqueada/suspensão) ou por inatividade:
   // o diário não fica na tela
   state.status.session_desbloqueada = false;
+  historicoPronto = false;
+  bootScreen.cancelar();
   limparDiario();
   desbloqueio.abrir();
 }
@@ -1759,6 +1616,114 @@ $('undoAction').onclick = async () => {
   pintarDiario();                           // reabilita conforme a lista real
 };
 $('openSettings').onclick = () => drawer(!gavetaAberta);
+
+/* ── pareamento rápido com o celular (fora das configurações) ─────────────── */
+let mobilePairLinkAtual = '';
+function limparQrPareamento() {
+  mobilePairLinkAtual = '';
+  $('mobilePairQrImg').removeAttribute('src');
+  $('mobilePairQrBox').hidden = true;
+  $('mobilePairCopyLink').hidden = true;
+  $('mobilePairManual').hidden = true;
+  $('mobilePairManual').open = false;
+  $('mobilePairManualUrl').textContent = '—';
+  $('mobilePairManualDevice').textContent = '—';
+  $('mobilePairManualSecret').textContent = '—';
+}
+function atualizarBotaoParear(info) {
+  const conectado = Boolean(info && info.configured);
+  const btn = $('pairPhoneButton');
+  btn.dataset.state = conectado ? 'on' : 'off';
+  btn.textContent = conectado ? 'celular pareado' : 'parear celular';
+}
+function fecharModalPareamento() {
+  limparQrPareamento();
+  $('mobilePairBackdrop').hidden = true;
+}
+async function gerarQrPareamento() {
+  $('mobilePairGenerate').disabled = true;
+  $('mobilePairStatus').textContent = 'Gerando QR Code seguro na rede local…';
+  try {
+    const dados = await transport.mobilePairingRotate(null, false);
+    if (!dados || !dados.pairing_uri || !dados.qr_data_uri) {
+      $('mobilePairStatus').textContent = 'Não foi possível gerar o QR Code agora.';
+      return;
+    }
+    mobilePairLinkAtual = dados.pairing_uri;
+    $('mobilePairQrImg').src = dados.qr_data_uri;
+    $('mobilePairQrBox').hidden = false;
+    $('mobilePairCopyLink').hidden = false;
+    $('mobilePairRevoke').hidden = false;
+    $('mobilePairManual').hidden = false;
+    $('mobilePairManualUrl').textContent = dados.lan_url || '—';
+    $('mobilePairManualDevice').textContent = dados.device_id || '—';
+    $('mobilePairManualSecret').textContent = dados.shared_secret || '—';
+    $('mobilePairGenerate').textContent = 'gerar novo QR Code';
+    $('mobilePairStatus').textContent = dados.mobile_server_running
+      ? `Pronto para conectar (${dados.lan_url})`
+      : `QR Code pronto (${dados.lan_url})`;
+    atualizarBotaoParear({ configured: true });
+  } catch {
+    $('mobilePairStatus').textContent = 'Erro ao gerar pareamento. Verifique se o núcleo local está ativo.';
+  } finally {
+    $('mobilePairGenerate').disabled = false;
+  }
+}
+async function abrirModalPareamento() {
+  if (gavetaAberta) fecharGaveta();
+  limparQrPareamento();
+  $('mobilePairBackdrop').hidden = false;
+  $('mobilePairStatus').textContent = 'Verificando conexão local…';
+  try {
+    const info = await transport.mobilePairingStatus();
+    atualizarBotaoParear(info);
+    if (info && info.configured) {
+      const lista = (info.devices || []).map(d => d.device_id).filter(Boolean).join(', ');
+      $('mobilePairRevoke').hidden = false;
+      $('mobilePairGenerate').textContent = 'gerar novo QR Code';
+      $('mobilePairStatus').textContent = lista
+        ? `Celular conectado: ${lista} (${info.lan_url || ''})`
+        : 'Celular conectado na rede local.';
+      return;
+    }
+  } catch {
+    /* segue para geração imediata no primeiro uso */
+  }
+  $('mobilePairRevoke').hidden = true;
+  $('mobilePairGenerate').textContent = 'gerar QR Code';
+  await gerarQrPareamento();
+}
+$('pairPhoneButton').onclick = abrirModalPareamento;
+$('mobilePairClose').onclick = fecharModalPareamento;
+$('mobilePairGenerate').onclick = gerarQrPareamento;
+$('mobilePairCopyLink').onclick = async () => {
+  if (!mobilePairLinkAtual) return;
+  try {
+    await navigator.clipboard.writeText(mobilePairLinkAtual);
+    toast('Link de pareamento copiado.');
+  } catch {
+    toast('Não consegui copiar automaticamente — abra os dados manuais.');
+  }
+};
+$('mobilePairRevoke').onclick = async () => {
+  $('mobilePairRevoke').disabled = true;
+  try {
+    await transport.mobilePairingRevoke(null);
+    limparQrPareamento();
+    $('mobilePairRevoke').hidden = true;
+    $('mobilePairGenerate').textContent = 'gerar QR Code';
+    $('mobilePairStatus').textContent = 'Nenhum celular conectado.';
+    atualizarBotaoParear({ configured: false });
+    toast('Celular desconectado.');
+  } catch {
+    toast('Não foi possível desconectar agora.');
+  } finally {
+    $('mobilePairRevoke').disabled = false;
+  }
+};
+$('mobilePairBackdrop').addEventListener('pointerdown', event => {
+  if (event.target === $('mobilePairBackdrop')) fecharModalPareamento();
+});
 /* fechar: seta, clique fora (o backdrop cobre o resto da tela) e Esc */
 $('closeDrawer').addEventListener('click', event => { event.preventDefault(); fecharGaveta(); });
 $('drawerBackdrop').addEventListener('pointerdown', event => { event.preventDefault(); fecharGaveta(); });
@@ -1828,21 +1793,34 @@ function atalhos(event) {
     const alvo = event.target;
     const digitando = Boolean(alvo && typeof alvo.tagName === 'string' &&
       /^(INPUT|TEXTAREA|SELECT)$/.test(alvo.tagName));
+    if (!$('mobilePairBackdrop').hidden) { event.preventDefault(); event.stopPropagation(); fecharModalPareamento(); return; }
     if (!$('drawer').hidden) { event.preventDefault(); event.stopPropagation(); fecharGaveta(); return; }
     if (state.palco && !digitando) { event.preventDefault(); event.stopPropagation(); fecharPalco(); }
   }
 }
 /* captura: funciona mesmo quando o foco está num select/botão dentro da barra */
 window.addEventListener('keydown', atalhos, { capture: true });
-document.addEventListener('keydown', atalhos);
 
 /* ── ciclo de vida ───────────────────────────────────────────────────────── */
 restaurarRails();
 updateClock();
-setInterval(updateClock, 1000);
+const clockTimer = setInterval(updateClock, 1000);
+let conversaTimer = 0;
+let statusFallbackTimer = 0;
 window.addEventListener('resize', () => { if (gavetaAberta) posicionarBarra(); });
 document.addEventListener('visibilitychange', () => orbLoop(!document.hidden));
-window.addEventListener('beforeunload', () => { orb.parar(); campo.parar(); desbloqueio.parar(); transport.disconnect(); });
+window.addEventListener('beforeunload', () => {
+  clearInterval(clockTimer);
+  clearInterval(conversaTimer);
+  clearInterval(statusFallbackTimer);
+  clearInterval(updateUi.timer);
+  updateUi.timer = null;
+  (orb.destruir || orb.parar).call(orb);
+  campo.parar();
+  bootScreen.destruir();
+  desbloqueio.parar();
+  transport.disconnect();
+});
 
 (async () => {
   // AO ABRIR: a câmara aparece inteira; ajustes só quando forem pedidos.
@@ -1852,6 +1830,7 @@ window.addEventListener('beforeunload', () => { orb.parar(); campo.parar(); desb
   try {
     await transport.connect();
     connection(true);
+    transport.mobilePairingStatus().then(atualizarBotaoParear).catch(() => {});
     carregarPersonalidade();
     carregarHistorico();
   } catch (est) {
@@ -1866,6 +1845,6 @@ window.addEventListener('beforeunload', () => { orb.parar(); campo.parar(); desb
     mostrarVersao(info);
     if (info?.needs_restart) $('updateRestart').hidden = false;
   }).catch(() => {});
-  setInterval(carregarConversa, 20000);     // reconcilia se algum evento se perder
-  setInterval(() => refreshStatus(), 5000);
+  conversaTimer = setInterval(carregarConversa, 20000);     // reconcilia se algum evento se perder
+  statusFallbackTimer = setInterval(() => { if (!state.connected) refreshStatus(); }, 5000);
 })();

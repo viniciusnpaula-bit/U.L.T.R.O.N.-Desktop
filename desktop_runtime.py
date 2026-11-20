@@ -4,8 +4,10 @@ from __future__ import annotations
 import importlib
 import inspect
 import json
+import logging
 import os
 import queue
+import re
 import sys
 import threading
 import time
@@ -20,26 +22,28 @@ import sessao
 # Limite de falhas de PIN e janela de espera (persistidos em dados/sessao.json).
 UNLOCK_FALHAS_MAX = 5
 UNLOCK_ESPERA_S = 30.0
-ARQUIVO_SESSAO = config.BASE / "dados" / "sessao.json"
+ARQUIVO_SESSAO = getattr(config, "ARQUIVO_SESSAO", getattr(config, "DIR_DADOS", config.BASE / "dados") / "sessao.json")
 
 
 class DesktopRuntime:
     """Runs one core voice loop and serializes Desktop commands through the core."""
 
-    def __init__(self, start_voice: bool = True):
+    def __init__(self, start_voice: bool = True, stop_event: threading.Event | None = None):
         self.start_voice = start_voice
         self._events: queue.Queue[dict] = queue.Queue()
-        self._commands: queue.Queue[tuple[str, str] | None] = queue.Queue()
+        self._commands: queue.Queue[tuple[str, str, str] | None] = queue.Queue()
+        self._workflow_pending: dict[str, str] = {}
+        self._workflow_lock = threading.Lock()
         self._pending: dict[str, dict] = {}
         self._pending_lock = threading.Lock()
         self._lifecycle_lock = threading.RLock()
         self._microphone_lock = threading.RLock()
-        self._stop = threading.Event()
+        self._stop = stop_event if stop_event is not None else threading.Event()
         self._started = False
         self._api_running = False
         self._shutdown_requested = False
         self._error: str | None = None
-        self._voice_state = "iniciando"
+        self._voice_state = "iniciando" if start_voice else "desativado"
         self._microphone_error: str | None = None
         self._main = None
         self._security = None
@@ -60,10 +64,25 @@ class DesktopRuntime:
         self._command_thread: threading.Thread | None = None
         self._voice_thread: threading.Thread | None = None
         self._notification_callback = None
+        self._speech_queue: queue.Queue[tuple[str, str] | None] = queue.Queue()
+        self._speech_thread: threading.Thread | None = None
+        self._speech_lock = threading.Lock()
+        self._recent_notifications: dict[str, float] = {}
+        self._pending_notifications: set[str] = set()
+        self._speaking_notification: str | None = None
+        self._stop_hook = None
+        self._voz_barge_in_hook = None
 
         self._unlock_lock = threading.Lock()
         self._unlock_falhas, self._unlock_espera_ate = self._ler_estado_unlock()
         self._session_thread: threading.Thread | None = None
+        self._vigilancia_disco = None
+        self._vigilancia_processos = None
+        self._mobile_lock = threading.Lock()
+        self._mobile_server = None
+        self._mobile_thread: threading.Thread | None = None
+        self._mobile_api_running = False
+        self._mobile_api_url: str | None = None
 
     def start(self) -> None:
         with self._lifecycle_lock:
@@ -75,21 +94,42 @@ class DesktopRuntime:
             self._cerebro = importlib.import_module("cerebro")
             self._main.pausado.clear()
             self._shutdown_requested = False
-            self._voice_state = "iniciando"
+            self._voice_state = "iniciando" if self.start_voice else "desativado"
             self._microphone_error = None
-            try:
-                if self._microphone_preference:
-                    self._resolve_microphone_preference()
-                else:
-                    self._resolve_default_microphone()
-            except Exception:
-                self._microphone_device_index = -1
-                self._microphone_error = "Não foi possível acessar a lista de entradas de microfone. Verifique a permissão de microfone do Windows."
-                self._voice_state = "erro"
+            if self.start_voice:
+                try:
+                    if self._microphone_preference:
+                        self._resolve_microphone_preference()
+                    else:
+                        self._resolve_default_microphone()
+                except Exception:
+                    self._microphone_device_index = -1
+                    self._microphone_error = "Não foi possível acessar a lista de entradas de microfone. Verifique a permissão de microfone do Windows."
+                    self._voice_state = "erro"
             notifiers = getattr(self._cerebro, "NOTIFICADORES", None)
             if isinstance(notifiers, list):
                 self._notification_callback = self._notify
-                notifiers.append(self._notification_callback)
+                if self._notification_callback not in notifiers:
+                    notifiers.append(self._notification_callback)
+            hooks = getattr(self._security, "ganchos_parada", None)
+            if isinstance(hooks, list):
+                self._stop_hook = self._on_emergency_stop
+                if self._stop_hook not in hooks:
+                    hooks.append(self._stop_hook)
+            if self.start_voice:
+                try:
+                    self._registrar_barge_in_voz(importlib.import_module("voz"))
+                except Exception:
+                    pass
+            with self._speech_lock:
+                while True:
+                    try:
+                        self._speech_queue.get_nowait()
+                    except queue.Empty:
+                        break
+                self._pending_notifications.clear()
+                self._recent_notifications.clear()
+                self._speaking_notification = None
             self._command_thread = threading.Thread(
                 target=self._command_loop, name="ultron-desktop-commands", daemon=True)
             self._command_thread.start()
@@ -100,9 +140,24 @@ class DesktopRuntime:
                     target=self._session_monitor, name="ultron-desktop-sessao", daemon=True)
                 self._session_thread.start()
             if self.start_voice:
+                self._speech_thread = threading.Thread(
+                    target=self._speech_loop, name="ultron-desktop-fala", daemon=True)
+                self._speech_thread.start()
                 self._voice_thread = threading.Thread(
                     target=self._voice_loop, name="ultron-desktop-voice", daemon=True)
                 self._voice_thread.start()
+            try:
+                import vigilancia_disco
+                self._vigilancia_disco = vigilancia_disco.VigilanciaDisco()
+                self._vigilancia_disco.iniciar()
+            except Exception as e:
+                logging.getLogger("ultron.desktop").warning("Falha ao iniciar vigilancia_disco: %s", e)
+            try:
+                import vigilancia_processos
+                self._vigilancia_processos = vigilancia_processos.VigilanciaProcessos()
+                self._vigilancia_processos.iniciar()
+            except Exception as e:
+                logging.getLogger("ultron.desktop").warning("Falha ao iniciar vigilancia_processos: %s", e)
 
     # ---- bloqueio por inatividade (ULTRON_SESSAO_MINUTOS)
     def _inatividade_limite(self) -> float:
@@ -152,6 +207,8 @@ class DesktopRuntime:
                 kwargs["conversa"] = self._registrar_conversa
             if "converter_confirmacao" in parameters:
                 kwargs["converter_confirmacao"] = self._confirmar_interpretacao
+            if "notificar_voz" in parameters:
+                kwargs["notificar_voz"] = False
             try:
                 if "estado_voz" in inspect.signature(self._main.modo_voz).parameters:
                     kwargs["estado_voz"] = self._set_voice_state
@@ -259,8 +316,12 @@ class DesktopRuntime:
     # ---- memória (Fase 3)
     def fatos_listar(self, busca: str = "") -> dict:
         import memoria
-        return {"fatos": memoria.buscar_fatos(busca, 50) if busca else memoria.fatos_com_id(50),
-                "limite": 50}
+        termo = str(busca or "").strip()[:300]
+        try:
+            fatos = memoria.buscar_fatos(termo, 50) if termo else memoria.fatos_com_id(50)
+            return {"fatos": fatos or [], "limite": 50}
+        except Exception:
+            return {"fatos": [], "limite": 50}
 
     def fatos_corrigir(self, id_, texto) -> dict:
         import memoria
@@ -478,6 +539,11 @@ class DesktopRuntime:
                     pending["pin"] = None
                     pending["event"].set()
             self._commands.put(None)
+            self._cancelar_falas(parar_voz=True)
+            with self._speech_lock:
+                speech_thread = self._speech_thread
+                if speech_thread is not None:
+                    self._speech_queue.put(None)
 
             ouvido = self._ouvido
             deadline = time.monotonic() + 4.0
@@ -486,19 +552,120 @@ class DesktopRuntime:
             for thread in (self._voice_thread, self._command_thread, self._session_thread):
                 if thread is not None and thread is not threading.current_thread():
                     thread.join(timeout=4.5)
+            if speech_thread is not None and speech_thread is not threading.current_thread():
+                speech_thread.join(timeout=1.5)
+            self._speech_thread = None
             self._session_thread = None
+            if self._vigilancia_disco is not None:
+                try:
+                    self._vigilancia_disco.parar()
+                except Exception:
+                    pass
+                self._vigilancia_disco = None
+            if self._vigilancia_processos is not None:
+                try:
+                    self._vigilancia_processos.parar()
+                except Exception:
+                    pass
+                self._vigilancia_processos = None
+            self.stop_mobile_server()
             self._api_running = False
             self._started = False
             notifiers = getattr(self._cerebro, "NOTIFICADORES", None)
             if isinstance(notifiers, list) and self._notification_callback in notifiers:
                 notifiers.remove(self._notification_callback)
             self._notification_callback = None
+            hooks = getattr(self._security, "ganchos_parada", None)
+            if isinstance(hooks, list) and self._stop_hook in hooks:
+                hooks.remove(self._stop_hook)
+            self._stop_hook = None
+            try:
+                self._remover_barge_in_voz(sys.modules.get("voz"))
+            except Exception:
+                pass
 
     def request_shutdown(self) -> None:
         self._shutdown_requested = True
 
     def set_api_running(self, running: bool) -> None:
         self._api_running = bool(running)
+
+    def set_mobile_api_state(self, running: bool, url: str | None = None) -> None:
+        self._mobile_api_running = bool(running)
+        self._mobile_api_url = str(url) if (running and url) else None
+
+    def ensure_mobile_server_running(self) -> bool:
+        """Inicia o servidor LAN Mobile sob demanda quando houver pareamento ativo."""
+        if not getattr(config, "MOBILE_ENABLED", True):
+            return False
+        with self._mobile_lock:
+            if self._mobile_server is not None and self._mobile_api_running:
+                return True
+            import mobile_api
+            import mobile_pairing
+            if not mobile_pairing.tem_pareamento_ativo():
+                return False
+            srv, mobile_url = mobile_api.create_mobile_server(self)
+            t = threading.Thread(target=srv.serve_forever, name="ultron-mobile-api", daemon=True)
+            t.start()
+            self._mobile_server = srv
+            self._mobile_thread = t
+            self.set_mobile_api_state(True, mobile_url)
+            return True
+
+    def stop_mobile_server(self) -> None:
+        with self._mobile_lock:
+            srv = self._mobile_server
+            t = self._mobile_thread
+            self._mobile_server = None
+            self._mobile_thread = None
+            self.set_mobile_api_state(False, None)
+        if srv is not None:
+            try:
+                srv.shutdown()
+            except Exception:
+                pass
+            try:
+                srv.server_close()
+            except Exception:
+                pass
+        if t is not None and t is not threading.current_thread():
+            t.join(timeout=3)
+
+    def mobile_pairing_status(self) -> dict:
+        import mobile_pairing
+        dados = mobile_pairing.status_publico()
+        dados["mobile_server_running"] = bool(self._mobile_api_running)
+        dados["mobile_server_url"] = self._mobile_api_url
+        return dados
+
+    def mobile_pairing_rotate(
+        self,
+        device_id: str | None = None,
+        killswitch_separado: bool = False,
+    ) -> dict:
+        import mobile_pairing
+        resultado = mobile_pairing.criar_ou_rotacionar(
+            device_id=device_id,
+            killswitch_separado=bool(killswitch_separado),
+        )
+        try:
+            self.ensure_mobile_server_running()
+        except Exception as erro:
+            self._registrar_falha("mobile_api.start", erro)
+        resultado["mobile_server_running"] = bool(self._mobile_api_running)
+        resultado["mobile_server_url"] = self._mobile_api_url
+        self._log_seg("mobile_pairing_rotate", "ALLOW", "user_requested")
+        return resultado
+
+    def mobile_pairing_revoke(self, device_id: str | None = None) -> dict:
+        import mobile_pairing
+        resultado = mobile_pairing.revogar(device_id)
+        if not resultado.get("configured"):
+            self.stop_mobile_server()
+        resultado["mobile_server_running"] = bool(self._mobile_api_running)
+        self._log_seg("mobile_pairing_revoke", "ALLOW", "user_requested")
+        return resultado
 
     def set_microphone_paused(self, paused: bool) -> bool:
         with self._microphone_lock:
@@ -653,8 +820,33 @@ class DesktopRuntime:
         if not isinstance(text, str) or not text.strip() or len(text) > 4000:
             raise ValueError("O comando deve conter de 1 a 4000 caracteres.")
         operation_id = uuid.uuid4().hex
-        self._commands.put((operation_id, text.strip()))
+        self._commands.put((operation_id, "comando", text.strip()))
         return operation_id
+
+    def submit_fluxo(self, fluxo_id: str) -> str:
+        if not self._started or self._stop.is_set():
+            raise RuntimeError("O ULTRON Desktop não está em execução.")
+        if not isinstance(fluxo_id, str) or not re.fullmatch(r"[a-z0-9][a-z0-9._-]{0,39}", fluxo_id):
+            raise ValueError("Identificador de fluxo inválido.")
+        with self._workflow_lock:
+            pendente = self._workflow_pending.get(fluxo_id)
+            if pendente:
+                return pendente
+        import fluxos
+        if fluxos.obter(fluxo_id) is None:
+            raise LookupError(fluxo_id)
+        with self._workflow_lock:
+            pendente = self._workflow_pending.get(fluxo_id)
+            if pendente:
+                return pendente
+            operation_id = uuid.uuid4().hex
+            self._workflow_pending[fluxo_id] = operation_id
+            self._commands.put((operation_id, "fluxo", fluxo_id))
+            return operation_id
+
+    def _executar_fluxo_direto(self, fluxo_id: str) -> str:
+        import ferramentas
+        return ferramentas.executar("executar_fluxo", {"fluxo": fluxo_id}, self._confirmar, "desktop")
 
     # ---- sessão local (ed0): Hello, PIN e bloqueio
     def _log_seg(self, acao: str, decisao: str, motivo: str) -> None:
@@ -693,6 +885,8 @@ class DesktopRuntime:
             "hello": hello,
             "pin_configurado": pin_configurado,
             "irreversiveis": irreversiveis,
+            "admin_elevated": getattr(security, "eh_admin", lambda: False)(),
+            "admin_mode": getattr(security, "modo_admin_ativo", lambda o: False)("desktop"),
             "versao": self.update_info().get("current_version", "desconhecida"),
         }
         try:
@@ -834,6 +1028,8 @@ class DesktopRuntime:
             "microphone_device_available": self._microphone_device_index != -1,
             "autostart_installed": autostart,
             "shutdown_requested": self._shutdown_requested,
+            "admin_elevated": getattr(self._security, "eh_admin", lambda: False)(),
+            "admin_mode": getattr(self._security, "modo_admin_ativo", lambda o: False)("desktop"),
             "error": self._error,
             "palco": palco_atual,
             "session_desbloqueada": bool(sessao.estado()["desbloqueada"]),
@@ -846,10 +1042,11 @@ class DesktopRuntime:
 
     def _notify(self, text: str) -> None:
         try:
-            safe_text = self._security.redigir(str(text))[:1000]
+            full_text = str(self._security.redigir(str(text)))
         except Exception:
-            safe_text = "Notificação do ULTRON."
-        self._events.put({"type": "notification", "message": safe_text})
+            full_text = "Notificação do ULTRON."
+        self._events.put({"type": "notification", "message": full_text[:1000]})
+        self._agendar_fala(full_text[:4000], notificacao=True)
 
     def poll_events(self) -> list[dict]:
         events = []
@@ -930,35 +1127,168 @@ class DesktopRuntime:
                 return False
         return True
 
+    _DEDUP_NOTIFICACAO_S = 2.0
+
+    @staticmethod
+    def _normalizar_fala(texto: str) -> str:
+        return " ".join(str(texto).split()).strip()
+
+    def _parada_ativa(self) -> bool:
+        parada = getattr(self._security, "parada", None)
+        return bool(parada is not None and callable(getattr(parada, "is_set", None)) and parada.is_set())
+
+    def _voz_habilitada(self, *, notificacao: bool = False) -> bool:
+        if not self.start_voice or not self._started:
+            return False
+        if self._stop.is_set() or self._shutdown_requested or self._parada_ativa():
+            return False
+        if not bool(getattr(config, "VOZ_ATIVO", True)):
+            return False
+        voz_conf = str(getattr(config, "VOZ", "pt-BR-AntonioNeural") or "").strip().lower()
+        if voz_conf in {"off", "desligada", "desligado", "none", "false", "0"}:
+            return False
+        voz_mod = sys.modules.get("voz")
+        pref_fn = getattr(voz_mod, "preferencias", None)
+        if callable(pref_fn):
+            try:
+                prefs = pref_fn() or {}
+                if isinstance(prefs, dict):
+                    if prefs.get("ativa") is False or prefs.get("ativo") is False:
+                        return False
+                    if notificacao and prefs.get("notificacoes") is False:
+                        return False
+            except Exception:
+                pass
+        if notificacao:
+            if not bool(getattr(config, "VOZ_NOTIFICACOES", True)):
+                return False
+            pausado = getattr(self._main, "pausado", None)
+            if pausado is not None and callable(getattr(pausado, "is_set", None)) and pausado.is_set():
+                return False
+        return True
+
+    def _on_emergency_stop(self) -> None:
+        self._cancelar_falas(parar_voz=True)
+
+    def _registrar_barge_in_voz(self, voz_mod) -> None:
+        registrar = getattr(voz_mod, "registrar_gancho_parada", None)
+        if not callable(registrar):
+            return
+        if self._voz_barge_in_hook is None:
+            self._voz_barge_in_hook = lambda: self._cancelar_falas(parar_voz=False)
+        registrar(self._voz_barge_in_hook)
+
+    def _remover_barge_in_voz(self, voz_mod) -> None:
+        remover = getattr(voz_mod, "remover_gancho_parada", None)
+        if callable(remover) and self._voz_barge_in_hook is not None:
+            remover(self._voz_barge_in_hook)
+        self._voz_barge_in_hook = None
+
+    def _cancelar_falas(self, *, parar_voz: bool = False) -> None:
+        with self._speech_lock:
+            while True:
+                try:
+                    self._speech_queue.get_nowait()
+                except queue.Empty:
+                    break
+            self._pending_notifications.clear()
+            self._recent_notifications.clear()
+        if parar_voz:
+            voz_mod = sys.modules.get("voz")
+            parar = getattr(voz_mod, "parar_fala", None)
+            if callable(parar):
+                try:
+                    parar()
+                except Exception:
+                    pass
+
     def _falar_resposta(self, texto: str) -> None:
-        """Fala uma resposta digitada; roda em segundo plano para o painel não esperar o áudio."""
+        """Fala uma resposta ou aviso; roda em segundo plano para o painel não esperar o áudio."""
         try:
             import voz
             voz.falar(texto)
         except Exception as erro:
             try:
-                self._security.log.warning(f"Voz da resposta digitada falhou: {type(erro).__name__}")
+                self._security.log.warning(f"Voz da resposta/aviso falhou: {type(erro).__name__}")
             except Exception:
-                pass
+                self._registrar_falha("voz.falar", erro)
 
-    def _agendar_fala(self, texto) -> None:
+    def _speech_loop(self) -> None:
+        while True:
+            item = self._speech_queue.get()
+            if item is None:
+                return
+            origem, texto = item
+            notificacao = origem == "notificacao"
+            chave = self._normalizar_fala(texto) if notificacao else None
+            if notificacao and chave:
+                with self._speech_lock:
+                    self._pending_notifications.discard(chave)
+            if not self._voz_habilitada(notificacao=notificacao):
+                continue
+            if notificacao and chave:
+                with self._speech_lock:
+                    self._speaking_notification = chave
+            try:
+                self._falar_resposta(texto)
+            finally:
+                if notificacao:
+                    with self._speech_lock:
+                        self._speaking_notification = None
+
+    def _agendar_fala(self, texto, *, notificacao: bool = False) -> None:
         """Só fala texto de verdade (confirmações devolvem True/False/None)."""
-        if not isinstance(texto, str) or not texto.strip() or self._stop.is_set():
+        if not isinstance(texto, str) or not texto.strip():
             return
-        threading.Thread(target=self._falar_resposta, args=(texto,),
-                         name="ultron-desktop-fala", daemon=True).start()
+        if not self._voz_habilitada(notificacao=notificacao):
+            return
+        chave = self._normalizar_fala(texto)
+        if not chave:
+            return
+        with self._speech_lock:
+            if not self._voz_habilitada(notificacao=notificacao):
+                return
+            if notificacao:
+                agora = time.monotonic()
+                expiradas = [k for k, ts in self._recent_notifications.items()
+                             if agora - ts > self._DEDUP_NOTIFICACAO_S]
+                for k in expiradas:
+                    self._recent_notifications.pop(k, None)
+                if chave == self._speaking_notification or chave in self._pending_notifications:
+                    return
+                ultimo = self._recent_notifications.get(chave)
+                if ultimo is not None and (agora - ultimo) < self._DEDUP_NOTIFICACAO_S:
+                    return
+                self._recent_notifications[chave] = agora
+                self._pending_notifications.add(chave)
+            if self._speech_thread is None or not self._speech_thread.is_alive():
+                self._speech_thread = threading.Thread(
+                    target=self._speech_loop, name="ultron-desktop-fala", daemon=True)
+                self._speech_thread.start()
+            self._speech_queue.put(("notificacao" if notificacao else "resposta", texto))
 
     def _command_loop(self) -> None:
         while True:
             item = self._commands.get()
             if item is None:
                 return
-            operation_id, text = item
+            operation_id, tipo, valor = item
+            workflow_id = valor if tipo == "fluxo" else None
             if self._stop.is_set():
                 response = "Comando cancelado pelo encerramento do ULTRON Desktop."
+            elif workflow_id is not None:
+                try:
+                    response = self._executar_fluxo_direto(workflow_id)
+                except Exception:
+                    self._error = "Falha ao executar um fluxo do Desktop."
+                    try:
+                        self._security.log.error(self._error)
+                    except Exception:
+                        pass
+                    response = self._error
             else:
                 try:
-                    response = self._cerebro.processar(text, self._confirmar, "desktop")
+                    response = self._cerebro.processar(valor, self._confirmar, "desktop")
                 except Exception:
                     self._error = "Falha ao processar um comando do Desktop."
                     try:
@@ -966,11 +1296,105 @@ class DesktopRuntime:
                     except Exception:
                         pass
                     response = self._error
-            # O painel já mostrou estes turnos ao digitar; guardamos para a
-            # reconciliação periódica não apagar a conversa digitada.
-            self._registrar_conversa("user", text, "texto", emitir=False)
+            # O painel já mostrou os comandos digitados; registra o acionamento
+            # do fluxo sem pedir ao modelo para interpretar seu identificador.
+            texto_usuario = f"Executar fluxo: {workflow_id}" if workflow_id else valor
+            self._registrar_conversa("user", texto_usuario, "texto", emitir=False)
             self._registrar_conversa("assistant", response, "texto", emitir=False)
-            self._events.put({"type": "command_result", "operation_id": operation_id,
-                              "response": response})
+            evento = {"type": "command_result", "operation_id": operation_id,
+                      "response": response}
+            if workflow_id is not None:
+                evento["workflow_id"] = workflow_id
+            self._events.put(evento)
+            if workflow_id is not None:
+                with self._workflow_lock:
+                    if self._workflow_pending.get(workflow_id) == operation_id:
+                        self._workflow_pending.pop(workflow_id, None)
             self._agendar_fala(response)
+
+    # ---- Bloco 1: Arquivos, Downloads e Disco
+    def obter_estado_bloco1(self) -> dict:
+        import disco_ops
+        import seguranca
+        cfg = disco_ops.carregar_config_bloco1()
+        status_monitores = self._vigilancia_disco.status() if self._vigilancia_disco else {"ativo": False}
+        return {
+            "config": cfg,
+            "status_monitores": status_monitores,
+            "admin_elevated": seguranca.eh_admin(),
+            "admin_mode": seguranca.modo_admin_ativo("desktop"),
+        }
+
+    def atualizar_config_bloco1(self, dados: dict) -> dict:
+        import disco_ops
+        nova_cfg = disco_ops.salvar_config_bloco1(dados)
+        return {"sucesso": True, "config": nova_cfg}
+
+    def executar_acao_bloco1(self, acao: str, params: dict | None = None) -> dict:
+        import disco_ops
+        params = params or {}
+        acoes = {
+            "organizar_pdf": lambda: disco_ops.organizar_pdf_downloads(params.get("pasta", "~/Downloads"), params.get("aplicar", True)),
+            "extrair_instalador": lambda: disco_ops.extrair_e_limpar_instalador(params.get("arquivo", ""), params.get("destino", ""), params.get("apagar_origem", False)),
+            "limpar_duplicados": lambda: disco_ops.limpar_duplicados(params.get("pasta", ""), params.get("executar", False)),
+            "limpar_disco": lambda: disco_ops.limpar_disco(params.get("executar", True), params.get("incluir_docker", True), params.get("incluir_builds", True)),
+            "converter_imagens": lambda: disco_ops.converter_imagens(params.get("alvo", ""), params.get("formato", "png"), params.get("apagar_original", False)),
+            "arquivar_projetos": lambda: disco_ops.arquivar_projetos_antigos(params.get("pasta", ""), params.get("meses", 6), params.get("executar", False)),
+            "backup_incremental": lambda: disco_ops.executar_backup_incremental(params.get("origem", ""), params.get("destino", "")),
+            "arquivar_capturas": lambda: disco_ops.arquivar_capturas_desktop(params.get("dias", 7), params.get("executar", True)),
+            "corrigir_permissoes": lambda: disco_ops.corrigir_permissoes_pasta(params.get("pasta", ""), params.get("remover_readonly", True), params.get("corrigir_acl", True)),
+            "ejetar_usb": lambda: disco_ops.ejetar_usb_ocioso(params.get("unidade", ""), params.get("minutos_ocioso", 5)),
+        }
+        fn = acoes.get(acao)
+        if not fn:
+            return {"sucesso": False, "erro": f"Ação desconhecida: {acao}"}
+        try:
+            resultado = fn()
+            return {"sucesso": True, "resultado": resultado}
+        except Exception as e:
+            return {"sucesso": False, "erro": str(e)}
+
+    # ---- Bloco 2: Processos, Memória e Hardware
+    def obter_estado_bloco2(self) -> dict:
+        import processos_ops
+        import seguranca
+        cfg = processos_ops.carregar_config_bloco2()
+        status_monitores = self._vigilancia_processos.status() if self._vigilancia_processos else {"ativo": False}
+        return {
+            "config": cfg,
+            "status_monitores": status_monitores,
+            "admin_elevated": seguranca.eh_admin(),
+            "admin_mode": seguranca.modo_admin_ativo("desktop"),
+            "temperatura_cpu": processos_ops._obter_temperatura_cpu(),
+            "plano_ativo": processos_ops._obter_plano_energia_ativo(),
+        }
+
+    def atualizar_config_bloco2(self, dados: dict) -> dict:
+        import processos_ops
+        nova_cfg = processos_ops.salvar_config_bloco2(dados)
+        return {"sucesso": True, "config": nova_cfg}
+
+    def executar_acao_bloco2(self, acao: str, params: dict | None = None) -> dict:
+        import processos_ops
+        params = params or {}
+        acoes = {
+            "suspender_abas": lambda: processos_ops.suspender_abas_pesadas(params.get("limite_mb", 500), params.get("desuspender", False), params.get("simular", False)),
+            "matar_travados": lambda: processos_ops.encerrar_processos_travados(params.get("matar", True)),
+            "plano_energia": lambda: processos_ops.gerenciar_plano_energia(params.get("modo", "auto"), params.get("esquema", "")),
+            "otimizar_cpu": lambda: processos_ops.otimizar_cpu_foco(params.get("em_reuniao_ou_jogo"), params.get("aplicar", True)),
+            "proteger_temperatura": lambda: processos_ops.proteger_temperatura(params.get("limite_celsius", 82), params.get("simular", False)),
+            "guardiao_startup": lambda: processos_ops.guardiao_startup(params.get("acao", "auditar"), params.get("item", "")),
+            "otimizar_janela_ativa": lambda: processos_ops.otimizar_janela_ativa(params.get("aplicar", True)),
+            "limpar_ram": lambda: processos_ops.limpar_ram_ociosa(params.get("agressivo", False)),
+            "ajustar_display": lambda: processos_ops.ajustar_display(params.get("brilho"), params.get("temperatura_k"), params.get("taxa_hz"), params.get("modo", "auto")),
+            "bluetooth_ocioso": lambda: processos_ops.desconectar_bluetooth_ocioso(params.get("minutos_ocioso", 5), params.get("executar", True)),
+        }
+        fn = acoes.get(acao)
+        if not fn:
+            return {"sucesso": False, "erro": f"Ação desconhecida: {acao}"}
+        try:
+            resultado = fn()
+            return {"sucesso": True, "resultado": resultado}
+        except Exception as e:
+            return {"sucesso": False, "erro": str(e)}
 

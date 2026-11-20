@@ -1,8 +1,10 @@
 """Ferramentas do Ultron. Para criar uma nova, escreva uma função com @ferramenta(...)."""
+import concurrent.futures
 import contextvars
 import datetime
 import difflib
 import functools
+import html as _html
 import inspect
 import json
 import os
@@ -20,6 +22,8 @@ from urllib.parse import quote_plus, unquote, urlparse
 
 import requests
 
+import config
+import ferramentas_sites as _ferramentas_sites
 import memoria
 import obsidian
 import seguranca
@@ -29,6 +33,8 @@ from seguranca import ALTO, BAIXO, CRITICO, MEDIO, Classificacao  # noqa: E402
 FERRAMENTAS = {}
 _TIPOS = {str: "string", int: "integer", float: "number", bool: "boolean"}
 _AUTORIZADO = contextvars.ContextVar("ultron_autorizado", default=None)
+_CONFIRMAR = contextvars.ContextVar("ultron_confirmar", default=None)
+_ORIGEM_ATUAL = contextvars.ContextVar("ultron_origem", default="desconhecida")
 
 
 def ferramenta(descricao, risco=BAIXO, params=None, classificar=None):
@@ -75,14 +81,17 @@ def executar(nome, args, confirmar, origem="desconhecida"):
         return "Cancelado pela parada de emergência."
     if not isinstance(args, dict):
         args = {}
+    origem_token = _ORIGEM_ATUAL.set(origem)
     try:
         cls = f["classificar"](**args) if f["classificar"] else Classificacao(f["risco"], nome)
     except Exception as e:
         seguranca.log_seg(origem, nome, f["risco"], seguranca.DENY, f"invalid_arguments:{type(e).__name__}", args)
+        _ORIGEM_ATUAL.reset(origem_token)
         return f"Argumentos inválidos para {nome}: {e}"
     decisao, motivo = seguranca.autorizar(cls, nome, origem)
     seguranca.log_seg(origem, nome, cls.risco, decisao, motivo, args)
     if decisao == seguranca.DENY:
+        _ORIGEM_ATUAL.reset(origem_token)
         if motivo == "outside_allowlist":
             return (_recusa_fora_da_allowlist() + " Diga isso ao usuário e NÃO tente contornar "
                     "com outra ferramenta nem com outro caminho.")
@@ -91,17 +100,22 @@ def executar(nome, args, confirmar, origem="desconhecida"):
     if decisao == seguranca.CONFIRM:
         pedido = seguranca.novo_pedido(nome, args, cls, origem)
         if not seguranca.pedir_confirmacao(confirmar, pedido):
+            _ORIGEM_ATUAL.reset(origem_token)
             return "Confirmação não recebida ou negada. Ação cancelada. NÃO tente de novo nem por outro caminho."
     token = _AUTORIZADO.set(nome)
+    confirmar_token = _CONFIRMAR.set(confirmar)
     try:
         resultado = str(f["fn"](**args))
         seguranca.log_seg(origem, nome, cls.risco, "EXECUTED", "ok")
         return resultado
     except Exception as e:
         seguranca.log_seg(origem, nome, cls.risco, "EXECUTED", f"error:{type(e).__name__}")
-        return f"Erro ao executar {nome}: {e}"
+        detalhe = str(e).strip() or type(e).__name__
+        return f"Erro ao executar {nome}: {detalhe}"
     finally:
+        _CONFIRMAR.reset(confirmar_token)
         _AUTORIZADO.reset(token)
+        _ORIGEM_ATUAL.reset(origem_token)
 
 
 # ---------- utilidades ----------
@@ -147,11 +161,15 @@ def _caminho(c):
 
 
 def _pasta_ok(c):
-    """O caminho está dentro de um dos diretórios da allowlist?"""
+    """O caminho está dentro de um dos diretórios da allowlist ou liberado no Modo Admin?"""
     try:
         p = _caminho(c)
     except Exception:
         return False
+    if _protegido(p):
+        return False
+    if seguranca.modo_admin_ativo(_ORIGEM_ATUAL.get()):
+        return True
     for base in seguranca.allowlist("diretorios", []):
         b = Path(os.path.expandvars(base)).expanduser().resolve()
         if p == b or b in p.parents:
@@ -242,37 +260,144 @@ _FEEDS = {
 
 
 def _imagem_da_entrada(e):
-    """Extrai a URL da imagem de uma entrada de feed (media_content > summary > None)."""
-    mc = e.get("media_content") or []
-    for item in mc:
-        if isinstance(item, dict) and item.get("url"):
-            return item["url"]
-    summary = e.get("summary") or ""
-    achado = re.search(r'<img[^>]+src="([^"]+)"', summary)
-    return achado.group(1) if achado else None
+    """Extrai a URL da imagem de uma entrada de feed (media_content > thumbnail > enclosure > html)."""
+    for chave in ("media_content", "media_thumbnail"):
+        lista = e.get(chave) or []
+        for item in lista:
+            if isinstance(item, dict) and item.get("url"):
+                return str(item["url"]).strip()
+    for grupo in (e.get("enclosures") or [], e.get("links") or []):
+        for item in grupo:
+            if not isinstance(item, dict):
+                continue
+            url = str(item.get("href") or item.get("url") or "").strip()
+            tipo = str(item.get("type") or "").lower()
+            rel = str(item.get("rel") or "").lower()
+            if url and (tipo.startswith("image/") or (rel == "enclosure" and re.search(r"\.(?:jpg|jpeg|png|webp|gif)(?:\?|$)", url, re.I))):
+                return url
+    blobs = [e.get("summary") or ""]
+    for c in (e.get("content") or []):
+        if isinstance(c, dict) and c.get("value"):
+            blobs.append(c["value"])
+    for html_txt in blobs:
+        achado = re.search(r'<img[^>]+(?:src|data-src)=["\']([^"\']+)["\']', str(html_txt), re.I)
+        if achado:
+            return achado.group(1).strip()
+    return None
 
 
-@ferramenta("Últimas manchetes de notícias. Expõe a imagem da notícia de destaque "
-            "para ser mostrada no palco.", params={"tema": "geral, tecnologia, economia, esporte ou mundo"})
+def _resumo_entrada(e) -> str:
+    """Extrai um resumo curto em texto puro de uma entrada RSS."""
+    bruto = e.get("summary") or e.get("description") or ""
+    if not bruto:
+        for c in (e.get("content") or []):
+            if isinstance(c, dict) and c.get("value"):
+                bruto = c["value"]
+                break
+    limpo = _html.unescape(re.sub(r"<[^>]+>", " ", str(bruto or "")))
+    limpo = re.sub(r"\s+", " ", limpo).strip()
+    return (limpo[:177] + "...") if len(limpo) > 180 else limpo
+
+
+def _og_image_da_materia(url: str) -> str | None:
+    """Busca og:image / twitter:image de uma matéria pública com timeout curto."""
+    try:
+        import navegador
+        url_segura = navegador.validar_url(url)
+        resp = requests.get(
+            url_segura,
+            timeout=2.5,
+            headers={"User-Agent": "ULTRON/2.1 (+https://github.com/ultron)"},
+            stream=True,
+        )
+        if resp.status_code != 200 or "html" not in (resp.headers.get("Content-Type") or "").lower():
+            resp.close()
+            return None
+        pedaco = resp.raw.read(48_000, decode_content=True).decode("utf-8", errors="ignore")
+        resp.close()
+    except Exception:
+        return None
+    padroes = (
+        r'<meta[^>]+(?:property|name)=["\']og:image["\'][^>]+content=["\']([^"\']+)["\']',
+        r'<meta[^>]+content=["\']([^"\']+)["\'][^>]+(?:property|name)=["\']og:image["\']',
+        r'<meta[^>]+(?:property|name)=["\']twitter:image["\'][^>]+content=["\']([^"\']+)["\']',
+        r'<meta[^>]+content=["\']([^"\']+)["\'][^>]+(?:property|name)=["\']twitter:image["\']',
+    )
+    for padrao in padroes:
+        achado = re.search(padrao, pedaco, re.I)
+        if achado:
+            img = _html.unescape(achado.group(1).strip())
+            if img.startswith(("http://", "https://")):
+                return img
+    return None
+
+
+@ferramenta("Últimas manchetes de notícias com imagem e resumo individuais por matéria "
+            "para exibição no palco.", params={"tema": "geral, tecnologia, economia, esporte ou mundo"})
 def noticias(tema: str = "geral"):
+    import json as _json
     import feedparser
-    feed = feedparser.parse(_FEEDS.get(tema.lower().strip(), _FEEDS["geral"]))
-    linhas = []
-    imagem_destaque = None
-    titulo_destaque = ""
-    for e in feed.entries[:6]:
-        titulo = e.get("title", "")
-        linhas.append(f"- {titulo}")
-        if imagem_destaque is None:
-            img = _imagem_da_entrada(e)
-            if img:
-                imagem_destaque = img
-                titulo_destaque = titulo
-    if not linhas:
+
+    tema_chave = tema.lower().strip()
+    url_feed = _FEEDS.get(tema_chave, _FEEDS["geral"])
+    feed = feedparser.parse(url_feed)
+    entries = list(getattr(feed, "entries", []) or [])[:6]
+    if not entries:
         return "Não consegui carregar as notícias agora."
+
+    itens = []
+    precisam_og = []
+    imagens_vistas = set()
+
+    for idx, e in enumerate(entries):
+        titulo = str(e.get("title") or "").strip()
+        if not titulo:
+            continue
+        link = str(e.get("link") or "").strip()
+        fonte = urlparse(link).hostname or urlparse(url_feed).hostname or ""
+        if fonte.startswith("www."):
+            fonte = fonte[4:]
+        publicado = str(e.get("published") or e.get("updated") or "").strip()[:32]
+        img = _imagem_da_entrada(e) or ""
+        if img and img in imagens_vistas:
+            img = ""  # nunca repetir a mesma foto de outra matéria
+        if img:
+            imagens_vistas.add(img)
+        elif link.startswith(("http://", "https://")):
+            precisam_og.append(len(itens))
+
+        itens.append({
+            "titulo": titulo,
+            "resumo": _resumo_entrada(e),
+            "imagem": img,
+            "url": link,
+            "fonte": fonte,
+            "publicado": publicado,
+        })
+
+    if not itens:
+        return "Não consegui carregar as notícias agora."
+
+    if precisam_og:
+        with concurrent.futures.ThreadPoolExecutor(max_workers=4) as pool:
+            futuros = [(i, pool.submit(_og_image_da_materia, itens[i]["url"])) for i in precisam_og]
+            for i, fut in futuros:
+                try:
+                    og = fut.result() or ""
+                except Exception:
+                    og = ""
+                if og and og not in imagens_vistas:
+                    imagens_vistas.add(og)
+                    itens[i]["imagem"] = og
+
+    linhas = [f"- {item['titulo']}" for item in itens]
     texto = "\n".join(linhas)
-    if imagem_destaque:
-        texto += f"\n\n[IMAGEM_DESTAQUE] {titulo_destaque} || {imagem_destaque}"
+    destaque = next((item for item in itens if item["imagem"]), itens[0])
+    if destaque["imagem"]:
+        texto += f"\n\n[IMAGEM_DESTAQUE] {destaque['titulo']} || {destaque['imagem']}"
+    texto += "\n\n[PALCO_NOTICIAS] " + _json.dumps(
+        {"tema": tema_chave or "geral", "itens": itens}, ensure_ascii=False
+    )
     return _dados(texto)
 
 
@@ -285,17 +410,41 @@ def pesquisar_web(consulta: str):
     return _dados("\n".join(f"- {r.get('title','')}: {r.get('body','')}" for r in res))
 
 
-@ferramenta("Abre um vídeo/busca no YouTube no navegador.", params={"busca": "O que procurar"})
-def youtube(busca: str):
-    url = "https://www.youtube.com/results?search_query=" + quote_plus(busca)
+def _buscar_url_youtube(busca: str) -> str:
+    """Busca o primeiro vídeo do YouTube correspondente a `busca`."""
+    termo = str(busca or "").strip()
+    if not termo:
+        return ""
     try:
         with _DDGS()() as d:
-            for v in d.videos(busca, max_results=5):
-                if "youtube.com/watch" in v.get("content", ""):
-                    url = v["content"]
-                    break
+            for v in d.videos(termo, max_results=5):
+                conteudo = str((v or {}).get("content") or "")
+                if "youtube.com/watch" in conteudo or "youtu.be/" in conteudo:
+                    return conteudo
     except Exception:
         pass
+    try:
+        resp = requests.get(
+            "https://www.youtube.com/results",
+            params={"search_query": termo},
+            headers={"User-Agent": "Mozilla/5.0"},
+            timeout=8,
+        )
+        if resp.ok:
+            achado = re.search(r'"videoId":"([A-Za-z0-9_-]{11})"', resp.text)
+            if achado:
+                return f"https://www.youtube.com/watch?v={achado.group(1)}"
+    except Exception:
+        pass
+    return ""
+
+
+@ferramenta("Abre um vídeo/busca no YouTube no navegador externo. Só use quando o usuário pedir "
+            "explicitamente para abrir no navegador; para reproduzir ou mostrar vídeo na tela, "
+            "prefira mostrar_na_interface(tipo='video').",
+            params={"busca": "O que procurar"})
+def youtube(busca: str):
+    url = _buscar_url_youtube(busca) or ("https://www.youtube.com/results?search_query=" + quote_plus(busca))
     webbrowser.open(url)
     return "YouTube aberto no navegador."
 
@@ -425,132 +574,22 @@ def fechar_navegador():
 
 
 # ---------- programas e jogos ----------
-_cache_apps = {"t": 0.0, "dados": {}}
-_IGNORAR_APPS = ("uninstall", "desinstal", "redistributable", "steamworks", "readme", "leia-me", "leiame")
+import ferramentas_apps as _ferramentas_apps
 
-
-def _norm(s):
-    s = unicodedata.normalize("NFD", s.lower())
-    return re.sub(r"[^a-z0-9]", "", "".join(c for c in s if unicodedata.category(c) != "Mn"))
-
-
-def _apps_menu_iniciar():
-    """Apps do Menu Iniciar (inclui Microsoft Store) via PowerShell Get-StartApps."""
-    cmd = "[Console]::OutputEncoding=[Text.Encoding]::UTF8; Get-StartApps | ConvertTo-Json -Compress"
-    r = subprocess.run(["powershell", "-NoProfile", "-Command", cmd], capture_output=True, text=True,
-                       encoding="utf-8", errors="replace", timeout=25, creationflags=0x08000000)
-    dados = json.loads(r.stdout or "[]")
-    if isinstance(dados, dict):
-        dados = [dados]
-    return {d["Name"]: ("appid", d["AppID"]) for d in dados if d.get("Name") and d.get("AppID")}
-
-
-def _atalhos_arquivos():
-    """Atalhos (.lnk/.url) do Menu Iniciar e da Área de Trabalho."""
-    pastas = [os.path.expandvars(r"%ProgramData%\Microsoft\Windows\Start Menu\Programs"),
-              os.path.expandvars(r"%APPDATA%\Microsoft\Windows\Start Menu\Programs"),
-              os.path.expandvars(r"%PUBLIC%\Desktop"), str(Path.home() / "Desktop"),
-              str(Path.home() / "OneDrive" / "Desktop")]
-    achados = {}
-    for pasta in pastas:
-        p = Path(pasta)
-        if not p.is_dir():
-            continue
-        for ext in ("*.lnk", "*.url"):
-            for f in p.rglob(ext):
-                achados[f.stem] = ("arquivo", str(f))
-    return achados
-
-
-def _jogos_steam(base=None):
-    jogos = {}
-    if base is None:
-        try:
-            import winreg
-            with winreg.OpenKey(winreg.HKEY_CURRENT_USER, r"Software\Valve\Steam") as k:
-                base = Path(winreg.QueryValueEx(k, "SteamPath")[0])
-        except Exception:
-            base = Path(os.environ.get("ProgramFiles(x86)", r"C:\Program Files (x86)")) / "Steam"
-    bibliotecas = {Path(base)}
-    try:
-        txt = (Path(base) / "steamapps" / "libraryfolders.vdf").read_text(encoding="utf-8", errors="replace")
-        for m in re.finditer(r'"path"\s+"([^"]+)"', txt):
-            bibliotecas.add(Path(m.group(1).replace("\\\\", "\\")))
-    except Exception:
-        pass
-    for lib in bibliotecas:
-        for acf in (lib / "steamapps").glob("appmanifest_*.acf"):
-            try:
-                t = acf.read_text(encoding="utf-8", errors="replace")
-                a = re.search(r'"appid"\s+"(\d+)"', t)
-                n = re.search(r'"name"\s+"([^"]+)"', t)
-                if a and n:
-                    jogos[n.group(1)] = ("uri", f"steam://rungameid/{a.group(1)}")
-            except Exception:
-                continue
-    return jogos
-
-
-def _jogos_epic(pasta=None):
-    jogos = {}
-    pasta = Path(pasta or os.path.expandvars(r"%ProgramData%\Epic\EpicGamesLauncher\Data\Manifests"))
-    for item in pasta.glob("*.item"):
-        try:
-            d = json.loads(item.read_text(encoding="utf-8", errors="replace"))
-            nome = d.get("DisplayName")
-            if nome and d.get("CatalogNamespace") and d.get("CatalogItemId") and d.get("AppName"):
-                jogos[nome] = ("uri", f"com.epicgames.launcher://apps/{d['CatalogNamespace']}%3A"
-                                      f"{d['CatalogItemId']}%3A{d['AppName']}?action=launch&silent=true")
-        except Exception:
-            continue
-    return jogos
-
-
-def _catalogo(forcar=False):
-    """Lista de tudo que dá para abrir: {nome_normalizado: (nome, tipo, valor)}."""
-    if not forcar and _cache_apps["dados"] and time.time() - _cache_apps["t"] < 600:
-        return _cache_apps["dados"]
-    cat = {}
-    for fonte in (_apps_menu_iniciar, _atalhos_arquivos, _jogos_steam, _jogos_epic):
-        try:
-            for nome, (tipo, valor) in fonte().items():
-                if any(x in nome.lower() for x in _IGNORAR_APPS):
-                    continue
-                cat[_norm(nome)] = (nome, tipo, valor)
-        except Exception as e:
-            seguranca.log.warning(f"Catálogo de apps ({fonte.__name__}): {e}")
-    cat.pop("", None)
-    _cache_apps.update(t=time.time(), dados=cat)
-    seguranca.log.info(f"Catálogo de apps carregado: {len(cat)} itens")
-    return cat
-
-
-def _buscar(cat, nome):
-    n = _norm(nome)
-    if not n:
-        return None, 0.0
-    if n in cat:
-        return cat[n], 1.0
-    contem = [k for k in cat if n in k or (len(k) >= 4 and k in n)]
-    if contem:
-        return cat[min(contem, key=len)], 0.9
-    prox = difflib.get_close_matches(n, list(cat), n=1, cutoff=0.7)
-    return (cat[prox[0]], 0.75) if prox else (None, 0.0)
+_cache_apps = _ferramentas_apps._cache_apps
+_IGNORAR_APPS = _ferramentas_apps._IGNORAR_APPS
+_norm = _ferramentas_apps._norm
+_apps_menu_iniciar = _ferramentas_apps._apps_menu_iniciar
+_atalhos_arquivos = _ferramentas_apps._atalhos_arquivos
+_jogos_steam = _ferramentas_apps._jogos_steam
+_jogos_epic = _ferramentas_apps._jogos_epic
+_catalogo = _ferramentas_apps._catalogo
+_buscar = _ferramentas_apps._buscar
+_lancar = _ferramentas_apps._lancar
 
 
 def _resolver_app(nome):
-    item, score = _buscar(_catalogo(), nome)
-    if not item and time.time() - _cache_apps["t"] > 30:   # talvez tenha acabado de instalar
-        item, score = _buscar(_catalogo(forcar=True), nome)
-    return item, score
-
-
-def _lancar(item):
-    _, tipo, valor = item
-    if tipo == "appid":
-        subprocess.Popen(["explorer.exe", f"shell:AppsFolder\\{valor}"])
-    else:
-        os.startfile(valor)
+    return _ferramentas_apps._resolver_app(nome, catalog_fn=_catalogo)
 
 
 def _janelas_visiveis():
@@ -678,7 +717,7 @@ def _app_rodando(item, nome_exibicao):
     except Exception:
         return None
     try:
-        titulos = [titulo for _h, titulo in _janelas_visiveis()]
+        titulos = [titulo for _h, titulo, _proc in _janelas_visiveis()]
         if any(alvo in _norm(titulo) or _norm(titulo)[:12] == alvo[:12] for titulo in titulos):
             return True
         return False
@@ -1247,7 +1286,8 @@ def _cls_comando(comando, **_):
 
 
 
-@ferramenta("Ajusta o volume do PC.", params={"nivel": "0 a 100"})
+@ferramenta("Ajusta o volume geral (mestre) do PC. Para controlar o som de um aplicativo isoladamente, "
+            "use ajustar_volume_app.", params={"nivel": "0 a 100"})
 def ajustar_volume(nivel: int):
     pag = _pag()
     nivel = max(0, min(100, int(nivel)))
@@ -1258,25 +1298,55 @@ def ajustar_volume(nivel: int):
     return f"Volume em cerca de {nivel}%."
 
 
+@ferramenta(
+    "Controla o volume ou mudo de um aplicativo específico no Windows sem alterar o volume dos outros apps. "
+    "Chame uma vez para cada aplicativo quando o usuário pedir mais de um (ex.: Google em 70% e Spotify em 30%).",
+    risco=BAIXO,
+    params={
+        "aplicativo": "Nome ou apelido do app (ex.: 'google', 'chrome', 'spotify', 'discord', 'firefox', 'edge', 'steam', 'sistema').",
+        "nivel": "Volume de 0 a 100 (para 'definir') ou passo em % (para 'aumentar'/'diminuir'). Use -1 ao mutar/desmutar/consultar.",
+        "acao": "definir (padrão), aumentar, diminuir, mutar, desmutar, alternar_mudo ou consultar.",
+    },
+)
+def ajustar_volume_app(aplicativo: str, nivel: int = -1, acao: str = "definir"):
+    import audio_apps
+    return audio_apps.controlar_volume_app(aplicativo=aplicativo, nivel=nivel, acao=acao)
+
+
+@ferramenta("Lista os aplicativos com sessão de áudio no Windows e seus volumes atuais.", risco=BAIXO)
+def listar_volumes_apps():
+    import audio_apps
+    return audio_apps.listar_volumes_apps()
+
+
 _MIDIA = {"pausar": "playpause", "pause": "playpause", "continuar": "playpause", "retomar": "playpause",
           "tocar": "playpause", "play": "playpause", "play_pause": "playpause", "proxima": "nexttrack",
-          "proximo": "nexttrack", "pular": "nexttrack", "anterior": "prevtrack", "voltar": "prevtrack",
-          "mudo": "volumemute", "mute": "volumemute", "desmutar": "volumemute", "volume_mais": "volumeup",
-          "aumentar_volume": "volumeup", "volume_menos": "volumedown", "diminuir_volume": "volumedown"}
+          "proximo": "nexttrack", "next": "nexttrack", "pular": "nexttrack", "anterior": "prevtrack",
+          "previous": "prevtrack", "prev": "prevtrack", "voltar": "prevtrack", "parar": "stop", "stop": "stop",
+          "mudo": "volumemute", "mute": "volumemute", "desmutar": "volumemute", "unmute": "volumemute",
+          "volume_mais": "volumeup", "aumentar_volume": "volumeup", "volume_up": "volumeup",
+          "volume_menos": "volumedown", "diminuir_volume": "volumedown", "volume_down": "volumedown"}
 
 
 @ferramenta("Controla a sessão de mídia atualmente ativa no Windows: pausar/continuar, próxima, anterior, mudo, "
             "aumentar ou diminuir o volume. Play/Pause é global e não seleciona um aplicativo nomeado; para abrir "
             "Spotify ou outro app, use abrir_programa.", risco=BAIXO,
-            params={"acao": "pausar, continuar, proxima, anterior, mudo, volume_mais ou volume_menos",
+            params={"acao": "pausar, continuar, proxima, anterior, stop, mudo, volume_mais ou volume_menos",
                     "vezes": "Repetições (padrão 1). No volume, cada repetição muda cerca de 10%."})
 def controlar_midia(acao: str, vezes: int = 1):
     tecla = _MIDIA.get(seguranca.normalizar(acao).strip().replace(" ", "_"))
     if not tecla:
-        return "Ação de mídia desconhecida. Use: pausar, continuar, proxima, anterior, mudo, volume_mais, volume_menos."
+        return "Ação de mídia desconhecida. Use: pausar, continuar, proxima, anterior, stop, mudo, volume_mais, volume_menos."
     n = max(1, min(10, int(vezes)))
     if tecla in ("volumeup", "volumedown"):
         n *= 5
+    if tecla == "stop" and os.name == "nt":
+        import ctypes
+        user32 = ctypes.windll.user32
+        for _ in range(n):
+            user32.keybd_event(0xB2, 0, 0, 0)
+            user32.keybd_event(0xB2, 0, 0x0002, 0)
+        return "Feito."
     pag = _pag()
     for _ in range(n):
         pag.press(tecla)
@@ -1290,7 +1360,12 @@ def spotify_tocar(consulta: str):
     if not spotify.configurado():
         return "O Spotify não está configurado (client id, secret e refresh token no cofre)."
     try:
-        return spotify.tocar(consulta)
+        res = spotify.tocar(consulta)
+        if any(trecho in res for trecho in ("Abra o Spotify", "não confirmei", "Premium")):
+            alternativa = spotify.ativar_e_tocar_local(consulta, res)
+            if alternativa:
+                return alternativa
+        return res
     except Exception as e:      # noqa: BLE001 - a mensagem ao usuário não pode virar traceback
         return f"Não consegui falar com o Spotify: {e}"
 
@@ -1501,7 +1576,7 @@ def _recusa_fora_da_allowlist():
 
 
 def _pasta_permitida(caminho):
-    """Só aceita pastas que estão na allowlist de diretórios."""
+    """Só aceita pastas que estão na allowlist de diretórios ou qualquer pasta válida no Modo Admin."""
     if not str(caminho or "").strip():
         return None
     try:
@@ -1513,6 +1588,8 @@ def _pasta_permitida(caminho):
     if _protegido(str(alvo)):
         # liberar uma pasta-pai (ex.: a home) não pode abrir AppData, .ssh nem o Ultron
         return None
+    if seguranca.modo_admin_ativo(_ORIGEM_ATUAL.get()):
+        return alvo if alvo.is_dir() else None
     for base in seguranca.allowlist("diretorios", []):
         try:
             raiz = Path(str(base)).expanduser().resolve()
@@ -1676,7 +1753,7 @@ def alternar_modo_escuro(ligar: bool | None = None):
             classificar=lambda fluxo="", **_: Classificacao(BAIXO, "fluxo.executar", True))
 def executar_fluxo(fluxo: str):
     import fluxos as _fluxos
-    resultado = _fluxos.executar(fluxo, executar, None, "fluxo")
+    resultado = _fluxos.executar(fluxo, executar, _CONFIRMAR.get(), "fluxo")
     linhas = [resultado["resumo"]]
     for etapa in resultado["etapas"]:
         marca = "ok" if etapa["ok"] else "falhou"
@@ -1705,11 +1782,32 @@ def esquecer_fato(trecho: str):
     return "Esquecido." if apagados else "Não achei nenhum fato com esse trecho."
 
 
-@ferramenta("Cria um lembrete para daqui a alguns minutos (calcule os minutos a partir da hora atual).",
-            params={"texto": "O que lembrar", "minutos": "Minutos a partir de agora"})
-def criar_lembrete(texto: str, minutos: float):
-    memoria.add_lembrete(time.time() + float(minutos) * 60, texto)
-    return f"Lembrete criado para daqui a {float(minutos):g} minutos."
+@ferramenta(
+    "Cria um lembrete para daqui a alguns minutos ou para um horário/data em português natural "
+    "(ex.: 'amanhã às 9h', 'hoje às 18:30', 'em 1h30'), com recorrência opcional.",
+    params={
+        "texto": "O que lembrar",
+        "minutos": "Minutos a partir de agora (opcional se 'quando' for informado)",
+        "quando": "Data/hora em linguagem natural ou ISO/BR (opcional: ex. 'amanhã às 9h')",
+        "repetir": "Opcional: vazio, diaria, semanal, mensal ou minutos",
+    },
+)
+def criar_lembrete(texto: str, minutos: float = 0, quando: str = "", repetir: str = ""):
+    try:
+        rep_min = memoria.minutos_de_recorrencia(repetir) if repetir else 0
+        quando_limpo = str(quando or "").strip()
+        if quando_limpo:
+            due = memoria._quando_do_texto(quando_limpo)
+        else:
+            due = time.time() + float(minutos) * 60
+    except (TypeError, ValueError, memoria.MemoriaLimite) as erro:
+        return str(erro)
+    memoria.add_lembrete(due, texto, rep_min)
+    extra = f", repetindo a cada {rep_min} minutos" if rep_min else ""
+    if quando_limpo and not minutos:
+        quando_local = datetime.datetime.fromtimestamp(due).strftime("%d/%m %H:%M")
+        return f"Lembrete criado para {quando_local}{extra}."
+    return f"Lembrete criado para daqui a {float(minutos):g} minutos{extra}."
 
 
 @ferramenta("Cancela um lembrete pendente pelo número da lista ou por um trecho do texto.",
@@ -1878,7 +1976,7 @@ def controlar_mouse_com_gesto(segundos: float = 8.0):
 
 
 # ---------- código e sites ----------
-_SANDBOX = seguranca.BASE / "dados" / "sandbox"
+_SANDBOX = getattr(config, "DIR_DADOS", seguranca.BASE / "dados") / "sandbox"
 _CHAVES_SENSIVEIS = re.compile(r"(API_KEY|APIKEY|TOKEN|SECRET|PASSWORD|SENHA|PIN|CREDENTIAL)", re.I)
 
 
@@ -1950,34 +2048,7 @@ def rodar_codigo(linguagem: str = "python", codigo: str = "", nome: str = ""):
                   f"Saída:\n{saida or '(sem saída)'}")
 
 
-_MODELO_SITE = """<!doctype html>
-<html lang="pt-BR">
-<head>
-<meta charset="utf-8">
-<meta name="viewport" content="width=device-width, initial-scale=1">
-<title>{titulo}</title>
-<style>
-  :root {{ color-scheme: dark; }}
-  * {{ box-sizing: border-box; }}
-  body {{ margin: 0; background: #07080c; color: #eef1f7;
-         font: 16px/1.65 "Segoe UI", system-ui, sans-serif; }}
-  main {{ max-width: 760px; margin: 0 auto; padding: 12vh 24px 16vh; }}
-  h1 {{ margin: 0 0 28px; font-size: clamp(34px, 6vw, 58px); line-height: 1.08;
-       font-weight: 700; letter-spacing: -.03em; }}
-  p {{ margin: 0 0 18px; color: #b9c1cf; max-width: 62ch; }}
-  footer {{ margin-top: 64px; padding-top: 18px; border-top: 1px solid #1c2028;
-           font-size: 12px; letter-spacing: .08em; text-transform: uppercase; color: #6d7686; }}
-</style>
-</head>
-<body>
-<main>
-<h1>{titulo}</h1>
-{corpo}
-<footer>feito com ULTRON</footer>
-</main>
-</body>
-</html>
-"""
+_MODELO_SITE = _ferramentas_sites._MODELO_SITE
 
 
 @ferramenta("Cria um site de uma página (HTML com estilo embutido) numa pasta autorizada. "
@@ -1988,33 +2059,19 @@ _MODELO_SITE = """<!doctype html>
             classificar=_cls_caminhos("site.criar", MEDIO, [("pasta", "")],
                                       resumo=lambda a: f"criar o site {a.get('nome')} em {a.get('pasta')}"))
 def criar_site(pasta: str, nome: str, titulo: str, conteudo: str = ""):
-    import html as _html
-
     base = _caminho(pasta)
     if base.exists() and not base.is_dir():
         return "O caminho indicado não é uma pasta."
     faltando = _pastas_que_faltam(base)
     base.mkdir(parents=True, exist_ok=True)
 
-    arquivo_nome = re.sub(r"[^A-Za-z0-9._-]+", "-", Path(str(nome or "site")).name).strip(".-")
-    if not arquivo_nome:
-        arquivo_nome = "site"
-    if not arquivo_nome.lower().endswith((".html", ".htm")):
-        arquivo_nome += ".html"
-    destino = (base / arquivo_nome).resolve()
-    if destino.parent != base.resolve():
+    destino = _ferramentas_sites.montar_destino_site(base, nome)
+    if destino is None:
         return "Nome de arquivo inválido."
     if destino.exists():
         return "Esse arquivo já existe; não vou sobrescrever."
 
-    titulo_limpo = _html.escape(str(titulo or "Sem título").strip() or "Sem título")
-    blocos = [b.strip() for b in re.split(r"\n\s*\n", str(conteudo or "")) if b.strip()]
-    if blocos:
-        corpo = "\n".join("<p>" + _html.escape(b).replace("\n", "<br>") + "</p>" for b in blocos)
-    else:
-        corpo = "<p>Página criada pelo ULTRON. Edite este arquivo para escrever o conteúdo.</p>"
-
-    destino.write_text(_MODELO_SITE.format(titulo=titulo_limpo, corpo=corpo), encoding="utf-8")
+    destino.write_text(_ferramentas_sites.gerar_html_site(titulo, conteudo), encoding="utf-8")
     _desfazer_registrar("site.criar", f"criar o site {destino}",
                         lambda d: d.inversa_remover(destino, pastas_criadas=faltando))
     return f"Site criado em {destino}"
@@ -2031,44 +2088,90 @@ def _host_de(url):
 
 
 def _cls_palco(tipo="auto", alvo="", titulo="", **_):
-    """Arquivo local segue a allowlist; site e mídia remota fora dos hosts conhecidos confirmam."""
+    """Modo palco não precisa de confirmação; mantém apenas bloqueio a caminhos protegidos e alvo vazio."""
     tipo = str(tipo or "auto").strip().lower()
     alvo = str(alvo or "").strip()
-    if tipo in {"fechar", "fechar_palco", "limpar", "texto"}:
-        return Classificacao(BAIXO, "palco.texto", True,
-                             resumo="fechar ou preencher o palco da interface")
+    if tipo in {"fechar", "fechar_palco", "limpar", "texto", "noticias", "noticia"}:
+        return Classificacao(BAIXO, f"palco.{tipo if tipo in {'noticias', 'noticia'} else 'texto'}", True,
+                             resumo="preencher ou fechar o palco da interface")
     if not alvo:
         return Classificacao(BAIXO, "palco.local", False, negar="missing_target")
     remoto = alvo.lower().startswith(("http://", "https://"))
     if tipo == "site" or (tipo == "auto" and remoto):
-        return Classificacao(MEDIO, "palco.site", False,
+        return Classificacao(BAIXO, "palco.site", True,
                              resumo=f"mostrar o site {alvo[:80]} dentro da interface")
     if remoto:
-        if tipo in {"video", "auto"} and _host_de(alvo) in _VIDEO_HOSTS:
-            return Classificacao(BAIXO, "palco.video", True,
-                                 resumo=f"mostrar o vídeo {alvo[:80]} no palco")
-        return Classificacao(MEDIO, "palco.remoto", False,
+        op = "palco.video" if (tipo in {"video", "auto"} and _host_de(alvo) in _VIDEO_HOSTS) else "palco.remoto"
+        return Classificacao(BAIXO, op, True,
                              resumo=f"mostrar conteúdo externo {alvo[:80]} no palco")
     if _protegido(alvo):
         return Classificacao(BAIXO, "palco.local", False, negar="protected_path")
-    dentro = _pasta_ok(alvo)
-    return Classificacao(BAIXO if dentro else MEDIO, "palco.local", dentro,
+    return Classificacao(BAIXO, "palco.local", True,
                          resumo=f"mostrar {alvo[:80]} no palco da interface")
 
 
 @ferramenta("Mostra algo no palco da interface do ULTRON: vídeo (YouTube, Vimeo ou arquivo), "
-            "imagem, PDF, site ou texto. Use quando o usuário pedir para ver, abrir aqui ou "
+            "imagem, PDF, site, notícias ou texto. Use quando o usuário pedir para ver, abrir aqui ou "
             "colocar na tela. Se o alvo for uma pasta, mostro o arquivo mais recente do tipo "
             "pedido dentro dela. Use o caminho exatamente como o usuário passou: não converta "
             "para file:/// e não use abrir_programa para mostrar no palco. Para fechar o palco, "
             "use tipo='fechar'.",
             risco=BAIXO,
-            params={"tipo": "video, imagem, pdf, site, texto ou fechar",
-                    "alvo": "URL, caminho do arquivo ou da pasta, ou o próprio texto",
+            params={"tipo": "video, imagem, pdf, site, texto, noticias ou fechar",
+                    "alvo": "URL, caminho do arquivo ou da pasta, JSON de notícias ou o próprio texto",
                     "titulo": "opcional: título mostrado no palco"},
             classificar=_cls_palco)
 def mostrar_na_interface(tipo: str = "auto", alvo: str = "", titulo: str = ""):
+    import json as _json
     import palco
+
+    tipo_norm = str(tipo or "auto").strip().lower()
+    alvo_str = str(alvo or "").strip()
+    if tipo_norm == "site" and alvo_str.lower().startswith(("http://", "https://")):
+        from urllib.parse import parse_qs, urlparse
+        partes_url = urlparse(alvo_str)
+        host_url = (partes_url.hostname or "").lower()
+        if host_url.startswith("www."):
+            host_url = host_url[4:]
+        if host_url in {"youtube.com", "m.youtube.com", "youtu.be", "youtube-nocookie.com"}:
+            if palco._youtube_id(alvo_str):
+                tipo = "video"
+            else:
+                q_busca = (parse_qs(partes_url.query).get("search_query") or [""])[0].strip()
+                termo = q_busca or (str(titulo or "").strip() if str(titulo or "").strip().lower() not in {"youtube", "site"} else "")
+                url_video = _buscar_url_youtube(termo) if termo else ""
+                if not url_video:
+                    return "Não consegui mostrar: o YouTube bloqueia exibição embutida da página inicial/busca; peça um vídeo específico."
+                tipo = "video"
+                alvo = url_video
+                titulo = titulo or termo
+    elif tipo_norm in {"video", "auto"} and alvo_str and not alvo_str.lower().startswith(("http://", "https://", "file://")):
+        try:
+            existe_local = _caminho(alvo_str).exists()
+        except Exception:
+            existe_local = False
+        if not existe_local:
+            consulta_yt = re.sub(r"^youtube:\s*", "", alvo_str, flags=re.IGNORECASE).strip()
+            url_video = _buscar_url_youtube(consulta_yt)
+            if url_video:
+                tipo = "video"
+                alvo = url_video
+                titulo = titulo or consulta_yt
+
+    if tipo_norm in {"noticias", "noticia"} and not alvo_str.startswith(("{", "[", "[PALCO_NOTICIAS]")):
+        atual = palco.estado()
+        if ("\n" in alvo_str and isinstance(atual, dict) and atual.get("tipo") == "noticias"
+                and any(isinstance(item, dict) and item.get("imagem") for item in (atual.get("itens") or []))):
+            alvo = _json.dumps(
+                {"tema": atual.get("tema", "geral"), "itens": atual.get("itens", [])},
+                ensure_ascii=False,
+            )
+            titulo = titulo or atual.get("titulo", "Notícias")
+        elif "\n" not in alvo_str and len(alvo_str) <= 32:
+            bruto = str(getattr(noticias, "__wrapped__", noticias)(alvo_str or "geral") or "")
+            if "[PALCO_NOTICIAS] " in bruto:
+                alvo = bruto.split("[PALCO_NOTICIAS] ", 1)[1].strip()
+
     resultado = palco.mostrar(tipo, alvo, titulo)
     if not resultado.get("ok"):
         return f"Não consegui mostrar: {resultado.get('erro', 'motivo desconhecido')}."
@@ -2139,3 +2242,487 @@ def descartar_skill(nome: str) -> str:
     if not skills.descartar(slug):
         return f"Skill pendente não encontrada: {slug}"
     return f"Skill pendente '{slug}' descartada."
+
+
+# ====================== BLOCO 1: ARQUIVOS, DOWNLOADS E DISCO ======================
+@ferramenta("Lê o conteúdo de PDFs recém-baixados e os renomeia com data e assunto ('AAAA-MM-DD - Assunto.pdf').",
+            params={"pasta": "Diretório dos PDFs (padrão ~/Downloads)", "aplicar": "True para renomear, False para prévia"},
+            risco=MEDIO,
+            classificar=lambda **a: Classificacao(MEDIO, "arquivo.organizar_pdf", resumo="organizar PDFs em Downloads"))
+def organizar_pdf_downloads(pasta: str = "~/Downloads", aplicar: bool = True) -> str:
+    import disco_ops
+    res = disco_ops.organizar_pdf_downloads(pasta=pasta, aplicar=aplicar)
+    if "erro" in res:
+        return f"Erro ao organizar PDFs: {res['erro']}"
+    return f"PDFs processados: {res['total']}. Renomeados: {res['renomeados']}."
+
+
+@ferramenta("Extrai pacotes .zip ou .rar em segurança e opcionalmente remove o pacote e instalador após a conclusão.",
+            params={"arquivo": "Caminho do arquivo compactado", "apagar_origem": "True para mover o arquivo de origem para Lixeira"},
+            risco=ALTO,
+            classificar=lambda **a: Classificacao(ALTO, "arquivo.extrair_instalador", resumo=f"extrair {a.get('arquivo')}"))
+def extrair_e_limpar_instalador(arquivo: str, apagar_origem: bool = False) -> str:
+    import disco_ops
+    res = disco_ops.extrair_e_limpar_instalador(arquivo=arquivo, apagar_origem=apagar_origem)
+    if not res.get("sucesso"):
+        return f"Erro na extração: {res.get('erro')}"
+    msg = f"Extraídos {res['extraidos']} arquivos para {res['destino']}."
+    if res.get("instalador"):
+        msg += f" Instalador detectado: {res['instalador']}."
+    return msg
+
+
+@ferramenta("Localiza e elimina arquivos duplicados comparando SHA-256, mantendo apenas a cópia mais recente.",
+            params={"pasta": "Diretório a varrer", "executar": "True para mover cópias antigas para a Lixeira, False para prévia"},
+            risco=ALTO,
+            classificar=lambda **a: Classificacao(ALTO, "arquivo.limpar_duplicados", resumo=f"deduplicar arquivos em {a.get('pasta')}"))
+def limpar_duplicados(pasta: str, executar: bool = False) -> str:
+    import disco_ops
+    res = disco_ops.limpar_duplicados(pasta=pasta, executar=executar)
+    if "erro" in res:
+        return f"Erro na deduplicação: {res['erro']}"
+    mb = res['bytes_economizados'] / (1024 * 1024)
+    if executar:
+        return f"Deduplicação concluída: {res['removidos']} arquivos duplicados movidos para a Lixeira ({mb:.2f} MB liberados)."
+    return f"Prévia de deduplicação: {res['duplicados']} arquivos duplicados encontrados em {res['grupos']} grupos ({mb:.2f} MB recuperáveis)."
+
+
+@ferramenta("Limpa caches seguros de navegadores, imagens Docker órfãs e pastas de build inativas quando o disco estiver cheio.",
+            params={"executar": "True para efetuar limpeza, False para simulação",
+                    "incluir_docker": "True para podar imagens Docker órfãs",
+                    "incluir_builds": "True para remover node_modules/builds inativos"},
+            risco=ALTO,
+            classificar=lambda **a: Classificacao(ALTO, "disco.limpeza", resumo="executar limpeza de disco"))
+def limpar_disco(executar: bool = True, incluir_docker: bool = True, incluir_builds: bool = True) -> str:
+    import disco_ops
+    res = disco_ops.limpar_disco(executar=executar, incluir_docker=incluir_docker, incluir_builds=incluir_builds, limite_pct=0 if executar else 80)
+    if not res.get("executado"):
+        return f"Limpeza ignorada: {res.get('motivo')}."
+    cache_mb = res.get("caches_navegador", {}).get("bytes_liberados", 0) / (1024 * 1024)
+    builds_pastas = res.get("builds", {}).get("pastas_removidas", 0)
+    return f"Limpeza concluída ({'efetiva' if not res.get('simulado') else 'simulação'}): {cache_mb:.2f} MB em caches limpos, {builds_pastas} pastas de build antigas removidas."
+
+
+@ferramenta("Converte em lote imagens .webp ou .heic para .png ou .jpg padrão preservando metadados.",
+            params={"alvo": "Arquivo ou diretório contendo imagens",
+                    "formato": "Formato de saída ('png' ou 'jpg')",
+                    "apagar_original": "True para mover original à Lixeira após conversão"},
+            risco=MEDIO,
+            classificar=lambda **a: Classificacao(MEDIO, "imagem.converter", resumo=f"converter imagens de {a.get('alvo')} para {a.get('formato', 'png')}"))
+def converter_imagens(alvo: str, formato: str = "png", apagar_original: bool = False) -> str:
+    import disco_ops
+    res = disco_ops.converter_imagens(alvo=alvo, formato=formato, apagar_original=apagar_original)
+    erros_txt = f" Erros: {len(res['erros'])}" if res['erros'] else ""
+    return f"Convertidas {res['convertidos']} de {res['total']} imagens para {formato}.{erros_txt}"
+
+
+@ferramenta("Compacta pastas de projetos sem modificação há mais de 6 meses em arquivos .tar.zst validados.",
+            params={"pasta": "Diretório de projetos (vazio usa as configuradas)",
+                    "meses": "Meses de inatividade requeridos (padrão 6)",
+                    "executar": "True para compactar e mover original para Lixeira, False para prévia"},
+            risco=ALTO,
+            classificar=lambda **a: Classificacao(ALTO, "projeto.arquivar", resumo="arquivar projetos antigos em .tar.zst"))
+def arquivar_projetos_antigos(pasta: str = "", meses: int = 6, executar: bool = False) -> str:
+    import disco_ops
+    res = disco_ops.arquivar_projetos_antigos(pasta=pasta, meses=meses, executar=executar)
+    return f"Projetos inativos (> {meses} meses): {res['encontrados']} encontrados, {res['compactados']} compactados em .tar.zst."
+
+
+@ferramenta("Cria backups incrementais silenciosos de diretórios críticos com manifesto SHA-256.",
+            params={"origem": "Diretório de origem", "destino": "Diretório de destino (drive externo ou pasta segura)"},
+            risco=MEDIO,
+            classificar=lambda **a: Classificacao(MEDIO, "backup.incremental", resumo=f"backup de {a.get('origem')} para {a.get('destino')}"))
+def executar_backup_incremental(origem: str = "", destino: str = "") -> str:
+    import disco_ops
+    res = disco_ops.executar_backup_incremental(origem=origem, destino=destino)
+    if not res.get("sucesso"):
+        return f"Falha no backup: {res.get('erro')}"
+    return f"Backup incremental concluído: {res['copiados']} copiados, {res['inalterados']} inalterados (total {res['total']})."
+
+
+@ferramenta("Identifica capturas de tela antigas na Área de Trabalho e as move para 'Capturas/AAAA/MM'.",
+            params={"dias": "Idade mínima em dias (padrão 7)", "executar": "True para mover, False para prévia"},
+            risco=MEDIO,
+            classificar=lambda **a: Classificacao(MEDIO, "desktop.arquivar_capturas", resumo="arquivar capturas de tela antigas"))
+def arquivar_capturas_desktop(dias: int = 7, executar: bool = True) -> str:
+    import disco_ops
+    res = disco_ops.arquivar_capturas_desktop(dias=dias, executar=executar)
+    if "erro" in res:
+        return f"Erro ao arquivar capturas: {res['erro']}"
+    return f"Capturas de tela (> {dias} dias): {res['movidos']} de {res['encontrados']} arquivadas."
+
+
+@ferramenta("Corrige atributos somente-leitura e permissões NTFS em pastas de repositórios ou projetos (exige Modo Admin).",
+            params={"pasta": "Diretório a corrigir", "remover_readonly": "True para remover flag somente-leitura", "corrigir_acl": "True para restaurar ACLs"},
+            risco=CRITICO,
+            classificar=lambda **a: Classificacao(CRITICO, "permissao.corrigir", resumo=f"corrigir permissões em {a.get('pasta')}"))
+def corrigir_permissoes_pasta(pasta: str, remover_readonly: bool = True, corrigir_acl: bool = True) -> str:
+    import disco_ops
+    res = disco_ops.corrigir_permissoes_pasta(pasta=pasta, remover_readonly=remover_readonly, corrigir_acl=corrigir_acl)
+    if not res.get("sucesso"):
+        return f"Falha ao corrigir permissões: {res.get('erro')}"
+    return f"Permissões corrigidas em {res['pasta']} (readonly_removido={res['readonly_removido']}, acl_corrigida={res['acl_corrigida']})."
+
+
+@ferramenta("Desmonta e ejeta com segurança pendrives e unidades USB externos ociosos.",
+            params={"unidade": "Letra da unidade (ex.: 'E:'). Se vazia, avalia todas as removíveis", "minutos_ocioso": "Tempo sem I/O para ejetar (padrão 5)"},
+            risco=ALTO,
+            classificar=lambda **a: Classificacao(ALTO, "usb.ejetar", resumo=f"ejetar unidade USB {a.get('unidade')}"))
+def ejetar_usb_ocioso(unidade: str = "", minutos_ocioso: int = 5) -> str:
+    import disco_ops
+    res = disco_ops.ejetar_usb_ocioso(unidade=unidade, minutos_ocioso=minutos_ocioso)
+    if not res.get("sucesso"):
+        return f"Não foi possível ejetar {unidade}: {res.get('erro')}"
+    if unidade:
+        return f"Unidade USB {unidade} ejetada com segurança."
+    ejetadas = ", ".join(res.get("ejetadas", [])) or "nenhuma"
+    bloqueadas = ", ".join(res.get("bloqueadas_em_uso", [])) or "nenhuma"
+    return f"Varredura USB: ejetadas={ejetadas}, em uso={bloqueadas}."
+
+
+@ferramenta("Consulta ou altera configurações das automações de disco e arquivos do Bloco 1.",
+            params={"acao": "'status' para ler ou 'atualizar' para mudar chave", "chave": "Nome da configuração", "valor": "Novo valor"},
+            risco=MEDIO,
+            classificar=lambda **a: Classificacao(MEDIO, "bloco1.configurar", resumo="configurar automações do Bloco 1"))
+def configurar_bloco1(acao: str = "status", chave: str = "", valor: str = "") -> str:
+    import disco_ops
+    if acao == "atualizar" and chave:
+        cfg_atual = disco_ops.carregar_config_bloco1()
+        if chave not in cfg_atual:
+            return f"Chave desconhecida: {chave}. Chaves válidas: {list(cfg_atual.keys())}"
+        val_parseado = valor
+        if valor.lower() in ("true", "1", "sim"):
+            val_parseado = True
+        elif valor.lower() in ("false", "0", "nao"):
+            val_parseado = False
+        elif valor.isdigit():
+            val_parseado = int(valor)
+        disco_ops.salvar_config_bloco1({chave: val_parseado})
+        return f"Configuração '{chave}' atualizada para {val_parseado}."
+    import json
+    return json.dumps(disco_ops.carregar_config_bloco1(), indent=2, ensure_ascii=False)
+
+
+# =====================================================================
+# BLOCO 2: Processos, Memória e Hardware (11 a 20)
+# =====================================================================
+
+@ferramenta("Detecta e suspende abas inativas do navegador que consomem mais de 500 MB de RAM.",
+            params={"limite_mb": "Limite mínimo em MB (padrão 500)", "desuspender": "True para retomar todas as abas", "simular": "True para apenas listar"},
+            risco=MEDIO,
+            classificar=lambda **a: Classificacao(MEDIO, "processo.suspender_abas", resumo="suspender abas inativas pesadas"))
+def suspender_abas_navegador(limite_mb: int = 500, desuspender: bool = False, simular: bool = False) -> str:
+    import processos_ops
+    res = processos_ops.suspender_abas_pesadas(limite_mb=limite_mb, desuspender=desuspender, simular=simular)
+    if desuspender:
+        return f"{res['retomados']} abas retomadas com sucesso."
+    if simular:
+        return f"Prévia: {res['candidatos']} abas candidatas ({res['mb_economizados']:.2f} MB recuperáveis)."
+    return f"{res['suspensos']} abas suspensas ({res['mb_economizados']:.2f} MB economizados)."
+
+
+@ferramenta("Identifica e encerra processos zumbis ou travados ('Não Respondendo') antes que congelem o sistema.",
+            params={"matar": "True para encerrar os travados, False para listar"},
+            risco=ALTO,
+            classificar=lambda **a: Classificacao(ALTO, "processo.encerrar_travados", resumo="encerrar processos travados"))
+def encerrar_apps_travados(matar: bool = True) -> str:
+    import processos_ops
+    res = processos_ops.encerrar_processos_travados(matar=matar)
+    if not res.get("encontrados"):
+        return "Nenhum aplicativo travado detectado no momento."
+    if matar:
+        return f"{res['encerrados']} aplicativos travados encerrados com sucesso (protegidos ignorados: {res['ignorados_protegidos']})."
+    return f"{res['encontrados']} aplicativos travados encontrados."
+
+
+@ferramenta("Alterna o plano de energia e perfil acústico (Silencioso para leitura vs Desempenho Máximo para compilação/renderização).",
+            params={"modo": "'auto', 'silencioso', 'desempenho' ou 'equilibrado'", "esquema": "GUID específico ou 'maximo'"},
+            risco=MEDIO,
+            classificar=lambda **a: Classificacao(MEDIO, "energia.plano", resumo=f"ajustar plano de energia para {a.get('modo', 'auto')}"))
+def controlar_plano_energia(modo: str = "auto", esquema: str = "") -> str:
+    import processos_ops
+    res = processos_ops.gerenciar_plano_energia(modo=modo, esquema=esquema)
+    gatilhos = f" (gatilhos: {', '.join(res['gatilhos'])})" if res.get("gatilhos") else ""
+    return f"Plano de energia ajustado para {res['modo'].upper()}{gatilhos}."
+
+
+@ferramenta("Limita o uso de CPU de indexadores e atualizações em segundo plano enquanto você estiver em reunião ou jogando.",
+            params={"em_reuniao_ou_jogo": "True/False explícito ou None para detecção automática", "aplicar": "True para aplicar prioridade ociosa"},
+            risco=BAIXO,
+            classificar=lambda **a: Classificacao(BAIXO, "processo.otimizar_cpu", resumo="otimizar CPU para jogos e reuniões"))
+def otimizar_cpu_jogos_reunioes(em_reuniao_ou_jogo: bool | None = None, aplicar: bool = True) -> str:
+    import processos_ops
+    res = processos_ops.otimizar_cpu_foco(em_reuniao_ou_jogo=em_reuniao_ou_jogo, aplicar=aplicar)
+    estado = "em reunião/jogo" if res["em_reuniao_ou_jogo"] else "modo padrão"
+    return f"Otimização de CPU ({estado}): {res['processos_otimizados']} indexadores ajustados para prioridade {res['prioridade']}."
+
+
+@ferramenta("Monitora a temperatura da CPU/GPU e alivia processos secundários caso haja risco de thermal throttling.",
+            params={"limite_celsius": "Limite térmico de alerta (padrão 82°C)", "simular": "True para não alterar processos"},
+            risco=BAIXO,
+            classificar=lambda **a: Classificacao(BAIXO, "hardware.temperatura", resumo="verificar proteção térmica do hardware"))
+def verificar_protecao_termica(limite_celsius: int = 82, simular: bool = False) -> str:
+    import processos_ops
+    res = processos_ops.proteger_temperatura(limite_celsius=limite_celsius, simular=simular)
+    temp_txt = f"{res['temperatura']}°C" if res['temperatura'] is not None else "indisponível"
+    if res["risco_throttling"]:
+        return f"ALERTA TÉRMICO: temperatura em {temp_txt} (limite {limite_celsius}°C). {res['processos_limitados']} processos secundários contidos."
+    return f"Temperatura estável: {temp_txt} (segura abaixo de {limite_celsius}°C)."
+
+
+@ferramenta("Audita, aprova ou remove programas que tentam se infiltrar na inicialização do sistema (Startup).",
+            params={"acao": "'auditar' para listar, 'aprovar' para autorizar, 'remover' para excluir", "item": "Nome do programa"},
+            risco=ALTO,
+            classificar=lambda **a: Classificacao(ALTO, "sistema.startup", resumo=f"{a.get('acao', 'auditar')} inicialização do sistema"))
+def gerenciar_inicializacao_sistema(acao: str = "auditar", item: str = "") -> str:
+    import processos_ops
+    res = processos_ops.guardiao_startup(acao=acao, item=item)
+    if acao == "aprovar":
+        return f"Item '{item}' aprovado na lista de inicialização autorizada."
+    if acao == "remover":
+        return f"Item '{item}' removido da inicialização ({res['removidos']} entradas eliminadas)."
+    novos = res.get("novos_infiltrados", 0)
+    return f"Auditoria de Startup: {res['total']} itens encontrados. {novos} não autorizados."
+
+
+@ferramenta("Redistribui afinidade de núcleos e prioridade máxima para o aplicativo em foco na janela ativa.",
+            params={"aplicar": "True para aplicar prioridade alta, False para prévia"},
+            risco=BAIXO,
+            classificar=lambda **a: Classificacao(BAIXO, "processo.prioridade", resumo="otimizar prioridade da janela ativa"))
+def otimizar_prioridade_janela(aplicar: bool = True) -> str:
+    import processos_ops
+    res = processos_ops.otimizar_janela_ativa(aplicar=aplicar)
+    if not res.get("sucesso"):
+        return f"Não foi possível otimizar: {res.get('motivo')}."
+    if res.get("ignorado"):
+        return f"Janela ativa ignorada ({res.get('motivo')})."
+    return f"Janela ativa otimizada: PID {res['pid_ativo']} ({res['exe']}) com prioridade {res['prioridade_aplicada']}."
+
+
+@ferramenta("Limpa o cache de memória RAM ociosa (Working Sets e Standby List) liberando alocação imediata.",
+            params={"agressivo": "True para purgar também Standby List do sistema"},
+            risco=MEDIO,
+            classificar=lambda **a: Classificacao(MEDIO, "memoria.purgar", resumo="limpar memória RAM ociosa"))
+def purgar_memoria_ram(agressivo: bool = False) -> str:
+    import processos_ops
+    res = processos_ops.limpar_ram_ociosa(agressivo=agressivo)
+    mb = res.get("mb_liberados", 0.0)
+    limpos = res.get("processos_limpos", 0)
+    depois = res.get("ram_livre_depois_mb", 0.0)
+    return f"Memória RAM liberada: {mb:.2f} MB liberados ({limpos} processos limpos). Disponível agora: {depois:.2f} MB."
+
+
+@ferramenta("Ajusta automaticamente brilho, temperatura de cor (luz noturna) e taxa de atualização do monitor conforme o horário.",
+            params={"brilho": "Brilho de 20 a 100", "temperatura_k": "Temperatura em Kelvin (2500 a 6500)", "taxa_hz": "Frequência em Hz", "modo": "'auto' ou 'manual'"},
+            risco=BAIXO,
+            classificar=lambda **a: Classificacao(BAIXO, "display.ajustar", resumo="ajustar display e temperatura de cor"))
+def ajustar_brilho_e_cor_tela(brilho: int | None = None, temperatura_k: int | None = None, taxa_hz: int | None = None, modo: str = "auto") -> str:
+    import processos_ops
+    res = processos_ops.ajustar_display(brilho=brilho, temperatura_k=temperatura_k, taxa_hz=taxa_hz, modo=modo)
+    return f"Display ajustado ({res['modo']}): brilho={res['brilho']}%, cor={res['temperatura_k']}K" + (f", {res['taxa_hz']}Hz" if res.get('taxa_hz') else "") + "."
+
+
+@ferramenta("Desconecta dispositivos Bluetooth ociosos para poupar bateria e evitar ruídos de áudio.",
+            params={"minutos_ocioso": "Tempo sem áudio em minutos (padrão 5)", "executar": "True para desconectar, False para prévia"},
+            risco=MEDIO,
+            classificar=lambda **a: Classificacao(MEDIO, "bluetooth.desconectar", resumo="desconectar bluetooth ocioso"))
+def desconectar_bluetooth_inativo(minutos_ocioso: int = 5, executar: bool = True) -> str:
+    import processos_ops
+    res = processos_ops.desconectar_bluetooth_ocioso(minutos_ocioso=minutos_ocioso, executar=executar)
+    if not res.get("total_encontrados"):
+        return "Nenhum dispositivo Bluetooth detectado."
+    return f"Bluetooth: {res['ociosos_desconectados']} dispositivos ociosos (> {minutos_ocioso} min) desconectados."
+
+
+@ferramenta("Consulta ou altera configurações das automações de processos, memória e hardware do Bloco 2.",
+            params={"acao": "'status' para ler ou 'atualizar' para mudar chave", "chave": "Nome da configuração", "valor": "Novo valor"},
+            risco=MEDIO,
+            classificar=lambda **a: Classificacao(MEDIO, "bloco2.configurar", resumo="configurar automações do Bloco 2"))
+def configurar_bloco2(acao: str = "status", chave: str = "", valor: str = "") -> str:
+    import processos_ops
+    if acao == "atualizar" and chave:
+        cfg_atual = processos_ops.carregar_config_bloco2()
+        if chave not in cfg_atual:
+            return f"Chave desconhecida: {chave}. Chaves válidas: {list(cfg_atual.keys())}"
+        val_parseado = valor
+        if valor.lower() in ("true", "1", "sim"):
+            val_parseado = True
+        elif valor.lower() in ("false", "0", "nao"):
+            val_parseado = False
+        elif valor.isdigit():
+            val_parseado = int(valor)
+        processos_ops.salvar_config_bloco2({chave: val_parseado})
+        return f"Configuração '{chave}' atualizada para {val_parseado}."
+    import json
+    return json.dumps(processos_ops.carregar_config_bloco2(), indent=2, ensure_ascii=False)
+
+
+# ====================== CONTROLE REVERSO DO CELULAR PAREADO ======================
+
+_CELULAR_CONTROLAR_MAP = {
+    "abrir_app": ("OPEN_APP", lambda v: {"app": v}),
+    "camera": ("OPEN_CAMERA", lambda _v: {}),
+    "lanterna_ligar": ("TORCH_ON", lambda _v: {}),
+    "lanterna_desligar": ("TORCH_OFF", lambda _v: {}),
+    "lanterna_alternar": ("TORCH_TOGGLE", lambda _v: {}),
+    "volume": ("VOLUME_SET", lambda v: {"percent": v}),
+    "volume_aumentar": ("VOLUME_UP", lambda _v: {}),
+    "volume_diminuir": ("VOLUME_DOWN", lambda _v: {}),
+    "volume_mutar": ("VOLUME_MUTE", lambda _v: {}),
+    "midia": ("MEDIA", lambda v: {"action": v}),
+    "vibrar": ("VIBRATE", lambda v: {"durationMs": v} if str(v or "").strip() else {"durationMs": 280}),
+    "nota": ("NOTE", lambda v: {"text": v}),
+}
+
+_CELULAR_CONSULTAR_MAP = {
+    "agenda": ("READ_CALENDAR", lambda d: {"days": d}),
+    "notificacoes": ("READ_MESSAGES", lambda _d: {}),
+    "mensagens": ("READ_MESSAGES", lambda _d: {}),
+    "status": ("DEVICE_STATUS", lambda _d: {}),
+    "ping": ("PING", lambda _d: {}),
+}
+
+_CELULAR_SENSIVEL_MAP = {
+    "whatsapp": ("WHATSAPP", lambda dest, cont: {"target": dest, "text": cont}),
+    "sms": ("SMS", lambda dest, cont: {"target": dest, "text": cont}),
+    "responder": ("REPLY_MESSAGE", lambda dest, cont: {"target": dest, "text": cont}),
+    "ligar": ("DIAL", lambda dest, _cont: {"number": dest}),
+    "criar_evento": ("CREATE_EVENT", lambda dest, cont: {"title": dest, "start": cont}),
+}
+
+
+def _resolver_comando_mobile_controlar(acao: str, valor: str = "") -> tuple[str, dict]:
+    import mobile_bridge
+    chave = str(acao or "").strip().lower()
+    spec = _CELULAR_CONTROLAR_MAP.get(chave)
+    if spec is None:
+        validas = ", ".join(sorted(_CELULAR_CONTROLAR_MAP))
+        raise ValueError(f"Ação '{acao}' inválida. Use uma de: {validas}.")
+    cmd, builder = spec
+    return mobile_bridge.validate_reverse_command(cmd, builder(valor))
+
+
+def _resolver_comando_mobile_consultar(consulta: str, dias: int = 3) -> tuple[str, dict]:
+    import mobile_bridge
+    chave = str(consulta or "").strip().lower()
+    spec = _CELULAR_CONSULTAR_MAP.get(chave)
+    if spec is None:
+        validas = ", ".join(sorted(_CELULAR_CONSULTAR_MAP))
+        raise ValueError(f"Consulta '{consulta}' inválida. Use uma de: {validas}.")
+    cmd, builder = spec
+    return mobile_bridge.validate_reverse_command(cmd, builder(dias))
+
+
+def _resolver_comando_mobile_sensivel(acao: str, destino: str, conteudo: str = "") -> tuple[str, dict]:
+    import mobile_bridge
+    chave = str(acao or "").strip().lower()
+    spec = _CELULAR_SENSIVEL_MAP.get(chave)
+    if spec is None:
+        validas = ", ".join(sorted(_CELULAR_SENSIVEL_MAP))
+        raise ValueError(f"Ação sensível '{acao}' inválida. Use uma de: {validas}.")
+    cmd, builder = spec
+    return mobile_bridge.validate_reverse_command(cmd, builder(destino, conteudo))
+
+
+def _classificar_celular_controlar(acao: str = "", valor: str = "") -> Classificacao:
+    try:
+        cmd, _ = _resolver_comando_mobile_controlar(acao, valor)
+    except ValueError as err:
+        return Classificacao(BAIXO, negar=str(err))
+    return Classificacao(BAIXO, "celular.controlar", resumo=f"executar {cmd} no celular pareado")
+
+
+def _classificar_celular_consultar(consulta: str = "", dias: int = 3) -> Classificacao:
+    try:
+        cmd, _ = _resolver_comando_mobile_consultar(consulta, dias)
+    except ValueError as err:
+        return Classificacao(BAIXO, negar=str(err))
+    return Classificacao(BAIXO, "celular.consultar", resumo=f"consultar {cmd} no celular pareado")
+
+
+def _classificar_celular_sensivel(acao: str = "", destino: str = "", conteudo: str = "") -> Classificacao:
+    try:
+        cmd, _ = _resolver_comando_mobile_sensivel(acao, destino, conteudo)
+    except ValueError as err:
+        return Classificacao(CRITICO, negar=str(err))
+    alvo_curto = str(destino or "").strip()[:48]
+    return Classificacao(
+        CRITICO,
+        "celular.sensivel",
+        resumo=f"executar {cmd} no celular pareado para '{alvo_curto}'",
+    )
+
+
+def _executar_bridge_mobile(cmd: str, args: dict) -> str:
+    import json
+    import mobile_bridge
+
+    bridge = mobile_bridge.get_bridge()
+    try:
+        res = bridge.enqueue_and_wait(cmd, args)
+    except mobile_bridge.MobileBridgeError as err:
+        return err.message
+
+    ok = bool(res.get("ok"))
+    msg = str(res.get("message") or "").strip()
+    data = res.get("data") or {}
+    if not ok:
+        detalhe = msg or str(res.get("status") or "failed")
+        return f"O celular não concluiu '{cmd}': {detalhe}"
+
+    if data:
+        resumo_dados = json.dumps(data, ensure_ascii=False)
+        return f"{msg}\nDados do celular: {resumo_dados}" if msg else f"Dados do celular: {resumo_dados}"
+    return msg or f"Comando {cmd} executado no celular."
+
+
+@ferramenta(
+    "Consulta o status atual do celular pareado (modelo, Android, bateria, RAM, lanterna, volume e rede).",
+    risco=BAIXO,
+    classificar=lambda: Classificacao(BAIXO, "celular.status", resumo="consultar status do celular pareado"),
+)
+def celular_status() -> str:
+    return _executar_bridge_mobile("DEVICE_STATUS", {})
+
+
+@ferramenta(
+    "Consulta informações no celular pareado: agenda ('agenda', dias 1..14), notificações recentes da Sentinela ('notificacoes') ou status ('status').",
+    params={
+        "consulta": "Tipo de consulta: 'agenda', 'notificacoes', 'mensagens', 'status' ou 'ping'",
+        "dias": "Quantidade de dias para consultar a agenda (1 a 14, padrão 3)",
+    },
+    risco=BAIXO,
+    classificar=_classificar_celular_consultar,
+)
+def celular_consultar(consulta: str, dias: int = 3) -> str:
+    cmd, args = _resolver_comando_mobile_consultar(consulta, dias)
+    return _executar_bridge_mobile(cmd, args)
+
+
+@ferramenta(
+    "Executa comandos de controle no celular pareado: abrir app ('abrir_app'), câmera ('camera'), lanterna ('lanterna_ligar'/'lanterna_desligar'/'lanterna_alternar'), volume ('volume' com 0..100, 'volume_aumentar', 'volume_diminuir', 'volume_mutar'), mídia ('midia' com play_pause/play/pause/next/previous/stop), vibrar ('vibrar' com ms) ou salvar nota diária no Obsidian do celular ('nota').",
+    params={
+        "acao": "Ação: 'abrir_app', 'camera', 'lanterna_ligar', 'lanterna_desligar', 'lanterna_alternar', 'volume', 'volume_aumentar', 'volume_diminuir', 'volume_mutar', 'midia', 'vibrar' ou 'nota'",
+        "valor": "Parâmetro da ação (nome do app como 'whatsapp'/'spotify', percentual 0..100, ação de mídia, duração em ms ou texto da nota)",
+    },
+    risco=BAIXO,
+    classificar=_classificar_celular_controlar,
+)
+def celular_controlar(acao: str, valor: str = "") -> str:
+    cmd, args = _resolver_comando_mobile_controlar(acao, valor)
+    return _executar_bridge_mobile(cmd, args)
+
+
+@ferramenta(
+    "Executa ações sensíveis no celular pareado com confirmação no PC e no celular: enviar WhatsApp ('whatsapp'), SMS ('sms'), responder mensagem ('responder'), discar ligação ('ligar') ou criar evento na agenda ('criar_evento').",
+    params={
+        "acao": "Ação sensível: 'whatsapp', 'sms', 'responder', 'ligar' ou 'criar_evento'",
+        "destino": "Contato/número de destino (para whatsapp/sms/responder/ligar) ou título do evento (para criar_evento)",
+        "conteudo": "Texto da mensagem (para whatsapp/sms/responder) ou data/hora de início do evento (para criar_evento); vazio para 'ligar'",
+    },
+    risco=CRITICO,
+    classificar=_classificar_celular_sensivel,
+)
+def celular_acao_sensivel(acao: str, destino: str, conteudo: str = "") -> str:
+    cmd, args = _resolver_comando_mobile_sensivel(acao, destino, conteudo)
+    return _executar_bridge_mobile(cmd, args)

@@ -47,8 +47,8 @@ DEFAULT_REPO = "viniciusnpaula-bit/U.L.T.R.O.N.-Desktop"
 ALLOWED_HOSTS = {"api.github.com", "objects.githubusercontent.com", "github.com",
                  "release-assets.githubusercontent.com"}
 MAX_DOWNLOAD_BYTES = 300 * 1024 * 1024
-PROTECTED = (".env", "dados", "logs", "venv", ".git", ".ultron-state.json")
-PROTECAO_PASTAS = {"venv", ".venv", "node_modules", "dados", "logs", ".git", "build", "__pycache__"}
+PROTECTED = (".env", "dados", "logs", "venv", ".venv", ".git", ".ultron-state.json", "runtime")
+PROTECAO_PASTAS = {"venv", ".venv", "node_modules", "dados", "logs", ".git", "build", "__pycache__", "runtime"}
 # Nunca sobrescreve nada fora destes tipos: assim um ZIP malicioso não troca código
 # arbitrário do sistema — só arquivos do próprio pacote.
 ALLOWED_SUFFIXES = {".py", ".js", ".mjs", ".cjs", ".json", ".html", ".css", ".svg", ".png",
@@ -407,7 +407,8 @@ class UpdateManager:
                     partes = Path(nome).parts
                     if any(parte in {"..", ""} for parte in partes) or Path(nome).is_absolute():
                         raise UpdateError("O ZIP contém caminho inseguro.")
-                    if partes[0] in PROTECTED or any(parte in PROTECAO_PASTAS for parte in partes):
+                    partes_lower = [p.lower() for p in partes]
+                    if partes_lower[0] in PROTECTED or any(parte in PROTECAO_PASTAS for parte in partes_lower):
                         continue
                     if Path(nome).suffix.lower() not in ALLOWED_SUFFIXES:
                         continue
@@ -498,7 +499,8 @@ class UpdateManager:
             if not arquivo.is_file():
                 continue
             relativo = arquivo.relative_to(staging)
-            if any(parte in PROTECAO_PASTAS for parte in relativo.parts):
+            relativo_lower = [p.lower() for p in relativo.parts]
+            if relativo_lower[0] in PROTECTED or any(parte in PROTECAO_PASTAS for parte in relativo_lower):
                 continue
             destino = self.root / relativo
             destino.parent.mkdir(parents=True, exist_ok=True)
@@ -547,16 +549,16 @@ echo Aguardando o ULTRON fechar...
 tasklist /FI "IMAGENAME eq ULTRON.exe" | find /I "ULTRON.exe" >nul && (timeout /t 1 /nobreak >nul & goto espera)
 tasklist /FI "IMAGENAME eq electron.exe" | find /I "electron.exe" >nul && (timeout /t 1 /nobreak >nul & goto espera)
 echo Backup em "{backup_bat}"...
-robocopy "{raiz_bat}" "{backup_bat}" /E /NFL /NDL /NJH /NJS /NP /XD venv .venv node_modules __pycache__ dados logs .git build /XF *.log >nul
+robocopy "{raiz_bat}" "{backup_bat}" /E /NFL /NDL /NJH /NJS /NP /XD venv .venv node_modules __pycache__ dados logs .git build runtime /XF *.log .env .ultron-state.json >nul
 echo Copiando a versão nova...
-robocopy "{staging_bat}" "{raiz_bat}" /E /IS /IT /NFL /NDL /NJH /NJS /NP /XD venv .venv node_modules __pycache__ dados logs .git build >nul
+robocopy "{staging_bat}" "{raiz_bat}" /E /IS /IT /NFL /NDL /NJH /NJS /NP /XD venv .venv node_modules __pycache__ dados logs .git build runtime /XF *.log .env .ultron-state.json >nul
 if errorlevel 8 goto falhou
 echo Atualização aplicada.
 start "" "{reabrir_bat}"
 exit /b 0
 :falhou
 echo A cópia falhou. Restaurando a versão anterior...
-robocopy "{backup_bat}" "{raiz_bat}" /E /IS /IT /NFL /NDL /NJH /NJS /NP /XD venv .venv node_modules __pycache__ dados logs .git build >nul
+robocopy "{backup_bat}" "{raiz_bat}" /E /IS /IT /NFL /NDL /NJH /NJS /NP /XD venv .venv node_modules __pycache__ dados logs .git build runtime /XF *.log .env .ultron-state.json >nul
 start "" "{reabrir_bat}"
 exit /b 1
 """
@@ -588,9 +590,10 @@ exit /b 1
             if not arquivo.is_file():
                 continue
             relativo = arquivo.relative_to(origem)
-            destino = self.root / relativo
-            if relativo.parts[0] in PROTECTED or any(parte in PROTECAO_PASTAS for parte in relativo.parts):
+            relativo_lower = [p.lower() for p in relativo.parts]
+            if relativo_lower[0] in PROTECTED or any(parte in PROTECAO_PASTAS for parte in relativo_lower):
                 continue
+            destino = self.root / relativo
             destino.parent.mkdir(parents=True, exist_ok=True)
             shutil.copy2(arquivo, destino)
         self._save_state(rolled_back_at=time.time())

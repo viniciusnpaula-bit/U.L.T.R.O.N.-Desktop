@@ -5,11 +5,13 @@ Fluxo (ferramentas.executar é o único portão):
 """
 import base64
 import copy
+import ctypes
 import hashlib
 import hmac
 import json
 import logging
 from logging.handlers import RotatingFileHandler
+import os
 import re
 import subprocess
 import threading
@@ -25,6 +27,8 @@ from config import BASE
 # ====================== LOGS (com redação de segredos) ======================
 # Preenchido por cofre.aplicar_na_config(): chaves guardadas cifradas também são mascaradas
 SEGREDOS_COFRE = ()
+# Preenchido por mobile_pairing.registrar_redacao(): segredos HMAC de pareamento Mobile
+SEGREDOS_MOBILE = ()
 
 _SEGREDOS = re.compile(r"(?:gsk_|AIza|sk-|ghp_|xox[bap]-)[A-Za-z0-9_\-]{8,}|\b\d{8,10}:[A-Za-z0-9_\-]{30,}\b")
 
@@ -33,7 +37,7 @@ def redigir(texto):
     """Troca por *** qualquer chave de API, token ou PIN que apareça em um texto."""
     t = str(texto)
     for s in (*config.CHAVES.values(), config.TELEGRAM_TOKEN, config.PIN,
-              getattr(config, "PIN_HASH", ""), *SEGREDOS_COFRE):
+              getattr(config, "PIN_HASH", ""), *SEGREDOS_COFRE, *SEGREDOS_MOBILE):
         if s and len(s) >= 4:
             t = t.replace(s, "***")
     return _SEGREDOS.sub("***", t)
@@ -52,23 +56,31 @@ class _Redator(logging.Filter):
 # Rotação: 5 MB por arquivo, 3 backups (ultron.log.1..3, seguranca.log.1..3).
 _ROTACAO = {"maxBytes": 5 * 1024 * 1024, "backupCount": 3, "encoding": "utf-8"}
 
-_h_ultron = RotatingFileHandler(str(BASE / "logs" / "ultron.log"), **_ROTACAO)
+_dir_logs = getattr(config, "DIR_LOGS", BASE / "logs")
+try:
+    _dir_logs.mkdir(parents=True, exist_ok=True)
+except OSError:
+    pass
+
+_h_ultron = RotatingFileHandler(str(_dir_logs / "ultron.log"), **_ROTACAO)
 _h_ultron.setFormatter(logging.Formatter("%(asctime)s | %(levelname)s | %(message)s"))
 _h_ultron.addFilter(_Redator())
 logging.basicConfig(level=logging.INFO, handlers=[_h_ultron])
+if not any(isinstance(h, RotatingFileHandler) for h in logging.root.handlers):
+    logging.root.addHandler(_h_ultron)
 for _h in logging.root.handlers:
     _h.addFilter(_Redator())
 log = logging.getLogger("ultron")
 
 _log_seg = logging.getLogger("ultron.seguranca")
 _log_seg.setLevel(logging.INFO)
-_hseg = RotatingFileHandler(str(BASE / "logs" / "seguranca.log"), **_ROTACAO)
+_hseg = RotatingFileHandler(str(_dir_logs / "seguranca.log"), **_ROTACAO)
 _hseg.setFormatter(logging.Formatter("%(asctime)s %(message)s"))
 _hseg.addFilter(_Redator())
 _log_seg.addHandler(_hseg)
 
 _SENSIVEIS = re.compile(r"(key|token|senha|password|pin|secret|segredo)", re.I)
-_SO_TAMANHO = {"texto", "conteudo", "consulta", "busca", "url", "caminho", "nome", "cidade", "tema", "pergunta", "comando", "fato", "trecho", "origem", "destino", "valor", "campo"}  # conteúdo livre: só registra o tamanho
+_SO_TAMANHO = {"texto", "text", "conteudo", "destino", "target", "number", "consulta", "busca", "url", "caminho", "nome", "cidade", "tema", "pergunta", "comando", "fato", "trecho", "origem", "valor", "campo"}  # conteúdo livre: só registra o tamanho
 
 
 def sanitizar_args(args):
@@ -83,9 +95,16 @@ def sanitizar_args(args):
     return saida
 
 
-def log_seg(origem, acao, risco, decisao, motivo, args=None, resultado=None):
-    usuario = config.TELEGRAM_USER_ID if origem == "telegram" else "local"
-    partes = [f"[SECURITY] origem={origem}", f"usuario={usuario}", f"action={acao}", f"risk={risco}",
+def _sanitizar_usuario_log(usuario) -> str:
+    limpo = re.sub(r"[\r\n\t\x00-\x1f\x7f]+", " ", str(usuario or "")).strip()
+    return redigir(limpo)[:64] or "local"
+
+
+def log_seg(origem, acao, risco, decisao, motivo, args=None, resultado=None, usuario=None):
+    user_label = _sanitizar_usuario_log(usuario) if usuario else (
+        config.TELEGRAM_USER_ID if origem == "telegram" else "local"
+    )
+    partes = [f"[SECURITY] origem={origem}", f"usuario={user_label}", f"action={acao}", f"risk={risco}",
               f"decision={decisao}", f"reason={motivo}"]
     if args is not None:
         partes.append("args=" + json.dumps(sanitizar_args(args), ensure_ascii=False))
@@ -94,7 +113,7 @@ def log_seg(origem, acao, risco, decisao, motivo, args=None, resultado=None):
     _log_seg.info(" ".join(partes))
 
 
-_RASTREIO_ORIGENS = {"voz", "desktop", "telegram", "terminal", "chat", "hud", "desconhecida"}
+_RASTREIO_ORIGENS = {"voz", "desktop", "telegram", "mobile", "terminal", "chat", "hud", "desconhecida"}
 _RASTREIO_EVENTOS = {"intent_selected", "tool_selected", "tool_finished", "step_started", "step_finished"}
 _RASTREIO_ACOES = {
     "rocket", "modo_jogo", "minimizar", "hora", "spotify", "conversa",
@@ -105,6 +124,7 @@ _RASTREIO_ACOES = {
     "controlar_midia", "info_sistema", "bloquear_tela", "executar_comando", "desligar_pc",
     "reiniciar_pc", "cancelar_desligamento", "lembrar_fato", "esquecer_fato",
     "criar_lembrete", "listar_lembretes", "desfazer",
+    "celular_status", "celular_consultar", "celular_controlar", "celular_acao_sensivel",
 }
 _RASTREIO_ETAPAS = {"-", "intent", "tool_call", "rocket_league", "spotify", "minimizar_janelas", "desfazer"}
 _RASTREIO_ESTADOS = {"selected", "started", "success", "failure", "denied", "cancelled", "returned"}
@@ -163,12 +183,36 @@ ALLOW, DENY, CONFIRM = "ALLOW", "DENY", "CONFIRM"
 # Ações que nunca ganham o atalho do desbloqueio: continuam consultando.
 IRREVERSIVEIS = frozenset({
     "executar_comando", "rodar_codigo", "desligar_pc", "reiniciar_pc",
-    "apagar_arquivo", "enviar_formulario",
+    "apagar_arquivo", "enviar_formulario", "celular_acao_sensivel",
 })
 # ALTO e reversíveis, mas capturam imagem ou tomam o ponteiro: confirmam sempre.
 SEMPRE_CONFIRMAR = frozenset({"ver_tela", "webcam_foto", "controlar_mouse_com_gesto"})
 # Só canais que existem de verdade ganham o atalho; telegram/fluxo/teste ficam fora.
 ORIGENS_LOCAIS = frozenset({"desktop", "voz", "terminal"})
+ORIGENS_ADMIN = frozenset({"desktop", "voz", "terminal", "bloco1", "bloco2", "agendado", "fluxo"})
+
+
+def _checar_admin() -> bool:
+    if os.name == "nt":
+        try:
+            return bool(ctypes.windll.shell32.IsUserAnAdmin())
+        except Exception:
+            return False
+    return False
+
+
+def eh_admin() -> bool:
+    """Retorna True se o processo do Ultron foi iniciado como Administrador no Windows."""
+    return _checar_admin()
+
+
+def modo_admin_ativo(origem: str = "desktop") -> bool:
+    """True se o processo for admin, a sessão estiver desbloqueada e a origem for local confiável."""
+    try:
+        desbloqueada = bool(sessao.estado().get("desbloqueada"))
+    except Exception:
+        desbloqueada = False
+    return eh_admin() and desbloqueada and (origem in ORIGENS_ADMIN)
 
 
 @dataclass
@@ -246,6 +290,8 @@ def autorizar(cls, ferramenta="", origem="desconhecida"):
     """Decide ALLOW / CONFIRM / DENY para uma ação já classificada. Devolve (decisão, motivo)."""
     if cls.negar:
         return DENY, cls.negar
+    if modo_admin_ativo(origem):
+        return ALLOW, "admin_operational_mode"
     if cls.risco == BAIXO:
         return ALLOW, "allowlisted_low_risk"
     if cls.risco == MEDIO:

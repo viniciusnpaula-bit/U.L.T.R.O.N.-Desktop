@@ -141,7 +141,12 @@ class DesktopStartupTests(unittest.TestCase):
             (app_dir / "package.json").write_text("{}", encoding="utf-8")
             (app_dir / "main.js").write_text("// fixture", encoding="utf-8")
             (app_dir / "site" / "index.html").write_text("<html>", encoding="utf-8")
-            with patch.dict(os.environ, {"ULTRON_TEST_SECRET": "do-not-forward"}):
+            with patch.dict(os.environ, {
+                "ULTRON_TEST_SECRET": "do-not-forward",
+                "SYSTEMDRIVE": "C:",
+                "PROGRAMDATA": r"C:\ProgramData",
+                "ALLUSERSPROFILE": r"C:\ProgramData",
+            }):
                 with patch.object(desktop.subprocess, "run", return_value=subprocess.CompletedProcess([], 7)) as run:
                     self.assertEqual(desktop._launch_electron(
                         exe, app_dir, "http://127.0.0.1:50000", "x" * 43, root), 7)
@@ -151,6 +156,9 @@ class DesktopStartupTests(unittest.TestCase):
             self.assertEqual(kwargs["env"]["ULTRON_API_URL"], "http://127.0.0.1:50000")
             self.assertEqual(kwargs["env"]["ULTRON_API_TOKEN"], "x" * 43)
             self.assertEqual(kwargs["env"]["ULTRON_ROOT"], str(root.resolve()))
+            self.assertEqual(kwargs["env"]["SYSTEMDRIVE"], "C:")
+            self.assertEqual(kwargs["env"]["PROGRAMDATA"], r"C:\ProgramData")
+            self.assertEqual(kwargs["env"]["ALLUSERSPROFILE"], r"C:\ProgramData")
             self.assertNotIn("ULTRON_TEST_SECRET", kwargs["env"])
             with self.assertRaises(FileNotFoundError):
                 desktop._launch_electron(root / "missing.exe", app_dir, "http://127.0.0.1:1", "x" * 43, root)

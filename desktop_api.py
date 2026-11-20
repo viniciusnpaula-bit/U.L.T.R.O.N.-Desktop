@@ -3,13 +3,55 @@ from __future__ import annotations
 
 import hmac
 import json
+import re
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
-from urllib.parse import urlsplit
+from urllib.parse import parse_qs, urlsplit
+from pathlib import Path
+
+_RAIZ = Path(__file__).resolve().parent
+_PACOTE = _RAIZ / "electron" / "package.json"
+
+
+def _obter_versao() -> str:
+    try:
+        dados = json.loads(_PACOTE.read_text(encoding="utf-8"))
+        versao = str(dados.get("version") or "").strip()
+        if versao:
+            return versao
+    except (OSError, ValueError, AttributeError):
+        pass
+    return "2.1.0"
+
 
 
 _PREFIX = "/api/v1/"
 _MAX_BODY = 8192
 _MAX_COMMAND = 4000
+_FLUXO_ID = re.compile(r"^[a-z0-9][a-z0-9._-]{0,39}$")
+_MAX_BUSCA = 300
+_GET_ROUTES = {
+    _PREFIX + "health",
+    _PREFIX + "unlock",
+    _PREFIX + "status",
+    _PREFIX + "events",
+    _PREFIX + "microphones",
+    _PREFIX + "voz",
+    _PREFIX + "cofre",
+    _PREFIX + "fatos",
+    _PREFIX + "fluxos",
+    _PREFIX + "lembretes",
+    _PREFIX + "agenda",
+    _PREFIX + "personalidade",
+    _PREFIX + "personalidade/previa",
+    _PREFIX + "skills",
+    _PREFIX + "update",
+    _PREFIX + "update/check",
+    _PREFIX + "undo",
+    _PREFIX + "conversation",
+    _PREFIX + "bloco1",
+    _PREFIX + "bloco2",
+    _PREFIX + "mobile/pairing",
+}
 
 
 class _Server(ThreadingHTTPServer):
@@ -29,7 +71,7 @@ def create_server(runtime, token: str, host: str = "127.0.0.1", port: int = PREF
         raise ValueError("O token da API deve ser aleatório e ter pelo menos 32 caracteres.")
 
     class Handler(BaseHTTPRequestHandler):
-        server_version = "ULTRONDesktop/1.9.4"
+        server_version = f"ULTRONDesktop/{_obter_versao()}"
         sys_version = ""
 
         def log_message(self, _format, *_args):
@@ -144,10 +186,49 @@ def create_server(runtime, token: str, host: str = "127.0.0.1", port: int = PREF
         def do_GET(self):
             if not self._authorized():
                 return
-            path = self._path()
+            parsed = urlsplit(self.path)
+            if parsed.fragment:
+                self._send(400, {"error": "fragment_not_supported"})
+                return
+            path = parsed.path
+            if path not in _GET_ROUTES:
+                self._send(404, {"error": "not_found"})
+                return
+            if parsed.query:
+                if path != _PREFIX + "fatos":
+                    self._send(400, {"error": "query_not_supported"})
+                    return
+                try:
+                    params = parse_qs(parsed.query, keep_blank_values=True, errors="replace")
+                except Exception:
+                    self._send(400, {"error": "invalid_query"})
+                    return
+                if set(params.keys()) - {"busca"}:
+                    self._send(400, {"error": "invalid_query"})
+                    return
+                valores = params.get("busca", [])
+                if len(valores) > 1:
+                    self._send(400, {"error": "invalid_query"})
+                    return
+                termo = valores[0] if valores else ""
+                if len(termo) > _MAX_BUSCA:
+                    self._send(400, {"error": "query_too_long"})
+                    return
+                if "\x00" in termo:
+                    self._send(400, {"error": "invalid_query"})
+                    return
+                busca_limpa = termo.strip()
+                try:
+                    if busca_limpa:
+                        self._send(200, runtime.fatos_listar(busca=busca_limpa))
+                    else:
+                        self._send(200, runtime.fatos_listar())
+                except TypeError:
+                    self._send(200, runtime.fatos_listar())
+                return
             try:
                 if path == _PREFIX + "health":
-                    self._send(200, {"ok": True, "version": "2.1.0"})
+                    self._send(200, {"ok": True, "version": _obter_versao()})
                 elif path == _PREFIX + "unlock":
                     self._send(200, runtime.unlock_info())
                 elif path == _PREFIX + "status":
@@ -183,6 +264,12 @@ def create_server(runtime, token: str, host: str = "127.0.0.1", port: int = PREF
                 elif path == _PREFIX + "conversation":
                     # Bate-papo: turnos da sessão (texto já redigido pelo runtime).
                     self._send(200, {"turns": runtime.conversation_turns()})
+                elif path == _PREFIX + "bloco1":
+                    self._send(200, runtime.obter_estado_bloco1())
+                elif path == _PREFIX + "bloco2":
+                    self._send(200, runtime.obter_estado_bloco2())
+                elif path == _PREFIX + "mobile/pairing":
+                    self._send(200, runtime.mobile_pairing_status())
                 else:
                     self._send(404, {"error": "not_found"})
             except Exception:
@@ -222,6 +309,16 @@ def create_server(runtime, token: str, host: str = "127.0.0.1", port: int = PREF
                         self._send(400, {"error": "invalid_command_text"})
                         return
                     operation_id = runtime.submit_command(text)
+                    self._send(202, {"operation_id": operation_id})
+                elif path == _PREFIX + "fluxos/executar":
+                    if set(body) != {"id"} or not isinstance(body.get("id"), str) or not _FLUXO_ID.fullmatch(body["id"]):
+                        self._send(400, {"error": "invalid_workflow_payload"})
+                        return
+                    try:
+                        operation_id = runtime.submit_fluxo(body["id"])
+                    except LookupError:
+                        self._send(404, {"error": "workflow_not_found"})
+                        return
                     self._send(202, {"operation_id": operation_id})
                 elif path == _PREFIX + "microphone":
                     if set(body) != {"paused"} or type(body["paused"]) is not bool:
@@ -328,8 +425,8 @@ def create_server(runtime, token: str, host: str = "127.0.0.1", port: int = PREF
                     else:
                         self._send(200, runtime.fatos_apagar(body.get("id")))
                 elif path == _PREFIX + "personalidade":
-                    permitido = {"perfil", "ton", "tamanho", "tratamento", "tratamentos",
-                                 "extras", "jeito", "usuario", "saudacao"}
+                    permitido = {"perfil", "tom", "ton", "tamanho", "tratamento", "tratamentos",
+                                 "extras", "jeito", "jeitos", "perfis", "usuario", "saudacao"}
                     if set(body) - permitido:
                         self._send(400, {"error": "invalid_personalidade_payload"})
                         return
@@ -410,6 +507,49 @@ def create_server(runtime, token: str, host: str = "127.0.0.1", port: int = PREF
                         self._send(400, {"error": "empty_payload_required"})
                         return
                     self._send(200, {"cleared": runtime.limpar_conversa()})
+                elif path == _PREFIX + "bloco1":
+                    if not isinstance(body, dict):
+                        self._send(400, {"error": "invalid_bloco1_payload"})
+                        return
+                    self._send(200, runtime.atualizar_config_bloco1(body))
+                elif path == _PREFIX + "bloco1/executar":
+                    if not isinstance(body, dict) or not isinstance(body.get("acao"), str):
+                        self._send(400, {"error": "invalid_bloco1_executar_payload"})
+                        return
+                    self._send(200, runtime.executar_acao_bloco1(body["acao"], body.get("params") or {}))
+                elif path == _PREFIX + "bloco2":
+                    if not isinstance(body, dict):
+                        self._send(400, {"error": "invalid_bloco2_payload"})
+                        return
+                    self._send(200, runtime.atualizar_config_bloco2(body))
+                elif path == _PREFIX + "bloco2/executar":
+                    if not isinstance(body, dict) or not isinstance(body.get("acao"), str):
+                        self._send(400, {"error": "invalid_bloco2_executar_payload"})
+                        return
+                    self._send(200, runtime.executar_acao_bloco2(body["acao"], body.get("params") or {}))
+                elif path == _PREFIX + "mobile/pairing/rotate":
+                    allowed = {"device_id", "killswitch_separado"}
+                    if set(body) - allowed:
+                        self._send(400, {"error": "invalid_mobile_pairing_payload"})
+                        return
+                    device_id = body.get("device_id")
+                    if device_id is not None and not isinstance(device_id, str):
+                        self._send(400, {"error": "invalid_mobile_pairing_payload"})
+                        return
+                    ks_sep = body.get("killswitch_separado", False)
+                    if type(ks_sep) is not bool:
+                        self._send(400, {"error": "invalid_mobile_pairing_payload"})
+                        return
+                    self._send(200, runtime.mobile_pairing_rotate(device_id=device_id, killswitch_separado=ks_sep))
+                elif path == _PREFIX + "mobile/pairing/revoke":
+                    if set(body) - {"device_id"}:
+                        self._send(400, {"error": "invalid_mobile_pairing_payload"})
+                        return
+                    device_id = body.get("device_id")
+                    if device_id is not None and not isinstance(device_id, str):
+                        self._send(400, {"error": "invalid_mobile_pairing_payload"})
+                        return
+                    self._send(200, runtime.mobile_pairing_revoke(device_id=device_id))
                 elif path == _PREFIX + "shutdown":
                     if body:
                         self._send(400, {"error": "empty_payload_required"})

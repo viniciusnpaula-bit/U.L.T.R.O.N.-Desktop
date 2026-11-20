@@ -35,8 +35,10 @@
       <span class="signal" id="signalCpu"><span>cpu</span><b id="cpuVal">—</b><i class="signal-bar"><i id="cpuBar"></i></i></span>
       <span class="signal" id="signalRam"><span>ram</span><b id="ramVal">—</b><i class="signal-bar"><i id="ramBar"></i></i></span>
       <span class="signal" id="signalDisk"><span>disco</span><b id="diskVal">—</b><i class="signal-bar"><i id="diskBar"></i></i></span>
+      <span class="signal signal-admin" id="signalAdmin" title="Modo Administrador Elevado" hidden><i class="led"></i><span>modo</span><b id="signalAdminText">admin</b></span>
     </div>
     <div class="clock"><b id="clockTime">--:--</b><span id="clockDate">—</span></div>
+    <button class="ghost tiny" id="pairPhoneButton" data-state="off" title="Conectar o aplicativo ULTRON do celular via QR Code" aria-label="Parear celular">parear celular</button>
     <button class="ghost tiny" id="sessionButton" data-state="off" title="Sessão local: bloqueado" aria-label="Sessão local">bloqueado</button>
     <button class="ghost icon" id="toggleChat" aria-expanded="true" aria-controls="drawerChat" aria-label="Abrir ou recolher o bate-papo" title="Recolher bate-papo (Ctrl+1)">
       <svg viewBox="0 0 24 24" aria-hidden="true"><rect x="3" y="4.5" width="7.5" height="15" rx="2"/><path d="M15 8.5h5M15 12h5M15 15.5h3"/></svg>
@@ -344,11 +346,92 @@
       <h3>Fluxos rápidos</h3>
       <p class="muted">Sequências com etapas. Se uma etapa falhar, o fluxo para e diz qual falhou.</p>
       <div class="field-row" id="fluxosList">
-        <button class="ghost" data-fluxo="abrir.rocket">abrir Rocket League</button>
-        <button class="ghost" data-fluxo="modo_jogo">modo jogo (3 etapas)</button>
-        <button class="ghost" data-fluxo="minimizar">minimizar tudo</button>
+        <span class="micro nano">carregando fluxos…</span>
       </div>
       <p class="micro nano" id="fluxoNote" role="status">—</p>
+    </section>
+
+    <section class="block" id="skillsBlock" aria-busy="false">
+      <div class="skills-head">
+        <h3>Skills</h3>
+        <button type="button" class="ghost tiny" id="skillsRefresh">atualizar</button>
+      </div>
+      <p class="muted">Procedimentos aprendidos pelo ULTRON. Skills criadas automaticamente ficam pendentes até você revisar os passos e aprovar.</p>
+      <p class="skills-loading" id="skillsLoading" role="status" aria-live="polite" hidden>carregando skills…</p>
+      <p class="micro nano" id="skillsNote" role="status">—</p>
+      <h4 class="skills-subhead">Pendentes de aprovação</h4>
+      <div id="skillsPendingList" class="skills-list" aria-live="polite"><p class="skill-empty">carregando…</p></div>
+      <h4 class="skills-subhead">Skills registradas</h4>
+      <div id="skillsList" class="skills-list" aria-live="polite"><p class="skill-empty">carregando…</p></div>
+    </section>
+
+    <section class="block" id="bloco1Block" aria-busy="false">
+      <div class="skills-head">
+        <h3>Automação de Disco (Bloco 1)</h3>
+        <button type="button" class="ghost tiny" id="bloco1Refresh">atualizar</button>
+      </div>
+      <p class="muted">Gerenciamento inteligente de arquivos, Lixeira e disco em Modo Admin.</p>
+      
+      <div class="field-row">
+        <label><input type="checkbox" id="switchBloco1Pdf"> Renomear PDFs em Downloads</label>
+        <label><input type="checkbox" id="switchBloco1Extrator"> Extrair pacotes automaticamente</label>
+        <label><input type="checkbox" id="switchBloco1Prints"> Arquivar capturas do Desktop</label>
+        <label><input type="checkbox" id="switchBloco1Usb"> Ejetar USB ocioso</label>
+        <label><input type="checkbox" id="switchBloco1DiscoAuto"> Limpeza se disco &gt; 80%</label>
+      </div>
+
+      <div class="field-col" style="margin-top: 8px;">
+        <label class="nano muted">Pastas de projetos (separadas por ponto e vírgula):</label>
+        <input type="text" id="inputBloco1Projetos" placeholder="D:\Projetos; C:\dev">
+        
+        <label class="nano muted" style="margin-top: 4px;">Backup incremental (origem / destino):</label>
+        <div class="field-row">
+          <input type="text" id="inputBloco1BackupOrigem" placeholder="Origem (ex.: D:\Trabalho)">
+          <input type="text" id="inputBloco1BackupDestino" placeholder="Destino (ex.: E:\Backup)">
+        </div>
+      </div>
+
+      <div class="field-row" style="margin-top: 8px;">
+        <button class="ghost" id="btnBloco1SalvarConfig">salvar configurações</button>
+        <button class="ghost" id="btnBloco1LimparDisco">limpar disco agora</button>
+        <button class="ghost" id="btnBloco1Deduplicar">deduplicar downloads</button>
+        <button class="ghost" id="btnBloco1BackupAgora">backup agora</button>
+      </div>
+      <p class="micro nano" id="statusBloco1Relatorio" role="status">—</p>
+    </section>
+
+    <section class="block" id="bloco2Block" aria-busy="false">
+      <div class="skills-head">
+        <h3>Processos e Hardware (Bloco 2)</h3>
+        <button type="button" class="ghost tiny" id="bloco2Refresh">atualizar</button>
+      </div>
+      <p class="muted">Otimização autônoma de abas pesadas, processos travados, memória RAM e hardware nativo.</p>
+      
+      <div class="field-row">
+        <label><input type="checkbox" id="switchBloco2Abas"> Suspender abas &gt; 500 MB</label>
+        <label><input type="checkbox" id="switchBloco2Travados"> Matar apps travados</label>
+        <label><input type="checkbox" id="switchBloco2Janela"> Otimizar janela ativa</label>
+        <label><input type="checkbox" id="switchBloco2Energia"> Plano de energia dinâmico</label>
+        <label><input type="checkbox" id="switchBloco2Termica"> Proteção térmica</label>
+        <label><input type="checkbox" id="switchBloco2Startup"> Guardião de startup</label>
+        <label><input type="checkbox" id="switchBloco2Ram"> Purgar RAM ociosa</label>
+      </div>
+
+      <div class="kv" style="margin-top: 8px;">
+        <span>temperatura cpu</span><b id="valBloco2Temp">—</b>
+      </div>
+      <div class="kv">
+        <span>plano ativo</span><b id="valBloco2Plano">—</b>
+      </div>
+
+      <div class="field-row" style="margin-top: 8px;">
+        <button class="ghost" id="btnBloco2SalvarConfig">salvar configurações</button>
+        <button class="ghost" id="btnBloco2PurgarRam">purgar RAM agora</button>
+        <button class="ghost" id="btnBloco2MatarTravados">verificar travados</button>
+        <button class="ghost" id="btnBloco2SuspenderAbas">suspender abas</button>
+        <button class="ghost" id="btnBloco2AuditarStartup">auditar startup</button>
+      </div>
+      <p class="micro nano" id="statusBloco2Relatorio" role="status">—</p>
     </section>
 
     <section class="block">
@@ -432,6 +515,73 @@
   </div>
 </div>
 
+<!-- ── tela de carregamento pós-desbloqueio (acima do palco, abaixo dos modais) ── -->
+<div class="boot-overlay" id="bootOverlay" role="status" aria-live="polite" aria-label="Inicializando U.L.T.R.O.N." hidden>
+  <canvas id="bootStarsCanvas" class="boot-stars" width="960" height="540" aria-hidden="true"></canvas>
+  <div class="boot-shell">
+    <header class="boot-head">
+      <div class="boot-brand">
+        <span class="boot-dot" aria-hidden="true"></span>
+        <b>U.L.T.R.O.N.</b>
+        <span class="boot-sep" aria-hidden="true">·</span>
+        <span class="boot-ver">v2.1</span>
+      </div>
+      <span class="boot-timer" id="bootTimer">0.0s</span>
+    </header>
+    <div class="boot-center">
+      <div class="boot-orb-wrap">
+        <div class="boot-reticle r1" aria-hidden="true"></div>
+        <div class="boot-reticle r2" aria-hidden="true"></div>
+        <div class="boot-reticle r3" aria-hidden="true"></div>
+        <canvas id="bootOrbCanvas" width="168" height="168" aria-label="Núcleo inicializando"></canvas>
+      </div>
+      <div class="boot-state-divider">
+        <span class="boot-state-word" id="bootStateWord">INICIALIZANDO</span>
+      </div>
+      <p class="boot-state-hint" id="bootStateHint">Confirmando canal com o núcleo local…</p>
+      <div class="boot-progress-box">
+        <div class="boot-progress-meta">
+          <span id="bootStageLabel">1/4 · Núcleo Python &amp; API local</span>
+          <span id="bootPctLabel">24%</span>
+        </div>
+        <div class="boot-progress-track">
+          <div class="boot-progress-fill" id="bootProgressFill"></div>
+          <div class="boot-progress-sweep" id="bootProgressSweep"></div>
+        </div>
+      </div>
+      <div class="boot-stages" id="bootStageGrid">
+        <div class="boot-stage-card" data-stage="0">
+          <div class="boot-stage-top"><span>01</span><i class="boot-stage-dot"></i></div>
+          <strong>Núcleo</strong>
+          <small class="boot-stage-sub">API 127.0.0.1</small>
+        </div>
+        <div class="boot-stage-card" data-stage="1">
+          <div class="boot-stage-top"><span>02</span><i class="boot-stage-dot"></i></div>
+          <strong>Cofre</strong>
+          <small class="boot-stage-sub">DPAPI + SQLite</small>
+        </div>
+        <div class="boot-stage-card" data-stage="2">
+          <div class="boot-stage-top"><span>03</span><i class="boot-stage-dot"></i></div>
+          <strong>Áudio AFE</strong>
+          <small class="boot-stage-sub">AEC · VAD · KWS</small>
+        </div>
+        <div class="boot-stage-card" data-stage="3">
+          <div class="boot-stage-top"><span>04</span><i class="boot-stage-dot"></i></div>
+          <strong>Pronto</strong>
+          <small class="boot-stage-sub">Interface &amp; Voz</small>
+        </div>
+      </div>
+      <div class="boot-error" id="bootErrorBar" hidden>
+        <span id="bootErrorText">O núcleo local demorou para responder na porta interna.</span>
+        <div class="boot-error-actions">
+          <button type="button" class="ghost tiny" id="bootRetryBtn">Tentar de novo</button>
+          <button type="button" class="solid tiny" id="bootBypassBtn" hidden>Entrar mesmo assim</button>
+        </div>
+      </div>
+    </div>
+  </div>
+</div>
+
 <!-- nós mantidos para compatibilidade com o estado do núcleo -->
 <div class="sr-only" aria-hidden="true">
   <span id="sideDot"></span><span id="sideStatus"></span><span id="sideInfo"></span>
@@ -440,6 +590,43 @@
   <span id="systemMicVal"></span><span id="coreLed"></span><span id="uptime"></span>
   <span id="orbState"></span><span id="orbResponse"></span><span id="coreServiceVal"></span>
   <span id="memoryList"></span><span id="activityFeed"></span><span id="recentList"></span>
+</div>
+
+<!-- ── pareamento rápido com o celular (direto no app, fora dos ajustes) ── -->
+<div class="modal-backdrop" id="mobilePairBackdrop" hidden>
+  <section class="modal mobile-pair-modal" id="mobilePairModal" role="dialog" aria-modal="true" aria-labelledby="mobilePairTitle">
+    <header class="mobile-pair-head">
+      <div>
+        <span class="eyebrow">conexão com o celular</span>
+        <h2 id="mobilePairTitle">Parear celular</h2>
+      </div>
+      <button type="button" class="ghost tiny" id="mobilePairClose" aria-label="Fechar janela de pareamento">fechar</button>
+    </header>
+    <p class="mobile-pair-status" id="mobilePairStatus" role="status" aria-live="polite">Verificando conexão local…</p>
+    <div class="mobile-pair-qr-box" id="mobilePairQrBox" hidden>
+      <div class="mobile-pair-qr-frame">
+        <img id="mobilePairQrImg" alt="QR Code de pareamento do U.L.T.R.O.N.">
+      </div>
+      <ol class="mobile-pair-steps">
+        <li>Conecte o celular e o PC no mesmo Wi-Fi.</li>
+        <li>Abra o <b>U.L.T.R.O.N.</b> no celular e escaneie este QR Code.</li>
+        <li>Pronto — a conexão segura HMAC é ativada na hora.</li>
+      </ol>
+    </div>
+    <details class="mobile-pair-manual" id="mobilePairManual" hidden>
+      <summary>Se preferir, mostrar dados manuais</summary>
+      <dl class="mobile-pair-facts">
+        <dt>Endereço LAN</dt><dd id="mobilePairManualUrl">—</dd>
+        <dt>ID do aparelho</dt><dd id="mobilePairManualDevice">—</dd>
+        <dt>Chave HMAC</dt><dd id="mobilePairManualSecret">—</dd>
+      </dl>
+    </details>
+    <div class="modal-actions mobile-pair-actions">
+      <button type="button" class="ghost" id="mobilePairRevoke" hidden>desconectar</button>
+      <button type="button" class="ghost" id="mobilePairCopyLink" hidden>copiar link</button>
+      <button type="button" class="solid" id="mobilePairGenerate">gerar novo QR Code</button>
+    </div>
+  </section>
 </div>
 
 <div class="toast" id="toast" role="status" aria-live="polite"></div>

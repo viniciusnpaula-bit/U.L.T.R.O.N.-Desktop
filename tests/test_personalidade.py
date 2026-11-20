@@ -214,6 +214,55 @@ class PersonalidadeTests(unittest.TestCase):
             "JARVIS online. À sua disposição, meu senhor.",
         )
 
+    def test_tom_personalizado_e_persistido_e_recarregado(self):
+        salvo = personalidade.salvar({"tom": "calmo e objetivo"})
+        self.assertEqual(salvo["tom"], "calmo e objetivo")
+        recarregado = personalidade.carregar()
+        self.assertEqual(recarregado["tom"], "calmo e objetivo")
+
+    def test_jeito_extras_e_tom_sao_individuais_por_personalidade(self):
+        personalidade.salvar({
+            "perfil": "ultron",
+            "jeito": "sarcastico",
+            "tratamento": "mestre",
+            "extras": "seja incisivo",
+        })
+        ao_trocar_para_jarvis = personalidade.salvar({"perfil": "jarvis"})
+        self.assertEqual(ao_trocar_para_jarvis["jeito"], "equilibrado")
+        self.assertEqual(ao_trocar_para_jarvis["tratamento"], "senhor")
+        self.assertEqual(ao_trocar_para_jarvis["extras"], "")
+
+        personalidade.salvar({"perfil": "jarvis", "jeito": "mordomo", "tom": "clássico"})
+        ao_voltar_para_ultron = personalidade.salvar({"perfil": "ultron"})
+        self.assertEqual(ao_voltar_para_ultron["jeito"], "sarcastico")
+        self.assertEqual(ao_voltar_para_ultron["tratamento"], "mestre")
+        self.assertEqual(ao_voltar_para_ultron["extras"], "seja incisivo")
+        self.assertEqual(ao_voltar_para_ultron["jeitos"]["jarvis"], "mordomo")
+
+        perfis = {p["id"]: p for p in personalidade.perfis_disponiveis()}
+        self.assertEqual(perfis["ultron"]["jeito"], "sarcastico")
+        self.assertEqual(perfis["jarvis"]["jeito"], "mordomo")
+        self.assertEqual(perfis["jarvis"]["tom"], "clássico")
+        self.assertEqual(perfis["visao"]["jeito"], "equilibrado")
+        self.assertEqual(perfis["edith"]["jeito"], "equilibrado")
+
+    def test_arquivo_legado_com_jeito_unico_migra_so_para_o_perfil_ativo(self):
+        self.arquivo.write_text(
+            json.dumps({
+                "perfil": "visao",
+                "tratamento": "mestre",
+                "jeito": "brincalhao",
+                "extras": "note detalhes",
+            }),
+            encoding="utf-8",
+        )
+        carregado = personalidade.carregar()
+        self.assertEqual(carregado["perfil"], "visao")
+        self.assertEqual(carregado["jeito"], "brincalhao")
+        self.assertEqual(carregado["tratamento"], "mestre")
+        self.assertEqual(carregado["jeitos"]["ultron"], "equilibrado")
+        self.assertEqual(carregado["jeitos"]["visao"], "brincalhao")
+
 
 if __name__ == "__main__":
     unittest.main()

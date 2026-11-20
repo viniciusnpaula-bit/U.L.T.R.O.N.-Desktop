@@ -19,7 +19,13 @@ function faixaInvalida(tamanho) {
   });
 }
 
-function manifestoPalco(root) {
+function manifestoPalco(root, dataDir = '') {
+  if (typeof dataDir === 'string' && dataDir) {
+    if (!path.isAbsolute(dataDir)) {
+      throw new TypeError('O diretório de dados do ULTRON precisa ser um caminho absoluto.');
+    }
+    return path.join(dataDir, 'palco', 'manifest.json');
+  }
   if (typeof root !== 'string' || !path.isAbsolute(root)) {
     throw new TypeError('A raiz do ULTRON precisa ser um caminho absoluto.');
   }
@@ -30,8 +36,8 @@ function manifestoPalco(root) {
 // é opaco: o caminho nunca chega à interface. A mesma leitura alimenta o
 // protocolo de mídia e o botão "abrir PDF", para as duas checagens não
 // divergirem com o tempo.
-async function lerEntradaPalco(root, id, { agora = () => Date.now() } = {}) {
-  const manifesto = manifestoPalco(root);
+async function lerEntradaPalco(root, id, { agora = () => Date.now(), dataDir = '' } = {}) {
+  const manifesto = manifestoPalco(root, dataDir);
   if (typeof id !== 'string' || !PALCO_ID.test(id)) return null;
   let dados;
   try {
@@ -61,15 +67,15 @@ async function lerEntradaPalco(root, id, { agora = () => Date.now() } = {}) {
 // Abre um PDF do palco no visualizador do sistema. A interface manda só o id;
 // o caminho é resolvido aqui, no processo principal, e nunca volta para o
 // renderer. Qualquer outro tipo de mídia é recusado.
-async function abrirPdfPalco({ root, id, abrir, agora = () => Date.now() } = {}) {
+async function abrirPdfPalco({ root, dataDir = '', id, abrir, agora = () => Date.now() } = {}) {
   if (typeof abrir !== 'function') return false;
-  const entrada = await lerEntradaPalco(root, id, { agora });
+  const entrada = await lerEntradaPalco(root, id, { agora, dataDir });
   if (!entrada || entrada.mime !== 'application/pdf') return false;
   return (await abrir(entrada.arquivo)) === '';
 }
 
-function criarRespostaPalco({ root, agora = () => Date.now() } = {}) {
-  manifestoPalco(root);
+function criarRespostaPalco({ root, dataDir = '', agora = () => Date.now() } = {}) {
+  manifestoPalco(root, dataDir);
 
   return async function responder(request) {
     let url;
@@ -78,7 +84,7 @@ function criarRespostaPalco({ root, agora = () => Date.now() } = {}) {
     const id = url.pathname.replace(/^\/+/, '');
     if (!id || id.includes('/')) return new Response(null, { status: 404 });
 
-    const entrada = await lerEntradaPalco(root, id, { agora });
+    const entrada = await lerEntradaPalco(root, id, { agora, dataDir });
     if (!entrada) return new Response(null, { status: 404 });
     const { arquivo, mime, tamanho } = entrada;
     const cabecalhos = {

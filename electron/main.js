@@ -13,9 +13,11 @@ protocol.registerSchemesAsPrivileged([{
 }]);
 
 const ULTRON_ROOT = path.resolve(process.env.ULTRON_ROOT || path.join(__dirname, '..'));
-const responderPalco = criarRespostaPalco({ root: ULTRON_ROOT });
+const ULTRON_DATA_DIR = process.env.ULTRON_DATA_DIR ? path.resolve(process.env.ULTRON_DATA_DIR) : '';
+const responderPalco = criarRespostaPalco({ root: ULTRON_ROOT, dataDir: ULTRON_DATA_DIR });
 
 const api = createApiClient({ baseUrl: process.env.ULTRON_API_URL, token: process.env.ULTRON_API_TOKEN });
+const SKILL_SLUG_RE = /^[a-z0-9][a-z0-9-]{0,39}$/;
 // Só estes domínios oficiais podem ser abertos pelo botão "obter chave".
 const LINK_HOSTS = Object.freeze([
   'aistudio.google.com', 'console.groq.com', 'build.nvidia.com',
@@ -101,6 +103,30 @@ function registerApiHandlers() {
     if (!isSender(event, mainWindow) || typeof nome !== 'string') return null;
     return api.cofreTestar(nome);
   });
+  ipcMain.handle('bloco1:status', event => {
+    if (!isSender(event, mainWindow)) return null;
+    return api.bloco1Status();
+  });
+  ipcMain.handle('bloco1:salvar', (event, config) => {
+    if (!isSender(event, mainWindow) || typeof config !== 'object') return null;
+    return api.bloco1Salvar(config);
+  });
+  ipcMain.handle('bloco1:executar', (event, acao, params) => {
+    if (!isSender(event, mainWindow) || typeof acao !== 'string') return null;
+    return api.bloco1Executar(acao, params);
+  });
+  ipcMain.handle('bloco2:status', event => {
+    if (!isSender(event, mainWindow)) return null;
+    return api.bloco2Status();
+  });
+  ipcMain.handle('bloco2:salvar', (event, config) => {
+    if (!isSender(event, mainWindow) || typeof config !== 'object') return null;
+    return api.bloco2Salvar(config);
+  });
+  ipcMain.handle('bloco2:executar', (event, acao, params) => {
+    if (!isSender(event, mainWindow) || typeof acao !== 'string') return null;
+    return api.bloco2Executar(acao, params);
+  });
 
   // Links de "onde obter a chave": abre no navegador do sistema, nunca dentro do app.
   ipcMain.handle('link:abrir', async (event, url) => {
@@ -133,12 +159,18 @@ function registerApiHandlers() {
   // só com id válido e só enquanto a entrada do manifesto não expirou.
   ipcMain.handle('palco:abrir', async (event, id) => {
     if (!isSender(event, mainWindow) || typeof id !== 'string') return false;
-    return abrirPdfPalco({ root: ULTRON_ROOT, id, abrir: arquivo => shell.openPath(arquivo) });
+    return abrirPdfPalco({
+      root: ULTRON_ROOT,
+      dataDir: ULTRON_DATA_DIR,
+      id,
+      abrir: arquivo => shell.openPath(arquivo),
+    });
   });
 
-  ipcMain.handle('mem:fatos', event => {
+  ipcMain.handle('mem:fatos', (event, busca) => {
     if (!isSender(event, mainWindow)) return null;
-    return api.fatosListar();
+    const termo = typeof busca === 'string' ? busca.slice(0, 300) : '';
+    return api.fatosListar(termo);
   });
   ipcMain.handle('mem:fato-corrigir', (event, id, texto) => {
     if (!isSender(event, mainWindow) || !Number.isSafeInteger(id)) return null;
@@ -165,6 +197,29 @@ function registerApiHandlers() {
   ipcMain.handle('fluxos:listar', event => {
     if (!isSender(event, mainWindow)) return null;
     return api.fluxosListar();
+  });
+  ipcMain.handle('fluxos:executar', (event, id) => {
+    if (!isSender(event, mainWindow)) throw new TypeError('Janela do ULTRON inválida.');
+    return api.executarFluxo(id);
+  });
+
+  ipcMain.handle('skills:listar', event => {
+    if (!isSender(event, mainWindow)) throw new TypeError('Janela do ULTRON inválida.');
+    return api.skillsListar();
+  });
+  ipcMain.handle('skills:aprovar', (event, nome) => {
+    if (!isSender(event, mainWindow)) throw new TypeError('Janela do ULTRON inválida.');
+    if (typeof nome !== 'string' || !SKILL_SLUG_RE.test(nome)) {
+      throw new TypeError('Identificador de skill inválido.');
+    }
+    return api.skillsAprovar(nome);
+  });
+  ipcMain.handle('skills:descartar', (event, nome) => {
+    if (!isSender(event, mainWindow)) throw new TypeError('Janela do ULTRON inválida.');
+    if (typeof nome !== 'string' || !SKILL_SLUG_RE.test(nome)) {
+      throw new TypeError('Identificador de skill inválido.');
+    }
+    return api.skillsDescartar(nome);
   });
 
   ipcMain.handle('mem:lembretes', event => {
@@ -218,12 +273,28 @@ function registerApiHandlers() {
   ipcMain.handle('update:launch', async event => {
     if (!isSender(event, mainWindow)) return false;
     const launched = await api.updateLaunch();
-    if (launched) setTimeout(() => app.quit(), 400);
-    return launched === true;
+    const ok = Boolean(launched && (launched === true || launched.launched === true));
+    if (ok) setTimeout(() => app.quit(), 400);
+    return ok;
   });
   ipcMain.handle('update:rollback', event => {
     if (!isSender(event, mainWindow)) return false;
     return api.updateRollback();
+  });
+
+  ipcMain.handle('mobile:pairing-status', event => {
+    if (!isSender(event, mainWindow)) return null;
+    return api.mobilePairingStatus();
+  });
+  ipcMain.handle('mobile:pairing-rotate', (event, deviceId, killswitchSeparado) => {
+    if (!isSender(event, mainWindow)) return null;
+    if (deviceId !== undefined && deviceId !== null && typeof deviceId !== 'string') return null;
+    return api.mobilePairingRotate(deviceId || null, killswitchSeparado === true);
+  });
+  ipcMain.handle('mobile:pairing-revoke', (event, deviceId) => {
+    if (!isSender(event, mainWindow)) return null;
+    if (deviceId !== undefined && deviceId !== null && typeof deviceId !== 'string') return null;
+    return api.mobilePairingRevoke(deviceId || null);
   });
 
   ipcMain.handle('hud:toggle', event => {
@@ -325,11 +396,15 @@ function createMiniWindow() {
   secureLocalWindow(miniWindow, file);
   miniWindow.on('closed', () => {
     miniWindow = null;
-    if (mainWindow && !mainWindow.isDestroyed()) mainWindow.webContents.send('hud:visibility', false);
+    if (mainWindow && !mainWindow.isDestroyed()) {
+      mainWindow.webContents.send('hud:visibility', false);
+      if (!quitting && !mainWindow.isVisible()) mainWindow.close();
+    }
   });
   miniWindow.loadFile(file);
   miniWindow.webContents.once('did-finish-load', () => {
-    miniWindow?.webContents.send('hud:snapshot', lastHudSnapshot);
+    if (!miniWindow || miniWindow.isDestroyed()) return;
+    miniWindow.webContents.send('hud:snapshot', lastHudSnapshot);
     if (mainWindow && !mainWindow.isDestroyed()) mainWindow.webContents.send('hud:visibility', true);
   });
   return miniWindow;
@@ -371,25 +446,39 @@ function createWindow() {
   mainWindow.loadFile(indexFile);
 }
 
-app.whenReady().then(() => {
-  app.setAppUserModelId('com.ultron.desktop');
-  protocol.handle('ultron-palco', async request => {
-    try {
-      return await responderPalco(request);
-    } catch {
-      return new Response(null, { status: 500 });
+const gotSingleInstanceLock = app.requestSingleInstanceLock();
+
+if (!gotSingleInstanceLock) {
+  app.quit();
+} else {
+  app.on('second-instance', () => {
+    if (mainWindow && !mainWindow.isDestroyed()) {
+      if (mainWindow.isMinimized()) mainWindow.restore();
+      if (!mainWindow.isVisible()) mainWindow.show();
+      mainWindow.focus();
     }
   });
-  registerApiHandlers();
-  fixYoutubeEmbedHeaders();
-  createWindow();
-  registrarEnergia();
-  restringirCamera();
-  app.on('before-quit', () => { quitting = true; });
-  app.on('activate', () => {
-    if (mainWindow && !mainWindow.isDestroyed()) { mainWindow.show(); mainWindow.focus(); }
-    else createWindow();
+
+  app.whenReady().then(() => {
+    app.setAppUserModelId('com.ultron.desktop');
+    protocol.handle('ultron-palco', async request => {
+      try {
+        return await responderPalco(request);
+      } catch {
+        return new Response(null, { status: 500 });
+      }
+    });
+    registerApiHandlers();
+    fixYoutubeEmbedHeaders();
+    createWindow();
+    registrarEnergia();
+    restringirCamera();
+    app.on('before-quit', () => { quitting = true; });
+    app.on('activate', () => {
+      if (mainWindow && !mainWindow.isDestroyed()) { mainWindow.show(); mainWindow.focus(); }
+      else createWindow();
+    });
   });
-});
+}
 
 app.on('window-all-closed', () => { if (process.platform !== 'darwin') app.quit(); });

@@ -255,6 +255,23 @@ class UpdateManagerTests(unittest.TestCase):
         self.assertEqual(self.manager._job["status"], "erro")
         self.assertIn("SHA256SUMS", self.manager._job["message"])
 
+    def test_runtime_is_protected_in_apply_now_and_script(self):
+        (self.root / "runtime" / "python").mkdir(parents=True)
+        (self.root / "runtime" / "python" / "python.exe").write_bytes(b"real-runtime")
+        staging = Path(self.temp.name) / "staging"
+        (staging / "runtime" / "python").mkdir(parents=True)
+        (staging / "runtime" / "python" / "python.exe").write_bytes(b"overwrite")
+        (staging / "cerebro.py").write_text("atualizado", encoding="utf-8")
+
+        aplicados, _pendentes, backup = self.manager._apply_now(staging)
+        self.assertIn("cerebro.py", aplicados)
+        self.assertNotIn("runtime/python/python.exe", aplicados)
+        self.assertEqual((self.root / "runtime" / "python" / "python.exe").read_bytes(), b"real-runtime")
+
+        script_path = self.manager._write_apply_script(staging, backup)
+        conteudo = script_path.read_text(encoding="utf-8")
+        self.assertIn(" runtime ", conteudo)
+
 
 if __name__ == "__main__":
     unittest.main()

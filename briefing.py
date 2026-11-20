@@ -31,7 +31,7 @@ def devido(agora=None, ultimo=None) -> bool:
 def _limpar(texto: str) -> str:
     linhas = []
     for linha in str(texto or "").splitlines():
-        if linha.startswith(("[DADOS EXTERNOS", "[IMAGEM_DESTAQUE")):
+        if linha.startswith(("[DADOS EXTERNOS", "[IMAGEM_DESTAQUE", "[PALCO_NOTICIAS")):
             continue
         linhas.append(linha)
     return "\n".join(linhas).strip()

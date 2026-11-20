@@ -30,7 +30,7 @@ PACOTE = RAIZ / "electron" / "package.json"
 
 # Decisões de produto: o que o ULTRON não faz, mesmo que pareça capaz.
 LIMITES = (
-    "não gera nem edita imagens",
+    "não gera imagens nem faz edição artística (apenas conversão de formato)",
     "não edita vídeo",
     "não envia mensagens por WhatsApp",
     "não tem app de celular",
@@ -43,6 +43,16 @@ _GRUPOS = {
         "apagar_arquivo", "compactar_arquivos", "criar_arquivo", "criar_pasta",
         "criar_site", "descompactar_arquivo", "ler_arquivo", "listar_pasta",
         "mover_arquivo", "organizar_arquivos", "prever_organizacao", "procurar_arquivo",
+        "organizar_pdf_downloads", "extrair_e_limpar_instalador", "limpar_duplicados",
+        "limpar_disco", "converter_imagens", "arquivar_projetos_antigos",
+        "executar_backup_incremental", "arquivar_capturas_desktop",
+        "corrigir_permissoes_pasta", "ejetar_usb_ocioso", "configurar_bloco1",
+    ),
+    "processos e hardware (bloco 2)": (
+        "suspender_abas_navegador", "encerrar_apps_travados", "controlar_plano_energia",
+        "otimizar_cpu_jogos_reunioes", "verificar_protecao_termica", "gerenciar_inicializacao_sistema",
+        "otimizar_prioridade_janela", "purgar_memoria_ram", "ajustar_brilho_e_cor_tela",
+        "desconectar_bluetooth_inativo", "configurar_bloco2",
     ),
     "janelas e programas": (
         "abrir_programa", "fechar_aplicativo", "minimizar_janelas", "alternar_modo_escuro",
@@ -64,8 +74,9 @@ _GRUPOS = {
     "câmera e gestos": (
         "controlar_mouse_com_gesto", "detectar_gestos_mao", "detectar_objetos", "webcam_foto",
     ),
-    "mídia e palco": ("controlar_midia", "mostrar_na_interface", "spotify_buscar",
-                      "spotify_controlar", "spotify_estado", "spotify_tocar", "youtube"),
+    "mídia e palco": ("ajustar_volume_app", "controlar_midia", "listar_volumes_apps",
+                      "mostrar_na_interface", "spotify_buscar",
+                      "spotify_estado", "spotify_tocar", "youtube"),
     "memória e lembretes": (
         "briefing_matinal", "cancelar_evento", "cancelar_lembrete", "criar_evento",
         "criar_lembrete", "esquecer_fato", "lembrar_fato", "listar_agenda", "listar_lembretes",
@@ -74,9 +85,11 @@ _GRUPOS = {
     ),
     "automação": ("agendar_fluxo", "criar_fluxo", "executar_fluxo", "listar_fluxos",
                   "listar_jogos", "remover_fluxo"),
+    "celular": ("celular_acao_sensivel", "celular_consultar", "celular_controlar", "celular_status"),
     "skills": ("criar_skill", "descartar_skill", "listar_skills", "usar_skill"),
     "desfazer": ("desfazer",),
 }
+GRUPOS_FERRAMENTAS = _GRUPOS
 
 _CACHE: dict[str, object] = {"ts": 0.0, "texto": ""}
 _VALIDADE = 3600.0  # o processo pode ficar aberto por dias; 1 h é barato e suficiente
@@ -150,6 +163,9 @@ def _estatico() -> str:
     linhas = [
         f"- Sistema: {_sistema()}.",
         f"- Versão: {_versao()}.",
+        "- Inteligência contínua: compactação de diálogos prolongados com fio de contexto, agenda e "
+        "lembretes recorrentes em linguagem natural, controle de volume por aplicativo, modo palco e "
+        "aprendizado contínuo de preferências.",
         "- Limites fixos: " + "; ".join(LIMITES) +
         ". Se pedirem algo assim, diga que não faz e ofereça o que existe.",
         "- Segurança: toda ferramenta passa por um portão único (risco, allowlist e "

@@ -16,7 +16,9 @@ from dataclasses import dataclass, field
 
 from config import BASE
 
-ARQUIVO_USUARIO = BASE / "dados" / "fluxos.json"
+import config
+
+ARQUIVO_USUARIO = getattr(config, "ARQUIVO_FLUXOS", getattr(config, "DIR_DADOS", BASE / "dados") / "fluxos.json")
 
 
 @dataclass(frozen=True)

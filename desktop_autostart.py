@@ -31,6 +31,11 @@ def install(appdata: str | Path | None, python_exe: str | Path, script_path: str
     python_exe = Path(python_exe).resolve()
     script_path = Path(script_path).resolve()
     destination.parent.mkdir(parents=True, exist_ok=True)
+    for legacy_name in _LEGACY_ENTRIES:
+        try:
+            (destination.parent / legacy_name).unlink()
+        except FileNotFoundError:
+            pass
     current_dir = str(script_path.parent).replace('"', '""')
     command = f'"{python_exe}" "{script_path}"'.replace('"', '""')
     contents = ("Set sh = CreateObject(\"WScript.Shell\")\r\n"

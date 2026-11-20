@@ -14,7 +14,9 @@ import time
 from pathlib import Path
 
 RAIZ = Path(__file__).resolve().parent
-WEBCAMS_DIR = RAIZ / "dados" / "webcams"
+import config
+
+WEBCAMS_DIR = getattr(config, "DIR_DADOS", RAIZ / "dados") / "webcams"
 
 # Limites de sanidade: nada de vídeo infinito nem foto de 8K na memória.
 _MAX_SEGUNDOS = 30.0

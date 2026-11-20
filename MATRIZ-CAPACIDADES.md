@@ -5,7 +5,7 @@
 > **Fonte do catálogo:** inventário funcional dos 8 repositórios (adewaskar,
 > OpenJarvis, microsoft/JARVIS, jgm-source, sukkeesh, AnaaySampat,
 > Aryan-0001, VarsshanCoder).
-> **Fonte do estado atual:** `ferramentas.py` (78 ferramentas registradas),
+> **Fonte do estado atual:** `ferramentas.py` (107 ferramentas registradas),
 > `desktop_api.py`, `electron/`, módulos da raiz e testes.
 >
 > Este documento compara **o catálogo** com **o que o ULTRON Desktop faz hoje**.
@@ -53,7 +53,7 @@ O ULTRON já é forte no que o catálogo chama de "controle de computador",
 | Seleção de modelo por complexidade/custo | 🟡 | Ordem de provedores + fallback + backoff (`config.py`) | Não mede custo/latência nem escolhe por capacidade | P3 |
 | Comparar modelos por custo, latência e qualidade | ❌ | — | Sem benchmark; hoje é tentativa e erro | P3 |
 | Modelos locais (Ollama etc.) | ❌ | — | 100% nuvem | P3 |
-| Agentes especializados (pesquisador, telefone, desktop…) | ❌ | Um único loop com 78 ferramentas; skills como procedimento | Sem orquestração multiagente | P2 |
+| Agentes especializados (pesquisador, telefone, desktop…) | ❌ | Um único loop com 107 ferramentas; skills como procedimento | Sem orquestração multiagente | P2 |
 | Executar código como parte da solução (CodeAct) | ✅ | `rodar_codigo` (Python/Node, limite de 20 s) | Sem REPL persistente entre chamadas | P3 |
 | Métricas por ferramenta (tempo, falha) | 🟡 | Log de segurança + `[tempo]` da 1ª frase | Sem telemetria local por ferramenta | P3 |
 

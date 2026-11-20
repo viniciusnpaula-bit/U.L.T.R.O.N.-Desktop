@@ -77,6 +77,11 @@ class BlocoTests(unittest.TestCase):
         self.assertIn("Seu nome é", texto)
         self.assertIn("- Sistema:", texto)
 
+    def test_grupos_referenciam_apenas_ferramentas_registradas(self):
+        agrupadas = {nome for itens in autoconhecimento._GRUPOS.values() for nome in itens}
+        registradas = set(ferramentas.FERRAMENTAS)
+        self.assertEqual(agrupadas, registradas)
+
 
 if __name__ == "__main__":
     unittest.main()

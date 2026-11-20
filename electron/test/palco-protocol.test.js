@@ -160,4 +160,26 @@ test('recusa entrada expirada e extensão que não é mídia', async () => {
 
 test('só aceita raiz absoluta', () => {
   assert.throws(() => criarRespostaPalco({ root: 'relativo' }), /absoluto/);
+  assert.throws(() => criarRespostaPalco({ root: path.resolve('.'), dataDir: 'relativo' }), /absoluto/);
+});
+
+test('dataDir alternativo serve manifesto do palco no modo instalado', async () => {
+  const root = await fs.mkdtemp(path.join(os.tmpdir(), 'ultron-palco-ro-'));
+  const dataDir = await fs.mkdtemp(path.join(os.tmpdir(), 'ultron-palco-data-'));
+  const dir = path.join(dataDir, 'palco');
+  await fs.mkdir(dir, { recursive: true });
+  const arquivo = path.join(dataDir, 'video.mp4');
+  await fs.writeFile(arquivo, Buffer.from('abcdef'));
+  await fs.writeFile(path.join(dir, 'manifest.json'), JSON.stringify({
+    [ID]: { caminho: arquivo, tipo: 'video', criado: Date.now() / 1000, expira: Date.now() / 1000 + 60 },
+  }));
+  try {
+    const responder = criarRespostaPalco({ root, dataDir });
+    const resposta = await responder(pedir(`ultron-palco://media/${ID}`));
+    assert.equal(resposta.status, 200);
+    assert.equal(await resposta.text(), 'abcdef');
+  } finally {
+    await fs.rm(root, { recursive: true, force: true });
+    await fs.rm(dataDir, { recursive: true, force: true });
+  }
 });

@@ -83,5 +83,23 @@ class FatorDoLimiarTests(unittest.TestCase):
             self.assertFalse(self.ouvido._eh_voz(np.zeros(1600, dtype=np.int16)))
 
 
+class PronunciaTtsTests(unittest.TestCase):
+    def test_limpar_converte_sigla_pontuada_para_pronuncia_corrida(self):
+        self.assertEqual(voz.limpar("U.L.T.R.O.N. online."), "Ultron online.")
+        self.assertEqual(voz.limpar("J.A.R.V.I.S. pronto."), "Jarvis pronto.")
+        self.assertEqual(voz.limpar("E.D.I.T.H. ativa."), "Edith ativa.")
+
+    def test_saudacao_perfil_ultron_nao_soletra_sigla(self):
+        import tempfile
+        import personalidade
+
+        with tempfile.TemporaryDirectory() as tmp:
+            arq = Path(tmp) / "personalidade.json"
+            with patch.object(personalidade, "ARQUIVO", arq):
+                personalidade.salvar({"perfil": "ultron", "tratamento": "senhor"})
+                frase = personalidade.frase_saudacao()
+        self.assertTrue(frase.startswith("Ultron online."))
+
+
 if __name__ == "__main__":
     unittest.main()

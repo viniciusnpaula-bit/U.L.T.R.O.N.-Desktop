@@ -265,11 +265,16 @@ Gere os dois com `python tools/build_setup.py --zip`.
 ## Desenvolvimento
 
 ```bash
-python -m pytest tests -q            # suíte local (328 testes)
-python tools/make_icon.py            # regera ULTRON.ico a partir da arte
-python tools/build_setup.py --zip    # compila ULTRON.exe, ULTRON-Setup.exe e o ZIP
-python launcher.py --doctor          # diagnóstico
+python -m pytest tests -q                                       # suíte de testes unitários do núcleo e desktop
+python -m unittest testes_seguranca                             # testes de segurança legados (política e permissões)
+node --test electron/test/*.test.js electron/site/test/*.mjs   # testes da interface e shell Electron
+python -m compileall -q .                                       # verificação de compilação e sintaxe Python
+python tools/make_icon.py                                       # regera ULTRON.ico a partir da arte
+python tools/build_setup.py --zip                               # compila ULTRON.exe, ULTRON-Setup.exe e o ZIP
+python launcher.py --doctor                                     # diagnóstico do ambiente
 ```
+
+Para verificar a contagem de testes atualizada a qualquer momento, execute os comandos de teste acima (os relatórios do pytest, unittest e node informam as quantidades exatas aprovadas no seu ambiente).
 
 O navegador controlado usa Playwright, que é opcional e fica fora do
 `requirements.txt` para não pesar a instalação: `pip install playwright` e
@@ -294,6 +299,12 @@ Estrutura:
 | `memoria.py`, `nuance.py` | memória SQLite entre sessões e leitura local de nuances |
 | `obsidian.py` | leitura e escrita no vault do Obsidian (notas Markdown) |
 | `personalidade.py`, `voz.py` | perfis, jeito, dados do usuário, saudação e vozes Edge TTS |
+| `agendador.py` | agendador de lembretes, tarefas periódicas e avisos com áudio |
+| `fluxos.py` | definição, listagem e execução de ações encadeadas (fluxos) |
+| `skills.py` | procedimentos e habilidades em Markdown (aprovação e ciclo de vida) |
+| `spotify.py` | controle de mídia via Spotify Web API oficial |
+| `briefing.py` | resumo matinal e consolidação de contexto para o início do dia |
+| `biometria.py` | autenticação e sessão local integrada com Windows Hello |
 | `autoconhecimento.py` | bloco do system prompt gerado do sistema vivo (nome, versão, SO, habilidades, limites) |
 | `voz_nativa.py` | reconhecimento de voz opcional do Windows (SAPI), offline |
 | `seguranca.py`, `permissoes.json` | riscos, confirmações, PIN, allowlist |

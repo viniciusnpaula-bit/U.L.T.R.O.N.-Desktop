@@ -111,6 +111,85 @@ class IntencaoSpotifyTests(unittest.TestCase):
                       "inicie o spotify"):
             self.assertTrue(cerebro._pedido_abrir_spotify(texto), texto)
 
+    def test_acao_rapida_midia_continuar_pausar_proxima_anterior(self):
+        import cerebro
+        self.assertEqual(cerebro._acao_rapida("continue a musica"), "midia:continuar")
+        self.assertEqual(cerebro._acao_rapida("continua a música no Spotify"), "midia:continuar")
+        self.assertEqual(cerebro._acao_rapida("pause a música"), "midia:pausar")
+        self.assertEqual(cerebro._acao_rapida("próxima música"), "midia:proxima")
+        self.assertEqual(cerebro._acao_rapida("música anterior"), "midia:anterior")
+        self.assertEqual(cerebro._acao_rapida("toca Daft Punk no Spotify"), "spotify_tocar:Daft Punk")
+        self.assertIsNone(cerebro._acao_rapida("toca uma música no Spotify"))
+
+    def test_executar_acao_rapida_midia_aciona_controlar_midia(self):
+        import cerebro
+        chamadas = []
+
+        def executar(nome, argumentos, confirmar, origem):
+            chamadas.append((nome, argumentos, origem))
+            return "Feito."
+
+        with mock.patch.object(cerebro, "_rastrear"):
+            res_cont = cerebro._executar_acao_rapida("midia:continuar", executar, lambda *_: True, "teste")
+            res_pausa = cerebro._executar_acao_rapida("midia:pausar", executar, lambda *_: True, "teste")
+            res_prox = cerebro._executar_acao_rapida("midia:proxima", executar, lambda *_: True, "teste")
+            res_ant = cerebro._executar_acao_rapida("midia:anterior", executar, lambda *_: True, "teste")
+
+        self.assertEqual(res_cont, "Reprodução retomada.")
+        self.assertEqual(res_pausa, "Música pausada.")
+        self.assertEqual(res_prox, "Pulando para a próxima faixa.")
+        self.assertEqual(res_ant, "Voltando para a faixa anterior.")
+        self.assertEqual(chamadas, [
+            ("controlar_midia", {"acao": "continuar"}, "teste"),
+            ("controlar_midia", {"acao": "pausar"}, "teste"),
+            ("controlar_midia", {"acao": "proxima"}, "teste"),
+            ("controlar_midia", {"acao": "anterior"}, "teste"),
+        ])
+
+    def test_spotify_tocar_usa_fallback_local_quando_sem_dispositivo_ativo(self):
+        with mock.patch("spotify.configurado", return_value=True), \
+             mock.patch("spotify.tocar", return_value="Abra o Spotify e toque algo para ativar um dispositivo; aí eu troco a faixa."), \
+             mock.patch("spotify.ativar_e_tocar_local", return_value="Tocando One More Time — Daft Punk no Spotify.") as mk_local:
+            saida = ferramentas.executar("spotify_tocar", {"consulta": "daft punk"}, lambda *_: True, "teste")
+        mk_local.assert_called_once_with("daft punk", "Abra o Spotify e toque algo para ativar um dispositivo; aí eu troco a faixa.")
+        self.assertEqual(saida, "Tocando One More Time — Daft Punk no Spotify.")
+
+    def test_recordar_ignora_mensagens_antigas_de_erro_do_spotify(self):
+        import time
+        import memoria
+        agora = time.time()
+        linhas_fake = [
+            (301, agora - 10, "assistant", "Lamento, senhor. O Spotify não está respondendo como esperado. Recomendo que abra o aplicativo e toque em qualquer música para ativar o dispositivo."),
+            (300, agora - 20, "assistant", "Abra o Spotify e toque algo para ativar um dispositivo; aí eu troco a faixa."),
+            (299, agora - 30, "user", "quero ouvir musica no computador"),
+        ]
+        with mock.patch("memoria._x", return_value=linhas_fake), \
+             mock.patch("memoria._texto", side_effect=lambda _t, _i, v: v):
+            lembradas = memoria.recordar("continue a musica", limite=4)
+        textos = [item["texto"] for item in lembradas]
+        self.assertEqual(textos, ["quero ouvir musica no computador"])
+
+    def test_spotify_controlar_player_nao_pausa_quando_ja_esta_tocando(self):
+        with mock.patch("spotify.configurado", return_value=True), \
+             mock.patch("spotify.estado", return_value={"tocando": True, "faixa": "Idol", "artista": "YOASOBI"}):
+            res = spotify.controlar_player("continuar")
+        self.assertIn("já está tocando", res)
+
+    def test_spotify_ativar_e_tocar_local_usa_startfile(self):
+        with mock.patch("spotify.configurado", return_value=True), \
+             mock.patch("spotify.os.name", "nt"), \
+             mock.patch("spotify.os.startfile", create=True) as mk_start, \
+             mock.patch("spotify.time.sleep"), \
+             mock.patch("spotify.buscar", return_value={"faixas": [
+                 {"nome": "One More Time", "artista": "Daft Punk", "uri": "spotify:track:1"}]}), \
+             mock.patch("spotify._pedir", side_effect=[
+                 (200, {"devices": [{"id": "pc", "is_active": False, "type": "Computer"}]}),
+                 (204, {}),
+                 (200, {"is_playing": True, "item": {"uri": "spotify:track:1"}})]):
+            res = spotify.ativar_e_tocar_local("daft punk")
+        mk_start.assert_called_once_with("spotify:track:1")
+        self.assertEqual(res, "Tocando One More Time — Daft Punk no Spotify.")
+
 
 if __name__ == "__main__":
     unittest.main()

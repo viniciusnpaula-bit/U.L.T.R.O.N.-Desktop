@@ -15,7 +15,9 @@ import json
 import re
 from pathlib import Path
 
-ARQUIVO = Path(__file__).resolve().parent / "dados" / "correcoes_voz.json"
+import config
+
+ARQUIVO = getattr(config, "DIR_DADOS", Path(__file__).resolve().parent / "dados") / "correcoes_voz.json"
 
 _PALAVRA = re.compile(r"[A-Za-zÀ-ÖØ-öø-ÿ]+")
 

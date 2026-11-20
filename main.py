@@ -21,7 +21,9 @@ import biometria
 
 # Sem janela (pythonw) não existe saída de texto: manda tudo para um arquivo.
 if sys.stdout is None or sys.stderr is None or "--bandeja" in sys.argv:
-    sys.stdout = sys.stderr = open(config.BASE / "logs" / "console.log", "a", buffering=1, encoding="utf-8")
+    _log_dir = getattr(config, "DIR_LOGS", config.BASE / "logs")
+    Path(_log_dir).mkdir(parents=True, exist_ok=True)
+    sys.stdout = sys.stderr = open(Path(_log_dir) / "console.log", "a", buffering=1, encoding="utf-8")
 
 import cerebro
 import confirmacao
@@ -69,10 +71,24 @@ def responder(texto, confirmar, origem):
     return resp
 
 
-def loop_lembretes():
+def loop_lembretes(stop_event=None):
     """Thread única do núcleo para lembretes, agenda, fluxos agendados e briefing."""
     import agendador
-    agendador.loop()
+    agendador.loop(stop_event)
+
+
+_hotkeys_registradas: set[str] = set()
+
+
+def remover_atalhos():
+    """Remove todos os atalhos globais registrados e libera os listeners."""
+    global _hotkeys_registradas
+    try:
+        import keyboard
+        keyboard.clear_all_hotkeys()
+    except Exception:
+        pass
+    _hotkeys_registradas.clear()
 
 
 def atalho_falar(evento):
@@ -84,20 +100,29 @@ def atalho_falar(evento):
     combinacao = getattr(config, "HOTKEY_FALAR", "") or ""
     if not combinacao:
         return
+    if combinacao.strip().lower() == getattr(config, "HOTKEY_PARAR", "").strip().lower():
+        print(f"[aviso] conflito: atalho de falar igual ao de parada ({combinacao}); ignorando atalho de falar.")
+        return
+    if "falar" in _hotkeys_registradas:
+        return
     try:
         import keyboard
         # press -> começa a gravar; release -> envia o que foi dito
         keyboard.add_hotkey(combinacao, lambda: evento.set(), trigger_on_release=False)
         keyboard.add_hotkey(combinacao, lambda: evento.clear(), trigger_on_release=True)
+        _hotkeys_registradas.add("falar")
         print(f"[segurar para falar] atalho: {combinacao}")
     except Exception as e:
         print(f"[aviso] atalho de falar indisponível: {e}")
 
 
 def atalho_parada():
+    if "parada" in _hotkeys_registradas:
+        return
     try:
         import keyboard
         keyboard.add_hotkey(config.HOTKEY_PARAR, seguranca.parar_tudo)
+        _hotkeys_registradas.add("parada")
         print(f"[parada de emergência] atalho: {config.HOTKEY_PARAR}")
     except Exception as e:
         print(f"[aviso] atalho de parada indisponível: {e}")
@@ -251,7 +276,8 @@ def modo_voz(bandeja=False, entrada_teclado=True, stop_event=None,
              estado_voz: Callable[[str, str | None], None] | None = None,
              microphone_device_index=None, microphone_device_id=None,
              conversa: Callable[[str, str, str], None] | None = None,
-             converter_confirmacao: Callable[[str, dict], bool] | None = None):
+             converter_confirmacao: Callable[[str, dict], bool] | None = None,
+             notificar_voz: bool = True):
     def publicar_estado(estado, erro=None):
         if estado_voz is not None:
             try:
@@ -259,11 +285,28 @@ def modo_voz(bandeja=False, entrada_teclado=True, stop_event=None,
             except Exception:
                 pass
 
+    def _eco_atual():
+        afe = getattr(ouvido, "afe", None) if "ouvido" in locals() else None
+        return 0.1 if (afe is not None and getattr(afe, "aec_ativo", False)) else 0.4
+
+    def _falar_resposta(texto, emocao="neutro"):
+        if not texto:
+            return
+        eco = _eco_atual()
+        if emocao and emocao != "neutro":
+            try:
+                voz.falar(texto, eco=eco, emocao=emocao)
+                return
+            except TypeError:
+                pass
+        voz.falar(texto, eco=eco)
+
     def responder_com_voz(comando, confirmar, origem):
         """Responde falando: com streaming, a 1ª frase toca enquanto o resto é gerado.
 
-        Se o streaming não render nada, `finalizar()` cai no fluxo normal e a fala
-        acontece depois — o comportamento anterior fica preservado.
+        Quando o modelo aciona ferramentas ou ocorre fallback no meio do stream,
+        `finalizar()` conclui o ciclo normal e a resposta final é falada e
+        devolvida ao painel.
         """
         sessao.tocar()
         try:
@@ -271,17 +314,32 @@ def modo_voz(bandeja=False, entrada_teclado=True, stop_event=None,
         except Exception as erro:
             seguranca.log.warning(f"Streaming indisponível ({type(erro).__name__}); modo normal.")
             texto = responder(comando, confirmar, origem)
-            voz.falar(texto)
+            _falar_resposta(texto)
             return texto
         t0 = time.perf_counter()
-        falado = voz.falar_partes(partes)
-        if falado:
-            # streaming funcionou: ainda precisamos gravar o histórico
-            finalizar()
-            seguranca.log.info(f"[tempo] 1ª frase falada em {time.perf_counter() - t0:.1f}s")
-            return falado
+
+        class _PartesAbortaveis:
+            def __iter__(self_it):
+                for item in partes:
+                    if voz._parar.is_set():
+                        break
+                    yield item
+
+            def __getattr__(self_it, nome):
+                return getattr(partes, nome)
+
+        falado = voz.falar_partes(_PartesAbortaveis(), eco=_eco_atual())
         texto = finalizar()
-        voz.falar(texto)
+        if getattr(voz, "foi_interrompido", lambda: False)():
+            return texto or falado
+        pos_stream = bool(getattr(partes, "resposta_pos_stream", False))
+        emocao = getattr(partes, "registro", None) or "neutro"
+        if falado and not pos_stream:
+            # streaming conversacional puro terminou sem pós-processamento
+            seguranca.log.info(f"[tempo] 1ª frase falada em {time.perf_counter() - t0:.1f}s")
+            return texto or falado
+        print(f"Ultron: {texto}")
+        _falar_resposta(texto, emocao=emocao)
         return texto
 
     def publicar_conversa(papel, texto):
@@ -299,11 +357,10 @@ def modo_voz(bandeja=False, entrada_teclado=True, stop_event=None,
     ouvido.pausado = pausado
     falar_agora = threading.Event()   # ligado enquanto o atalho "segurar para falar" está pressionado
     ouvido.pedido_manual = falar_agora
+    if hasattr(ouvido, "preparar_afe"):
+        ouvido.preparar_afe()
     if ouvido_pronto is not None:
         ouvido_pronto(ouvido)
-    seguranca.ganchos_parada.append(voz.parar_fala)
-    cerebro.NOTIFICADORES.append(lambda t: (print(f"\nUltron: {t}"), voz.falar(t)))
-
     atalho_falar(falar_agora)
 
     confirmar_voz = confirmacao.criar_confirmador_voz(ouvido, voz)
@@ -351,12 +408,23 @@ def modo_voz(bandeja=False, entrada_teclado=True, stop_event=None,
                     device_generation = ouvido.device_generation
                 if not calibrado:
                     if erro_audio is None:
+                        publicar_estado("aquecendo_afe")
+                    if hasattr(ouvido, "iniciar_afe"):
+                        ouvido.iniciar_afe()
+                    if erro_audio is None:
                         publicar_estado("calibrando")
                     ouvido.calibrar()
                     calibrado = True
                     erro_audio = None
+                    publicar_estado("ouvindo")
                     if personalidade.saudacao_ao_abrir():
-                        voz.falar(personalidade.frase_saudacao())
+                        # Aguarda a dissolução da tela de carregamento para falar ao revelar o núcleo.
+                        if stop_event is not None:
+                            stop_event.wait(0.75)
+                        else:
+                            time.sleep(0.75)
+                        if (stop_event is None or not stop_event.is_set()) and not pausado.is_set():
+                            voz.falar(personalidade.frase_saudacao(), eco=_eco_atual())
                     print("Diga 'Ei, Ultron' seguido do comando.")
                 if falar_agora.is_set() and not pausado.is_set():
                     # "segurar para falar": grava só enquanto a tecla está pressionada
@@ -364,11 +432,15 @@ def modo_voz(bandeja=False, entrada_teclado=True, stop_event=None,
                     texto = ouvido.escutar_manual()
                     if texto:
                         texto = fala.normalizar_despertar(texto)
-                        publicar_conversa("user", texto)
-                        publicar_estado("processando")
-                        resposta = responder_com_voz(texto, confirmar_voz, "voz")
-                        publicar_conversa("assistant", resposta)
-                        janela = time.time() + getattr(config, "JANELA_SEGUIMENTO", 6.0)
+                        try:
+                            publicar_conversa("user", texto)
+                            publicar_estado("processando")
+                            resposta = responder_com_voz(texto, confirmar_voz, "voz")
+                            publicar_conversa("assistant", resposta)
+                        except Exception as e:
+                            seguranca.log.error(f"Erro ao responder: {e}")
+                        publicar_estado("ouvindo")
+                        janela = time.time() + getattr(config, "JANELA_SEGUIMENTO", 15.0)
                     continue
                 if erro_audio is None:
                     publicar_estado("ouvindo")
@@ -377,7 +449,11 @@ def modo_voz(bandeja=False, entrada_teclado=True, stop_event=None,
                         ouvido.recalibrar_se_necessario()
                     except Exception:
                         pass
-                detalhe = ouvido.escutar_detalhado() if hasattr(ouvido, "escutar_detalhado") else {"texto": ouvido.escutar(), "alternativas": [], "erro": None}
+                exigir_wake = time.time() >= janela
+                try:
+                    detalhe = ouvido.escutar_detalhado(exigir_wake=exigir_wake)
+                except TypeError:
+                    detalhe = ouvido.escutar_detalhado() if hasattr(ouvido, "escutar_detalhado") else {"texto": ouvido.escutar(), "alternativas": [], "erro": None}
                 texto = detalhe.get("texto")
                 if texto:
                     # O Whisper pode devolver "EIULTRON"/"EIUTRON"; sem isso o WAKE não acha.
@@ -419,18 +495,21 @@ def modo_voz(bandeja=False, entrada_teclado=True, stop_event=None,
                 else:
                     voz.falar("Não tenho o que corrigir ainda. Diga o comando primeiro.", eco=0.2)
                 ultimo_texto_usuario = texto
-                janela = time.time() + getattr(config, "JANELA_SEGUIMENTO", 6.0)
+                janela = time.time() + getattr(config, "JANELA_SEGUIMENTO", 15.0)
                 continue
             ultimo_texto_usuario = texto
             m = WAKE.search(texto.lower())
             if m:
                 cmd = texto[m.end():].strip()
                 if not cmd:
-                    voz.falar("Pois não?")
-                    cmd = ouvido.escutar(espera=8)
+                    voz.falar("Pois não?", eco=_eco_atual())
+                    try:
+                        cmd = ouvido.escutar(espera=8, exigir_wake=False)
+                    except TypeError:
+                        cmd = ouvido.escutar(espera=8)
                     if not cmd:
                         continue
-            elif time.time() < janela:
+            elif detalhe.get("wake_detectado") or time.time() < janela:
                 cmd = texto
             else:
                 continue
@@ -447,7 +526,7 @@ def modo_voz(bandeja=False, entrada_teclado=True, stop_event=None,
                 publicar_conversa("user", cmd)
                 if not converter_confirmacao(cmd, incerteza):
                     publicar_conversa("assistant", "Deixei de executar porque a fala estava ambígua.")
-                    janela = time.time() + getattr(config, "JANELA_SEGUIMENTO", 6.0)
+                    janela = time.time() + getattr(config, "JANELA_SEGUIMENTO", 15.0)
                     continue
             try:
                 publicar_conversa("user", cmd)
@@ -459,22 +538,60 @@ def modo_voz(bandeja=False, entrada_teclado=True, stop_event=None,
             except Exception as e:
                 seguranca.log.error(f"Erro ao responder: {e}")
             publicar_estado("ouvindo")
-            janela = time.time() + getattr(config, 'JANELA_SEGUIMENTO', 6.0)
+            janela = time.time() + getattr(config, 'JANELA_SEGUIMENTO', 15.0)
         publicar_estado("encerrado")
 
-    if not bandeja:
-        if entrada_teclado:
-            threading.Thread(target=teclado.loop_digitacao, args=(digitado,), daemon=True).start()
-        loop()
-        return
-    threading.Thread(target=loop, daemon=True).start()
+    _gancho_parada = voz.parar_fala
+    _notificador_voz = None
+    seguranca.ganchos_parada.append(_gancho_parada)
+    if notificar_voz:
+        def _notificar_voz(texto_aviso):
+            print(f"\nUltron: {texto_aviso}")
+            if (not getattr(config, "VOZ_ATIVO", True)
+                    or not getattr(config, "VOZ_NOTIFICACOES", True)
+                    or pausado.is_set()
+                    or (getattr(seguranca, "parada", None) and seguranca.parada.is_set())):
+                return
+            try:
+                voz.falar(texto_aviso)
+            except Exception as erro_voz:
+                seguranca.log.warning(f"Voz da notificação falhou: {type(erro_voz).__name__}")
+
+        _notificador_voz = _notificar_voz
+        cerebro.NOTIFICADORES.append(_notificador_voz)
+
     try:
-        import bandeja
-        bandeja.executar(pausado)       # bloqueia até escolher "Sair"
-    except Exception as e:
-        seguranca.log.error(f"Bandeja indisponível ({e}); rodando sem ícone.")
-        while True:
-            time.sleep(3600)
+        if not bandeja:
+            if entrada_teclado:
+                threading.Thread(target=teclado.loop_digitacao, args=(digitado,), daemon=True).start()
+            loop()
+            return
+        threading.Thread(target=loop, daemon=True).start()
+        try:
+            import bandeja
+            bandeja.executar(pausado)       # bloqueia até escolher "Sair"
+            if stop_event is not None:
+                stop_event.set()
+        except Exception as e:
+            seguranca.log.error(f"Bandeja indisponível ({e}); rodando sem ícone.")
+            while stop_event is None or not stop_event.is_set():
+                if stop_event is not None:
+                    stop_event.wait(3600)
+                else:
+                    time.sleep(3600)
+    finally:
+        if hasattr(ouvido, "parar_afe"):
+            try:
+                ouvido.parar_afe()
+            except Exception:
+                pass
+        if stop_event is not None:
+            stop_event.set()
+        remover_atalhos()
+        if _gancho_parada in seguranca.ganchos_parada:
+            seguranca.ganchos_parada.remove(_gancho_parada)
+        if _notificador_voz is not None and _notificador_voz in cerebro.NOTIFICADORES:
+            cerebro.NOTIFICADORES.remove(_notificador_voz)
 
 
 def rodar_testes():
@@ -507,6 +624,12 @@ if __name__ == "__main__":
     preparar_windows()
     _curar_skills()
     threading.Thread(target=loop_lembretes, daemon=True).start()
+    try:
+        import vigilancia_disco
+        _vig_disco = vigilancia_disco.VigilanciaDisco()
+        _vig_disco.iniciar()
+    except Exception as _e_vig:
+        seguranca.log.warning("Falha ao iniciar vigilancia_disco: %s", _e_vig)
     atalho_parada()
     import telegram_bot
     if telegram_bot.iniciar():

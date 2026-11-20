@@ -195,9 +195,10 @@ def notas() -> list[dict]:
     except OSError:
         mtime = 0
     agora = time.monotonic()
-    if (_notas_cache.get("base") == str(base) and _notas_cache.get("mtime") == mtime
-            and agora - _notas_cache.get("ts", 0.0) < _NOTAS_TTL):
-        return [dict(item) for item in _notas_cache["itens"]]
+    with _trava:
+        if (_notas_cache.get("base") == str(base) and _notas_cache.get("mtime") == mtime
+                and agora - _notas_cache.get("ts", 0.0) < _NOTAS_TTL):
+            return [dict(item) for item in _notas_cache["itens"]]
     saida: list[dict] = []
     for pasta, dirs, arquivos in os.walk(base, followlinks=False):
         dirs[:] = [d for d in dirs
@@ -223,8 +224,12 @@ def notas() -> list[dict]:
                           "tags": _tags(texto), "mtime": info.st_mtime,
                           "tamanho": info.st_size})
             if len(saida) >= _MAX_NOTAS:
+                dirs.clear()
                 break
-    _notas_cache.update(base=str(base), ts=agora, mtime=mtime, itens=saida)
+        if len(saida) >= _MAX_NOTAS:
+            break
+    with _trava:
+        _notas_cache.update(base=str(base), ts=agora, mtime=mtime, itens=saida)
     return [dict(item) for item in saida]
 
 

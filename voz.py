@@ -144,18 +144,59 @@ class _Vad:
         )
 
 
+try:
+    import afe as _afe
+except Exception:
+    _afe = None
+
 _lock_fala = threading.RLock()
 _parar = threading.Event()
+_interrompido = threading.Event()
+_ganchos_parada = []
+_lock_ganchos = threading.Lock()
 falando = threading.Event()   # ligado enquanto o ULTRON está falando (a interface mostra no orbe)
+
+
+def registrar_gancho_parada(cb):
+    with _lock_ganchos:
+        if cb not in _ganchos_parada:
+            _ganchos_parada.append(cb)
+
+
+def remover_gancho_parada(cb):
+    with _lock_ganchos:
+        if cb in _ganchos_parada:
+            _ganchos_parada.remove(cb)
+
+
+def foi_interrompido() -> bool:
+    return _interrompido.is_set()
 
 
 def parar_fala():
     _parar.set()
+    _interrompido.set()
+    with _lock_ganchos:
+        callbacks = list(_ganchos_parada)
+    for cb in callbacks:
+        try:
+            cb()
+        except Exception:
+            pass
+
+
+_SIGLAS_FALADAS = (
+    (re.compile(r"\bU\.\s*L\.\s*T\.\s*R\.\s*O\.\s*N\.?", re.IGNORECASE), "Ultron"),
+    (re.compile(r"\bJ\.\s*A\.\s*R\.\s*V\.\s*I\.\s*S\.?", re.IGNORECASE), "Jarvis"),
+    (re.compile(r"\bE\.\s*D\.\s*I\.\s*T\.\s*H\.?", re.IGNORECASE), "Edith"),
+)
 
 
 def limpar(texto):
     texto = re.sub(r"https?://\S+", "", texto)
     texto = re.sub(r"[*#_`>~|]", "", texto)
+    for padrao, falado in _SIGLAS_FALADAS:
+        texto = padrao.sub(falado, texto)
     return re.sub(r"\s+", " ", texto).strip()
 
 
@@ -216,6 +257,18 @@ def _falar_offline(texto):
             motor.setProperty("voice", v.id)
             break
     motor.setProperty("rate", 165)
+
+    def _on_word(_name, _location, _length):
+        if _parar.is_set():
+            try:
+                motor.stop()
+            except Exception:
+                pass
+
+    try:
+        motor.connect("started-word", _on_word)
+    except Exception:
+        pass
     motor.say(texto)
     motor.runAndWait()
 
@@ -241,6 +294,7 @@ def falar_partes(partes, eco=0.3):
     """
     with _lock_fala:
         _parar.clear()
+        _interrompido.clear()
         t0 = time.perf_counter()
         base = os.path.join(tempfile.gettempdir(), f"ultron_{os.getpid()}_{uuid.uuid4().hex[:6]}")
         fila, parou = queue.Queue(), threading.Event()
@@ -267,7 +321,13 @@ def falar_partes(partes, eco=0.3):
                             asyncio.run(_sintetizar(frase, arq, tom["nome"]))
                         except Exception as e:
                             seguranca.log.warning(f"Voz online falhou ({e}); usando voz offline.")
-                            fila.put((None, " ".join(completo[indice - 1:])))
+                            pendentes = list(completo[indice - 1:])
+                            for pendente in partes:
+                                for f_rest in _frases(str(pendente or "").strip()):
+                                    if f_rest.strip():
+                                        completo.append(f_rest)
+                                        pendentes.append(f_rest)
+                            fila.put((None, " ".join(pendentes)))
                             return
                         fila.put((arq, frase))
             finally:
@@ -303,7 +363,8 @@ def falar_partes(partes, eco=0.3):
                     os.remove(sobra)
                 except OSError:
                     pass
-        time.sleep(eco)  # evita o microfone captar o eco
+        if completo and not _parar.is_set():
+            time.sleep(eco)  # evita o microfone captar o eco
         return " ".join(completo)
 
 
@@ -325,7 +386,7 @@ def testar_microfone(segundos=1.5):
         return {"ok": False, "erro": ERROS["sem_microfone"], "detalhe": type(e).__name__, "nivel": 0}
 
 
-def testar_voz(texto="Ultrason, testes de voz concluídos."):
+def testar_voz(texto="ULTRON, testes de voz concluídos."):
     """Fala uma frase curta com a voz configurada (usa a reserva se a online falhar)."""
     try:
         falar(texto, eco=0)
@@ -341,6 +402,7 @@ def falar(texto, eco=0.5, emocao=registro.NEUTRO):
         return
     with _lock_fala:
         _parar.clear()
+        _interrompido.clear()
         t0 = time.perf_counter()
         frases = _frases(texto)
         base = os.path.join(tempfile.gettempdir(), f"ultron_{os.getpid()}_{uuid.uuid4().hex[:6]}")
@@ -390,7 +452,8 @@ def falar(texto, eco=0.5, emocao=registro.NEUTRO):
                     os.remove(sobra)
                 except OSError:
                     pass
-        time.sleep(eco)  # evita o microfone captar o eco
+        if not _parar.is_set():
+            time.sleep(eco)  # evita o microfone captar o eco
 
 
 # Erros de voz em português: o que houve e o que fazer (nada de mensagem técnica solta).
@@ -429,7 +492,7 @@ VOZES_PT = [
 ]
 
 
-ARQUIVO_PREFERENCIAS = Path(__file__).resolve().parent / "dados" / "voz.json"
+ARQUIVO_PREFERENCIAS = getattr(config, "DIR_DADOS", Path(__file__).resolve().parent / "dados") / "voz.json"
 
 
 def preferencias():
@@ -490,7 +553,7 @@ class Ouvido:
     def __init__(self, device_index=None, device_id=None):
         self.rec = sr.Recognizer()
         self.limiar = getattr(config, "LIMIAR_VOZ", 0) or 400.0
-        self.pausado = None  # threading.Event: quando ligado, o microfone é liberado
+        self._pausado = None  # threading.Event: quando ligado, o microfone é liberado
         self.capturando = threading.Event()  # ligado somente enquanto InputStream está aberto
         self.ultimo_erro = None
         self.ultimo_stt = None
@@ -505,11 +568,58 @@ class Ouvido:
         # Estado da recalibração automática.
         self._ultimo_comando_ok = 0.0         # timestamp do último comando reconhecido
         self._nao_entendi_consecutivos = 0    # contador de "não entendi" seguidos
+        self.afe = None
+        if _afe is not None and getattr(config, "AFE_ATIVO", True):
+            try:
+                self.afe = _afe.AudioFrontEnd(
+                    falando_event=falando,
+                    capturando_event=self.capturando,
+                    on_barge_in=self._ao_barge_in,
+                )
+            except Exception:
+                self.afe = None
+
+    @property
+    def pausado(self):
+        return getattr(self, "_pausado", None)
+
+    @pausado.setter
+    def pausado(self, evento):
+        self._pausado = evento
+        afe = getattr(self, "afe", None)
+        if afe is not None and evento is not None:
+            afe.pausado_event = evento
+
+    def _ao_barge_in(self, _tipo: str, _pcm) -> None:
+        parar_fala()
+
+    def preparar_afe(self) -> None:
+        """Pré-carrega/baixa modelos do AFE na RAM sem abrir o microfone."""
+        afe = getattr(self, "afe", None)
+        if afe is not None:
+            afe.iniciar_provisionamento()
+
+    def iniciar_afe(self) -> None:
+        """Abre a captura contínua e o loopback WASAPI (chamar apenas após desbloquear)."""
+        afe = getattr(self, "afe", None)
+        if afe is None:
+            return
+        idx = self._capture_device()
+        afe.set_device(idx)
+        afe.iniciar_captura(device_index=idx, on_barge_in=self._ao_barge_in)
+
+    def parar_afe(self) -> None:
+        afe = getattr(self, "afe", None)
+        if afe is not None:
+            afe.parar_captura()
 
     def set_device(self, device_index, device_id=None):
         self.device_index = device_index
         self.device_id = device_id
         self.device_generation += 1
+        afe = getattr(self, "afe", None)
+        if afe is not None:
+            afe.set_device(device_index)
 
     def _capture_device(self):
         if self.device_id is not None:
@@ -586,6 +696,14 @@ class Ouvido:
         return None
 
     def calibrar(self):
+        afe = getattr(self, "afe", None)
+        if afe is not None and self.capturando.is_set():
+            self.nivel_atual = float(getattr(afe, "nivel_atual", 0.0))
+            ambiente = self.nivel_atual
+            self.limiar = getattr(config, "LIMIAR_VOZ", 0) or max(300.0, ambiente * 3)
+            self._ultimo_comando_ok = time.time()
+            self._nao_entendi_consecutivos = 0
+            return
         self.capturando.set()
         try:
             d = sd.rec(int(1.5 * self.FS), samplerate=self.FS, channels=1, dtype="int16",
@@ -621,6 +739,8 @@ class Ouvido:
     def recalibrar_se_necessario(self):
         """Recalibra o limiar se precisar, mas nunca enquanto o ULTRON está falando."""
         import voz as _voz  # falando é um atributo de módulo
+        if getattr(self, "afe", None) is not None and getattr(self.afe, "modo_neural_ativo", False):
+            return False
         if _voz.falando.is_set():
             return False
         if not self.precisa_recalibrar():
@@ -760,33 +880,63 @@ class Ouvido:
             seguranca.log.warning(f"Reconhecimento manual falhou ({type(e).__name__})")
             return None
 
-    def escutar_detalhado(self, espera=60):
+    def _capturar_pcm(self, espera=60, curto=False, exigir_wake=False):
+        """Usa o AudioFrontEnd contínuo quando ativo; caso contrário, cai para _gravar."""
+        afe = getattr(self, "afe", None)
+        if afe is not None and not getattr(self, "_forcar_gravar_legado", False):
+            silencio = getattr(config, "SILENCIO_FIM", 1.3)
+            res = afe.aguardar_enunciado(
+                espera=espera,
+                silencio_fim=silencio,
+                exigir_wake=exigir_wake,
+                curto=curto,
+            )
+            self.nivel_atual = float(getattr(afe, "nivel_atual", 0.0))
+            if res.get("erro"):
+                self.ultimo_erro = res["erro"]
+            return res.get("pcm"), {
+                "wake_detectado": bool(res.get("wake_detectado")),
+                "comando_direto": bool(res.get("comando_direto")),
+            }
+        if curto:
+            pcm = self._gravar(espera, max_seg=5, silencio=0.7, min_voz=2, fator=0.8)
+        else:
+            pcm = self._gravar(espera)
+        return pcm, {"wake_detectado": False, "comando_direto": False}
+
+    def escutar_detalhado(self, espera=60, exigir_wake=False):
         """Como escutar(), mas devolve todas as interpretações (para confirmar incerteza).
 
         Retorna {"texto": str|None, "alternativas": [str], "erro": str|None,
                  "confianca": dict|None}. Nada aqui executa ação: quem decide é o núcleo.
         """
-        pcm = self._gravar(espera)
+        def _com_meta(d: dict) -> dict:
+            if meta.get("wake_detectado") or meta.get("comando_direto"):
+                d["wake_detectado"] = bool(meta.get("wake_detectado"))
+                d["comando_direto"] = bool(meta.get("comando_direto"))
+            return d
+
+        pcm, meta = self._capturar_pcm(espera=espera, curto=False, exigir_wake=exigir_wake)
         if not pcm:
-            return {"texto": None, "alternativas": [], "erro": None, "confianca": None}
+            return _com_meta({"texto": None, "alternativas": [], "erro": None, "confianca": None})
         nativo_tentado = False
         if self._motor_escuta() == "nativo" or self._preferir_nativo():
             nativo = self._tentar_nativo(pcm)
             nativo_tentado = True
             if nativo:
-                return {"texto": nativo, "alternativas": [nativo], "erro": None,
-                        "confianca": None}
+                return _com_meta({"texto": nativo, "alternativas": [nativo], "erro": None,
+                                  "confianca": None})
         remoto = self._tentar_remoto(pcm)
         if remoto:
             texto = remoto.get("texto")
             if not texto:
                 # Silêncio confirmado pela Groq: nada para o Google acrescentar.
-                return {"texto": None, "alternativas": [], "erro": None,
-                        "confianca": remoto.get("confianca")}
-            return {"texto": texto,
-                    "alternativas": remoto.get("alternativas") or [texto],
-                    "erro": None,
-                    "confianca": remoto.get("confianca")}
+                return _com_meta({"texto": None, "alternativas": [], "erro": None,
+                                  "confianca": remoto.get("confianca")})
+            return _com_meta({"texto": texto,
+                              "alternativas": remoto.get("alternativas") or [texto],
+                              "erro": None,
+                              "confianca": remoto.get("confianca")})
         audio = sr.AudioData(pcm, self.FS, 2)
         try:
             r = self.rec.recognize_google(audio, language="pt-BR", show_all=True)
@@ -797,29 +947,26 @@ class Ouvido:
                     if frase and frase not in alternativas:
                         alternativas.append(frase)
             self.ultimo_erro = None
-            return {"texto": alternativas[0] if alternativas else None,
-                    "alternativas": alternativas[:3], "erro": None, "confianca": None}
+            return _com_meta({"texto": alternativas[0] if alternativas else None,
+                              "alternativas": alternativas[:3], "erro": None, "confianca": None})
         except sr.UnknownValueError:
             self.ultimo_erro = None
-            return {"texto": None, "alternativas": [], "erro": ERROS["nao_entendi"],
-                    "confianca": None}
+            return _com_meta({"texto": None, "alternativas": [], "erro": ERROS["nao_entendi"],
+                              "confianca": None})
         except sr.RequestError:
             if not nativo_tentado:
                 nativo = self._tentar_nativo(pcm)
                 if nativo:
-                    return {"texto": nativo, "alternativas": [nativo], "erro": None,
-                            "confianca": None}
+                    return _com_meta({"texto": nativo, "alternativas": [nativo], "erro": None,
+                                      "confianca": None})
             self.ultimo_erro = ERROS["sem_internet"]
-            return {"texto": None, "alternativas": [], "erro": ERROS["sem_internet"],
-                    "confianca": None}
+            return _com_meta({"texto": None, "alternativas": [], "erro": ERROS["sem_internet"],
+                              "confianca": None})
 
-    def escutar(self, espera=60, curto=False):
+    def escutar(self, espera=60, curto=False, exigir_wake=False):
         """Espera você falar. Devolve o texto (None se nada foi entendido).
         curto=True: modo para respostas rápidas como 'sim'/'não'; devolve uma LISTA de interpretações."""
-        if curto:
-            pcm = self._gravar(espera, max_seg=5, silencio=0.7, min_voz=2, fator=0.8)
-        else:
-            pcm = self._gravar(espera)
+        pcm, _meta = self._capturar_pcm(espera=espera, curto=curto, exigir_wake=exigir_wake)
         if not pcm:
             return None
         nativo_tentado = False

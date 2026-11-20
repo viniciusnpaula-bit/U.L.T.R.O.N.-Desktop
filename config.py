@@ -3,10 +3,291 @@ import os
 from pathlib import Path
 from dotenv import load_dotenv
 
+os.environ.setdefault("OPENBLAS_NUM_THREADS", "1")
+
+import shutil
+import sqlite3
+import time
+
+# ------------------------------------------------------------- 1. Política de Diretórios
 BASE = Path(__file__).resolve().parent
-load_dotenv(BASE / ".env")
-for _d in ("logs", "dados"):
-    (BASE / _d).mkdir(exist_ok=True)
+
+
+def _determinar_modo() -> str:
+    if os.environ.get("ULTRON_PORTABLE") == "1" or (BASE / ".portable").is_file():
+        return "portatil"
+    if os.environ.get("ULTRON_INSTALLED") == "1":
+        return "instalado"
+    if os.environ.get("ULTRON_DEV") == "1" or os.environ.get("PYTEST_CURRENT_TEST") or (BASE / ".git").is_dir():
+        return "desenvolvimento"
+    base_str = str(BASE).lower()
+    if "\\programs\\" in base_str or "\\program files" in base_str:
+        return "instalado"
+    return "instalado"
+
+
+MODO_EXECUCAO = _determinar_modo()
+DIR_INSTALACAO = BASE
+
+_env_data = os.environ.get("ULTRON_DATA_DIR")
+_env_config = os.environ.get("ULTRON_CONFIG_DIR")
+_env_logs = os.environ.get("ULTRON_LOGS_DIR")
+
+if _env_data:
+    DIR_DADOS = Path(_env_data).resolve()
+elif MODO_EXECUCAO in ("desenvolvimento", "portatil"):
+    DIR_DADOS = BASE / "dados"
+else:
+    local_app_data = os.environ.get("LOCALAPPDATA") or str(Path.home() / "AppData" / "Local")
+    DIR_DADOS = Path(local_app_data) / "ULTRON"
+
+if _env_config:
+    DIR_CONFIG = Path(_env_config).resolve()
+elif MODO_EXECUCAO in ("desenvolvimento", "portatil"):
+    DIR_CONFIG = BASE
+else:
+    app_data = os.environ.get("APPDATA") or str(Path.home() / "AppData" / "Roaming")
+    DIR_CONFIG = Path(app_data) / "ULTRON"
+
+if _env_logs:
+    DIR_LOGS = Path(_env_logs).resolve()
+elif MODO_EXECUCAO in ("desenvolvimento", "portatil"):
+    DIR_LOGS = BASE / "logs"
+else:
+    DIR_LOGS = DIR_DADOS / "logs"
+
+# Criação segura dos diretórios de escrita (somente no perfil do usuário / dados mutáveis)
+for _d in (DIR_DADOS, DIR_CONFIG, DIR_LOGS):
+    try:
+        _d.mkdir(parents=True, exist_ok=True)
+    except OSError:
+        pass
+
+# Caminhos específicos centralizados
+ARQUIVO_BANCO = DIR_DADOS / "ultron.db"
+ARQUIVO_COFRE = DIR_DADOS / "cofre.json"
+ARQUIVO_CHAVE_COFRE = DIR_DADOS / ".cofre.chave"
+ARQUIVO_MOBILE_PAIRING = DIR_DADOS / "mobile_pairing.json"
+DIR_SKILLS = DIR_DADOS / "skills"
+ARQUIVO_FLUXOS = DIR_DADOS / "fluxos.json"
+ARQUIVO_SESSAO = DIR_DADOS / "sessao.json"
+ARQUIVO_DESFAZER_DIR = DIR_DADOS / "desfazer"
+ARQUIVO_ENV = DIR_CONFIG / ".env"
+
+
+def reconfigurar_diretorios() -> dict[str, Path]:
+    """Reavalia as variáveis de ambiente e atualiza todos os caminhos de dados e configuração."""
+    global MODO_EXECUCAO, DIR_INSTALACAO, DIR_DADOS, DIR_CONFIG, DIR_LOGS
+    global ARQUIVO_BANCO, ARQUIVO_COFRE, ARQUIVO_CHAVE_COFRE, ARQUIVO_MOBILE_PAIRING, DIR_SKILLS
+    global ARQUIVO_FLUXOS, ARQUIVO_SESSAO, ARQUIVO_DESFAZER_DIR, ARQUIVO_ENV
+
+    MODO_EXECUCAO = _determinar_modo()
+    DIR_INSTALACAO = BASE
+
+    _env_data = os.environ.get("ULTRON_DATA_DIR")
+    _env_config = os.environ.get("ULTRON_CONFIG_DIR")
+    _env_logs = os.environ.get("ULTRON_LOGS_DIR")
+
+    if _env_data:
+        DIR_DADOS = Path(_env_data).resolve()
+    elif MODO_EXECUCAO in ("desenvolvimento", "portatil"):
+        DIR_DADOS = BASE / "dados"
+    else:
+        local_app_data = os.environ.get("LOCALAPPDATA") or str(Path.home() / "AppData" / "Local")
+        DIR_DADOS = Path(local_app_data) / "ULTRON"
+
+    if _env_config:
+        DIR_CONFIG = Path(_env_config).resolve()
+    elif MODO_EXECUCAO in ("desenvolvimento", "portatil"):
+        DIR_CONFIG = BASE
+    else:
+        app_data = os.environ.get("APPDATA") or str(Path.home() / "AppData" / "Roaming")
+        DIR_CONFIG = Path(app_data) / "ULTRON"
+
+    if _env_logs:
+        DIR_LOGS = Path(_env_logs).resolve()
+    elif MODO_EXECUCAO in ("desenvolvimento", "portatil"):
+        DIR_LOGS = BASE / "logs"
+    else:
+        DIR_LOGS = DIR_DADOS / "logs"
+
+    for _d in (DIR_DADOS, DIR_CONFIG, DIR_LOGS):
+        try:
+            _d.mkdir(parents=True, exist_ok=True)
+        except OSError:
+            pass
+
+    ARQUIVO_BANCO = DIR_DADOS / "ultron.db"
+    ARQUIVO_COFRE = DIR_DADOS / "cofre.json"
+    ARQUIVO_CHAVE_COFRE = DIR_DADOS / ".cofre.chave"
+    ARQUIVO_MOBILE_PAIRING = DIR_DADOS / "mobile_pairing.json"
+    DIR_SKILLS = DIR_DADOS / "skills"
+    ARQUIVO_FLUXOS = DIR_DADOS / "fluxos.json"
+    ARQUIVO_SESSAO = DIR_DADOS / "sessao.json"
+    ARQUIVO_DESFAZER_DIR = DIR_DADOS / "desfazer"
+    ARQUIVO_ENV = DIR_CONFIG / ".env"
+
+    return {
+        "instalacao": DIR_INSTALACAO,
+        "dados": DIR_DADOS,
+        "config": DIR_CONFIG,
+        "logs": DIR_LOGS,
+    }
+
+
+def migrar_dados_legados(forcar: bool = False) -> dict:
+    """Migra com segurança os dados existentes no diretório BASE para DIR_DADOS e DIR_CONFIG.
+
+    Requisitos:
+    - Backup prévio antes de qualquer alteração
+    - Cópia transacional de SQLite com PRAGMA integrity_check
+    - Não sobrescreve dados de destino existentes
+    - Não apaga a origem
+    - Idempotente (registra estado em .migracao.json)
+    """
+    relatorio = {"status": "ok", "migrados": [], "conflitos": [], "erros": []}
+
+    if DIR_DADOS.resolve() == (BASE / "dados").resolve() and DIR_CONFIG.resolve() == BASE.resolve() and not forcar:
+        return {**relatorio, "status": "ignorado_mesmo_diretorio"}
+
+    marcador = DIR_DADOS / ".migracao.json"
+    if marcador.is_file() and not forcar:
+        return {**relatorio, "status": "ja_migrado"}
+
+    backup_dir = DIR_DADOS / "backups" / f"migracao-pre-{int(time.time())}"
+    backup_criado = False
+
+    def _assegurar_backup():
+        nonlocal backup_criado
+        if not backup_criado:
+            backup_dir.mkdir(parents=True, exist_ok=True)
+            backup_criado = True
+
+    try:
+        DIR_DADOS.mkdir(parents=True, exist_ok=True)
+        DIR_CONFIG.mkdir(parents=True, exist_ok=True)
+    except OSError:
+        pass
+
+    # 1. Migração do .env para DIR_CONFIG
+    env_legado = BASE / ".env"
+    if env_legado.is_file() and env_legado.resolve() != ARQUIVO_ENV.resolve():
+        if not ARQUIVO_ENV.exists():
+            _assegurar_backup()
+            try:
+                ARQUIVO_ENV.parent.mkdir(parents=True, exist_ok=True)
+                shutil.copy2(env_legado, ARQUIVO_ENV)
+                relatorio["migrados"].append(str(ARQUIVO_ENV.name))
+            except OSError as err:
+                relatorio["erros"].append(f".env: {err}")
+        else:
+            relatorio["conflitos"].append(str(ARQUIVO_ENV.name))
+
+    # 2. Migração do banco SQLite (ultron.db)
+    banco_legado = BASE / "dados" / "ultron.db"
+    if banco_legado.is_file() and banco_legado.resolve() != ARQUIVO_BANCO.resolve():
+        if not ARQUIVO_BANCO.exists():
+            _assegurar_backup()
+            conn_orig = None
+            conn_dest = None
+            try:
+                ARQUIVO_BANCO.parent.mkdir(parents=True, exist_ok=True)
+                conn_orig = sqlite3.connect(str(banco_legado), timeout=5.0)
+                conn_dest = sqlite3.connect(str(ARQUIVO_BANCO), timeout=5.0)
+                with conn_dest:
+                    conn_orig.backup(conn_dest)
+
+                integrity = conn_dest.execute("PRAGMA integrity_check").fetchone()[0]
+                if integrity != "ok":
+                    raise RuntimeError(f"Integridade SQLite corrompida: {integrity}")
+                relatorio["migrados"].append(str(ARQUIVO_BANCO.name))
+            except Exception as exc:
+                relatorio["erros"].append(f"ultron.db: {exc}")
+                if conn_dest:
+                    try:
+                        conn_dest.close()
+                    except Exception:
+                        pass
+                    conn_dest = None
+                if conn_orig:
+                    try:
+                        conn_orig.close()
+                    except Exception:
+                        pass
+                    conn_orig = None
+                if ARQUIVO_BANCO.exists():
+                    try:
+                        ARQUIVO_BANCO.unlink()
+                    except OSError:
+                        pass
+            finally:
+                if conn_orig:
+                    try:
+                        conn_orig.close()
+                    except Exception:
+                        pass
+                if conn_dest:
+                    try:
+                        conn_dest.close()
+                    except Exception:
+                        pass
+        else:
+            relatorio["conflitos"].append(str(ARQUIVO_BANCO.name))
+
+    # 3. Migração de arquivos de configuração em dados/ (cofre, sessao, fluxos, pareamento mobile)
+    for nome in (".cofre.chave", "cofre.json", "fluxos.json", "sessao.json", "mobile_pairing.json"):
+        origem = BASE / "dados" / nome
+        destino = DIR_DADOS / nome
+        if origem.is_file() and origem.resolve() != destino.resolve():
+            if not destino.exists():
+                _assegurar_backup()
+                try:
+                    destino.parent.mkdir(parents=True, exist_ok=True)
+                    shutil.copy2(origem, destino)
+                    relatorio["migrados"].append(nome)
+                except OSError as err:
+                    relatorio["erros"].append(f"{nome}: {err}")
+            else:
+                relatorio["conflitos"].append(nome)
+
+    # 4. Migração de Skills (dados/skills)
+    skills_legadas = BASE / "dados" / "skills"
+    if skills_legadas.is_dir() and skills_legadas.resolve() != DIR_SKILLS.resolve():
+        _assegurar_backup()
+        try:
+            shutil.copytree(skills_legadas, DIR_SKILLS, dirs_exist_ok=True)
+            relatorio["migrados"].append("skills")
+        except OSError as err:
+            relatorio["erros"].append(f"skills: {err}")
+
+    try:
+        import json
+        payload = {
+            "status": "concluido" if not relatorio["erros"] else "parcial",
+            "timestamp": time.time(),
+            "migrados": relatorio["migrados"],
+            "conflitos": relatorio["conflitos"],
+            "erros": relatorio["erros"],
+            "backup": str(backup_dir) if backup_criado else None,
+        }
+        marcador.write_text(json.dumps(payload, indent=2), encoding="utf-8")
+    except OSError:
+        pass
+
+    return relatorio
+
+
+if MODO_EXECUCAO == "instalado":
+    try:
+        migrar_dados_legados()
+    except Exception:
+        pass
+
+# Carregamento do .env (prioriza o do perfil DIR_CONFIG, com fallback para o de BASE)
+if ARQUIVO_ENV.is_file():
+    load_dotenv(ARQUIVO_ENV)
+if (BASE / ".env").is_file() and (BASE / ".env").resolve() != ARQUIVO_ENV.resolve():
+    load_dotenv(BASE / ".env")
 
 
 def _env(nome, padrao=""):
@@ -68,26 +349,35 @@ URLS = {
 VOZ = _env("VOZ", "pt-BR-AntonioNeural")
 VOZ_PITCH = _env("VOZ_PITCH", "-12Hz")
 VOZ_RATE = _env("VOZ_RATE", "+0%")
+# Liga/desliga a síntese de voz no Desktop e os anúncios falados do agendador.
+VOZ_ATIVO = (_env("VOZ_ATIVO", "1") or "1").lower() not in (
+    "0", "nao", "não", "false", "off")
+VOZ_NOTIFICACOES = (_env("VOZ_NOTIFICACOES", "1") or "1").lower() not in (
+    "0", "nao", "não", "false", "off")
 # Voz clonada na nuvem (opcional): Fish Audio. Sem chave ou id, usa só o Edge TTS.
 VOZ_NUVEM_CHAVE = _env("VOZ_NUVEM_CHAVE")
 VOZ_NUVEM_ID = _env("VOZ_NUVEM_ID")
 VOZ_NUVEM_MODELO = _env("VOZ_NUVEM_MODELO", "s2.1-pro-free")
-LIMIAR_VOZ = float(_env("LIMIAR_VOZ", "0") or 0)
+def _num_env(nome, padrao, tipo=float):
+    try:
+        return tipo(_env(nome, str(padrao)) or padrao)
+    except ValueError:
+        return padrao
+
+
+LIMIAR_VOZ = max(0.0, _num_env("LIMIAR_VOZ", 0.0))
 # Fração do limiar calibrado que já conta como fala (0.35 capta fala a 30-50 cm
 # sem disparar com ruído estável). Suba para 0.5+ em ambientes muito ruidosos.
 try:
     LIMIAR_VOZ_FATOR = min(1.0, max(0.1, float(_env("LIMIAR_VOZ_FATOR", "0.35") or 0.35)))
 except ValueError:
     LIMIAR_VOZ_FATOR = 0.35
-SILENCIO_FIM = float(_env("SILENCIO_FIM", "0.9") or 0.9)   # segundos de silêncio que encerram sua fala
+SILENCIO_FIM = max(0.1, _num_env("SILENCIO_FIM", 1.3))   # segundos de silêncio que encerram sua fala
+AFE_ATIVO = (_env("AFE_ATIVO", "1") or "1").lower() not in (
+    "0", "nao", "não", "false", "off")
 REASONING = _env("REASONING_EFFORT", "low").lower()        # "low" = IA mais rápida; vazio desliga
 # Retry das chamadas de IA: tentativas por provedor, backoff exponencial com
 # jitter e um teto de tempo total por provedor (o Ultron responde por voz).
-def _num_env(nome, padrao, tipo=float):
-    try:
-        return tipo(_env(nome, str(padrao)) or padrao)
-    except ValueError:
-        return padrao
 
 IA_TENTATIVAS = max(1, _num_env("IA_TENTATIVAS", 4, int))
 IA_BACKOFF_BASE = max(0.0, _num_env("IA_BACKOFF_BASE", 1.0))
@@ -155,9 +445,9 @@ except ValueError:
 
 # Segundos em que uma fala sem "Ei, Ultron" ainda é aceita como comando (0 desliga)
 try:
-    JANELA_SEGUIMENTO = max(0.0, float(_env("JANELA_SEGUIMENTO", "6") or 6))
+    JANELA_SEGUIMENTO = max(0.0, float(_env("JANELA_SEGUIMENTO", "15") or 15))
 except ValueError:
-    JANELA_SEGUIMENTO = 6.0
+    JANELA_SEGUIMENTO = 15.0
 # Bloqueio automático da sessão após N minutos sem uso (0 desliga).
 try:
     SESSAO_MINUTOS = max(0.0, float(_env("ULTRON_SESSAO_MINUTOS", "15") or 15))
@@ -182,11 +472,29 @@ BRIEFING_ATIVO = (_env("BRIEFING_ATIVO", "0") or "0").lower() not in (
 BRIEFING_HORA = _env("BRIEFING_HORA", "08:00")
 CIDADE = _env("CIDADE", "São Paulo")
 
+# U.L.T.R.O.N. Mobile (servidor HTTP LAN autenticado via HMAC-SHA256).
+MOBILE_ENABLED = (_env("ULTRON_MOBILE_ENABLED", "1") or "1").lower() not in (
+    "0", "nao", "não", "false", "off")
+MOBILE_HOST = _env("ULTRON_MOBILE_HOST", "0.0.0.0") or "0.0.0.0"
+MOBILE_PORT = max(1, min(65535, _num_env("ULTRON_MOBILE_PORT", 8765, int)))
+MOBILE_CLOCK_SKEW_S = max(5, min(300, _num_env("ULTRON_MOBILE_CLOCK_SKEW_S", 60, int)))
+MOBILE_ALLOW_NON_PRIVATE = (_env("ULTRON_MOBILE_ALLOW_NON_PRIVATE_CLIENTS", "0") or "0").lower() in (
+    "1", "sim", "true", "on")
+
 # O cofre cifrado (dados/cofre.json) tem precedência sobre o .env. Falha aqui nunca
 # impede o app de abrir: o .env continua valendo.
 try:
     import cofre as _cofre
-    _cofre.aplicar_na_config()
-    _cofre._redacao_extra()
+    if hasattr(_cofre, "aplicar_na_config"):
+        _cofre.aplicar_na_config()
+    if hasattr(_cofre, "_redacao_extra"):
+        _cofre._redacao_extra()
 except Exception as _erro:      # noqa: BLE001 - inicialização não pode quebrar
-    print(f"[cofre] não foi possível aplicar as chaves guardadas ({type(_erro).__name__})")
+    pass
+
+try:
+    import mobile_pairing as _mobile_pairing
+    if hasattr(_mobile_pairing, "registrar_redacao"):
+        _mobile_pairing.registrar_redacao()
+except Exception:      # noqa: BLE001 - inicialização não pode quebrar
+    pass

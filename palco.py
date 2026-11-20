@@ -23,9 +23,9 @@ import time
 from pathlib import Path
 from urllib.parse import parse_qs, urlparse
 
-from config import BASE
+import config
 
-PALCO_DIR = BASE / "dados" / "palco"
+PALCO_DIR = getattr(config, "DIR_DADOS", config.BASE / "dados") / "palco"
 MANIFEST = PALCO_DIR / "manifest.json"
 
 _MAX_TEXTO = 20_000
@@ -275,6 +275,87 @@ def _mostrar_local(tipo: str, alvo: str, titulo: str) -> dict:
     return {"ok": True, "mensagem": mensagem, "palco": dados}
 
 
+def _normalizar_noticias(alvo: str, titulo: str) -> dict | None:
+    """Converte payload JSON (ou lista de manchetes) em estado estruturado de notícias para o palco."""
+    bruto = str(alvo or "").strip()
+    if bruto.startswith("[PALCO_NOTICIAS]"):
+        bruto = bruto[len("[PALCO_NOTICIAS]"):].strip()
+    tema = ""
+    itens_brutos = []
+    if bruto.startswith(("{", "[")):
+        try:
+            carregado = json.loads(bruto)
+            if isinstance(carregado, dict):
+                tema = _titulo_limpo(carregado.get("tema") or "", "")
+                itens_brutos = carregado.get("itens") or []
+            elif isinstance(carregado, list):
+                itens_brutos = carregado
+        except Exception:
+            itens_brutos = []
+    if not isinstance(itens_brutos, list) or not itens_brutos:
+        for linha in bruto.splitlines():
+            limpa = linha.lstrip("-• ").strip()
+            if limpa:
+                itens_brutos.append({"titulo": limpa})
+
+    itens = []
+    imagens_vistas: set[str] = set()
+    for entry in itens_brutos[:8]:
+        if isinstance(entry, str):
+            entry = {"titulo": entry}
+        if not isinstance(entry, dict):
+            continue
+        titulo_item = _titulo_limpo(entry.get("titulo") or "")
+        if not titulo_item:
+            continue
+        resumo = _texto_limpo(entry.get("resumo") or "")[:240].strip()
+        url_item = ""
+        url_raw = str(entry.get("url") or "").strip()
+        if url_raw.lower().startswith(("http://", "https://")):
+            try:
+                url_item = _url_remota(url_raw)
+            except Exception:
+                url_item = ""
+        img_item = ""
+        img_raw = str(entry.get("imagem") or "").strip()
+        if img_raw.lower().startswith(("http://", "https://")):
+            try:
+                img_segura = _url_remota(img_raw)
+                if img_segura not in imagens_vistas:
+                    imagens_vistas.add(img_segura)
+                    img_item = img_segura
+            except Exception:
+                img_item = ""
+        fonte_item = _titulo_limpo(entry.get("fonte") or "", "")
+        if not fonte_item and url_item:
+            host = (urlparse(url_item).hostname or "").lower()
+            fonte_item = host[4:] if host.startswith("www.") else host
+        publicado = _titulo_limpo(entry.get("publicado") or "", "")
+        itens.append({
+            "titulo": titulo_item,
+            "resumo": resumo,
+            "imagem": img_item,
+            "url": url_item,
+            "fonte": fonte_item,
+            "publicado": publicado,
+        })
+
+    if not itens:
+        return None
+    titulo_palco = _titulo_limpo(titulo, f"Notícias · {tema}" if tema else "Notícias")
+    return {
+        "id": secrets.token_hex(16),
+        "tipo": "noticias",
+        "titulo": titulo_palco,
+        "tema": tema or "geral",
+        "itens": itens,
+        "fonte": "",
+        "url": itens[0]["url"],
+        "embed": False,
+        "nota": f"{len(itens)} matéria(s) · selecione um cartão para trocar",
+    }
+
+
 def mostrar(tipo: str = "auto", alvo: str = "", titulo: str = "") -> dict:
     """Mostra algo no palco. Devolve um dicionário com ok/mensagem/erro."""
     tipo = str(tipo or "auto").strip().lower()
@@ -283,6 +364,12 @@ def mostrar(tipo: str = "auto", alvo: str = "", titulo: str = "") -> dict:
 
     if tipo in {"fechar", "fechar_palco", "limpar"}:
         return fechar()
+    if tipo in {"noticias", "noticia"}:
+        dados = _normalizar_noticias(alvo, titulo)
+        if not dados:
+            return _erro("Não encontrei notícias válidas para mostrar no palco.")
+        _publicar(dados)
+        return {"ok": True, "mensagem": f"{len(dados['itens'])} notícias exibidas no palco.", "palco": dados}
     if tipo == "texto":
         conteudo = _texto_limpo(alvo)
         if not conteudo.strip():
@@ -305,7 +392,7 @@ def mostrar(tipo: str = "auto", alvo: str = "", titulo: str = "") -> dict:
     remoto = alvo.lower().startswith(("http://", "https://"))
     if tipo == "auto":
         if remoto:
-            tipo = "site"
+            tipo = "video" if (_youtube_id(alvo) or _vimeo_id(alvo)) else "site"
         else:
             try:
                 caminho_alvo = _caminho(alvo)
@@ -317,6 +404,9 @@ def mostrar(tipo: str = "auto", alvo: str = "", titulo: str = "") -> dict:
                 tipo = _tipo_por_extensao(caminho_alvo)
                 if not tipo:
                     return _erro("Não reconheci o tipo. Diga vídeo, imagem, pdf, site ou texto.")
+
+    if tipo == "site" and remoto and (_youtube_id(alvo) or _vimeo_id(alvo)):
+        tipo = "video"
 
     if tipo == "site":
         try:

@@ -67,6 +67,31 @@ class FalarPartesTests(unittest.TestCase):
         voz._parar.clear()
         self.assertEqual(len(tocadas), 1)
 
+    def test_fallback_offline_preserva_frases_restantes_do_gerador(self):
+        import voz
+
+        faladas = []
+
+        def partes():
+            yield "Primeira."
+            yield "Segunda."
+            yield "Terceira."
+
+        async def falha(*_args):
+            raise RuntimeError("sem rede")
+
+        with patch.object(voz, "_sintetizar", falha), \
+             patch.object(voz, "_falar_offline", lambda texto: faladas.append(texto)), \
+             patch.object(voz.time, "sleep", lambda *_a: None), \
+             patch.object(voz, "glob"):
+            completo = voz.falar_partes(partes(), eco=0)
+
+        self.assertEqual(len(faladas), 1)
+        self.assertIn("Primeira.", faladas[0])
+        self.assertIn("Segunda.", faladas[0])
+        self.assertIn("Terceira.", faladas[0])
+        self.assertIn("Terceira.", completo)
+
 
 class StreamDeFrasesTests(unittest.TestCase):
     """cerebro._stream_frases entrega frases completas, sem depender do provedor real."""

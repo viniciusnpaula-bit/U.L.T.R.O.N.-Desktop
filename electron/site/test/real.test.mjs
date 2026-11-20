@@ -239,6 +239,7 @@ test('voz e jeito: um painel só, com abas, cartões e persistência', async () 
   const site = new URL('../', import.meta.url);
   const html = await readFile(fileURLToPath(new URL('index.html', site)), 'utf8');
   const app = await readFile(fileURLToPath(new URL('app.js', site)), 'utf8');
+  const painelPersonalidade = await readFile(fileURLToPath(new URL('src/personalidade-painel.js', site)), 'utf8');
   const css = await readFile(fileURLToPath(new URL('style.css', site)), 'utf8');
 
   // o bloco antigo de personalidade não ficou duplicado
@@ -260,15 +261,15 @@ test('voz e jeito: um painel só, com abas, cartões e persistência', async () 
   assert.match(html, /id="greetingToggle"[^>]*role="switch"/);
   assert.match(app, /function renderVoiceCards/);
   assert.match(app, /function escolherVoz/);
-  assert.match(app, /function renderStyleCards/);
-  assert.match(app, /function escolherJeito/);
-  assert.match(app, /function alternarSaudacao/);
-  assert.match(app, /personalidadeSalvar\(dados\)/);
-  assert.match(app, /dados\.usuario = dadosDoUsuario\(\)/);
-  assert.match(app, /dados\.saudacao = saudacaoLigada/);
+  assert.match(painelPersonalidade, /function renderStyleCards/);
+  assert.match(painelPersonalidade, /function escolherJeito/);
+  assert.match(painelPersonalidade, /function alternarSaudacao/);
+  assert.match(painelPersonalidade, /personalidadeSalvar\(dados\)/);
+  assert.match(painelPersonalidade, /dados\.usuario = dadosDoUsuario\(\)/);
+  assert.match(painelPersonalidade, /dados\.saudacao = saudacaoLigada/);
   // alternar a saudação não pode repintar/apagar os campos ainda não aplicados
-  assert.match(app, /personalidadeSalvar\(\{ saudacao: saudacaoLigada \}\)/);
-  assert.match(app, /if \(usuario && salvo\.usuario\) preencherUsuario/);
+  assert.match(painelPersonalidade, /personalidadeSalvar\(\{ saudacao: saudacaoLigada \}\)/);
+  assert.match(painelPersonalidade, /if \(usuario && salvo\.usuario\) preencherUsuario/);
 
   // o estilo novo existe e marca a escolha sem recolorir o resto
   assert.match(css, /\.seg-tabs\s*\{/);
@@ -314,4 +315,26 @@ test('prévia: todo id da tela real existe na prévia', async () => {
   assert.deepEqual(faltando, []);
   assert.match(preview, /preview-mock\.js/);
   assert.doesNotMatch(real, /preview-mock\.js/);
+});
+
+test('connect limpa e não vaza timer quando health falha', async () => {
+  const { bridge } = makeBridge();
+  bridge.health = async () => { throw new Error('offline'); };
+  const events = [];
+  const transport = new RealTransport({ bridge, onEvent: event => events.push(event) });
+  await assert.rejects(() => transport.connect({ poll: true }), /offline/);
+  assert.equal(transport.timer, null);
+  assert.equal(transport.online, false);
+  assert.ok(events.some(event => event.event === 'ULTRON_OFFLINE'));
+});
+
+test('ciclo de vida e limpeza de estado em app.js, orb.js e main.js', async () => {
+  const site = new URL('../', import.meta.url);
+  const app = await readFile(fileURLToPath(new URL('app.js', site)), 'utf8');
+  const orb = await readFile(fileURLToPath(new URL('src/orb.js', site)), 'utf8');
+  const main = await readFile(fileURLToPath(new URL('../main.js', site)), 'utf8');
+  assert.match(app, /catch \(error\) \{\s*if \(state\.writing > 0\) state\.writing -= 1;/);
+  assert.match(app, /beforeunload[\s\S]*clearInterval\(clockTimer\)/);
+  assert.match(orb, /destruir\(\)\s*\{[\s\S]*observador\.disconnect\(\)/);
+  assert.match(main, /miniWindow\.on\('closed'[\s\S]*!quitting && !mainWindow\.isVisible\(\)\) mainWindow\.close\(\)/);
 });

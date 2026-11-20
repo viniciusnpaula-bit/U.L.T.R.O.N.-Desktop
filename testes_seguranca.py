@@ -70,6 +70,7 @@ class Base(unittest.TestCase):
         CHAMADAS.clear()
         escrever_config()
         config.PIN = ""
+        config.PIN_HASH = ""
         sessao.bloquear()          # a ordem dos testes nunca deixa uma sessão aberta vazar
 
     def rodar(self, nome, args, conf, origem="teste"):
@@ -502,6 +503,7 @@ class T17_SessaoDesbloqueada(Base):
     def tearDown(self):
         sessao.bloquear()
         config.PIN = ""
+        config.PIN_HASH = ""
 
     def test_alto_local_reversivel_executa_sem_confirmacao(self):
         c = Conf(False)

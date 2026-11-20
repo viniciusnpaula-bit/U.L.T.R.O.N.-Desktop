@@ -52,6 +52,8 @@ $RECYCLE.BIN/
 *.dmg
 installer/output/
 installer/build/
+installer/dist/
+runtime/
 
 # --- Testes e cobertura ---
 htmlcov/

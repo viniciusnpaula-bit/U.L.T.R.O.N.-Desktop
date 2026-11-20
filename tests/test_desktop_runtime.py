@@ -139,6 +139,36 @@ class RuntimeTests(unittest.TestCase):
             time.sleep(0.005)
         return collected
 
+    def test_direct_workflow_uses_serial_queue_without_calling_the_llm_and_deduplicates(self):
+        started = threading.Event()
+        release = threading.Event()
+        self.addCleanup(release.set)
+        calls = []
+
+        def execute(flow_id):
+            calls.append(flow_id)
+            started.set()
+            release.wait(1)
+            return "Modo jogo concluído."
+
+        with patch.object(self.runtime, "_executar_fluxo_direto", execute):
+            operation_id = self.runtime.submit_fluxo("modo_jogo")
+            self.assertTrue(started.wait(0.5))
+            self.assertEqual(self.runtime.submit_fluxo("modo_jogo"), operation_id)
+            release.set()
+            events = self.events_until(lambda items: any(
+                e.get("type") == "command_result" and e.get("operation_id") == operation_id for e in items))
+
+        result = next(e for e in events if e.get("type") == "command_result")
+        self.assertEqual(calls, ["modo_jogo"])
+        self.assertEqual(self.calls, [])
+        self.assertEqual(result["response"], "Modo jogo concluído.")
+
+    def test_direct_workflow_rejects_unknown_id_before_queueing(self):
+        with self.assertRaises(LookupError):
+            self.runtime.submit_fluxo("nao_existe")
+        self.assertTrue(self.runtime._commands.empty())
+
     def test_startup_is_idempotent_and_shutdown_releases_capture(self):
         self.runtime.start()
         deadline = time.monotonic() + 1
@@ -497,6 +527,94 @@ class MicrophoneDeviceTests(unittest.TestCase):
             self.assertFalse(missing["selected_available"])
             self.assertEqual(missing["selected_name"], "Webcam Mic")
             self.assertEqual(runtime._microphone_device_index, -1)
+
+
+    def test_fatos_listar_com_e_sem_filtro_e_resiliente_a_erros(self):
+        runtime = DesktopRuntime(start_voice=False)
+        mock_fatos = [{"id": 1, "texto": "gosta de café"}, {"id": 2, "texto": "mora em Curitiba"}]
+        with patch("memoria.fatos_com_id", return_value=mock_fatos) as m_all, \
+                patch("memoria.buscar_fatos", side_effect=lambda t, lim: [f for f in mock_fatos if t.casefold() in f["texto"].casefold()]) as m_search:
+            # Sem filtro
+            res = runtime.fatos_listar()
+            self.assertEqual(len(res["fatos"]), 2)
+            self.assertEqual(res["limite"], 50)
+            m_all.assert_called_once_with(50)
+
+            # Com busca
+            res = runtime.fatos_listar("Curitiba")
+            self.assertEqual(len(res["fatos"]), 1)
+            self.assertEqual(res["fatos"][0]["id"], 2)
+            m_search.assert_called_once_with("Curitiba", 50)
+
+            # Termo vazio volta para fatos_com_id
+            m_all.reset_mock()
+            res = runtime.fatos_listar("   ")
+            self.assertEqual(len(res["fatos"]), 2)
+            m_all.assert_called_once_with(50)
+
+        # Resiliência quando memoria falha
+        with patch("memoria.buscar_fatos", side_effect=RuntimeError("db_error")):
+            res = runtime.fatos_listar("algo")
+            self.assertEqual(res, {"fatos": [], "limite": 50})
+
+    def test_bloco2_runtime_methods(self):
+        from desktop_runtime import DesktopRuntime
+        runtime = DesktopRuntime()
+        with patch("processos_ops.carregar_config_bloco2", return_value={"suspensao_abas_ativo": True}), \
+             patch("seguranca.eh_admin", return_value=True), \
+             patch("seguranca.modo_admin_ativo", return_value=True), \
+             patch("processos_ops._obter_temperatura_cpu", return_value=45.0), \
+             patch("processos_ops._obter_plano_energia_ativo", return_value="guid-equilibrado"):
+            
+            estado = runtime.obter_estado_bloco2()
+            self.assertTrue(estado["admin_elevated"])
+            self.assertTrue(estado["admin_mode"])
+            self.assertEqual(estado["temperatura_cpu"], 45.0)
+
+        with patch("processos_ops.salvar_config_bloco2", return_value={"suspensao_abas_limite_mb": 700}):
+            up = runtime.atualizar_config_bloco2({"suspensao_abas_limite_mb": 700})
+            self.assertTrue(up["sucesso"])
+            self.assertEqual(up["config"]["suspensao_abas_limite_mb"], 700)
+
+        with patch("processos_ops.limpar_ram_ociosa", return_value={"mb_liberados": 250}):
+            res = runtime.executar_acao_bloco2("limpar_ram", {"agressivo": False})
+            self.assertTrue(res["sucesso"])
+            self.assertEqual(res["resultado"]["mb_liberados"], 250)
+
+    def test_start_logs_watcher_failure_without_name_error(self):
+        from desktop_runtime import DesktopRuntime
+        runtime = DesktopRuntime()
+        broken_disco = types.SimpleNamespace(
+            VigilanciaDisco=lambda: types.SimpleNamespace(
+                iniciar=lambda: (_ for _ in ()).throw(RuntimeError("disco offline"))))
+        broken_proc = types.SimpleNamespace(
+            VigilanciaProcessos=lambda: types.SimpleNamespace(
+                iniciar=lambda: (_ for _ in ()).throw(RuntimeError("proc offline"))))
+        fake_main = FakeMain()
+        fake_main.modo_voz = lambda **kwargs: None
+        fake_security = types.SimpleNamespace(log_seg=lambda *a, **k: None)
+        with tempfile.TemporaryDirectory() as tmpdir, \
+             patch.object(desktop_runtime, "ARQUIVO_SESSAO", Path(tmpdir) / "sessao.json"), \
+             patch.dict(sys.modules, {
+                 "main": fake_main,
+                 "seguranca": fake_security,
+                 "vigilancia_disco": broken_disco,
+                 "vigilancia_processos": broken_proc,
+             }), \
+             patch("threading.Thread") as m_thread:
+            m_thread.return_value.start = lambda: None
+            runtime.start()
+            runtime.shutdown()
+
+    def test_snapshot_reporta_desativado_quando_start_voice_falso(self):
+        from desktop_runtime import DesktopRuntime
+        runtime = DesktopRuntime(start_voice=False)
+        snap = runtime.get_snapshot()
+        self.assertEqual(snap["microphone_state"], "desativado")
+        runtime._set_voice_state("aquecendo_afe", None)
+        snap2 = runtime.get_snapshot()
+        self.assertEqual(snap2["microphone_state"], "aquecendo_afe")
+        self.assertIsNone(snap2["microphone_error"])
 
 
 if __name__ == "__main__":

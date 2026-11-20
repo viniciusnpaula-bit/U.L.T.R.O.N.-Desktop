@@ -261,8 +261,9 @@ export function criarOrbe(canvas, { modo } = {}) {
     alvoX3d = (evento.clientX - (r.left + r.width / 2)) / Math.max(1, r.width);
     alvoY3d = (evento.clientY - (r.top + r.height / 2)) / Math.max(1, r.height);
   };
+  const aoSair3d = () => { alvoX3d = 0; alvoY3d = 0; };
   window.addEventListener('pointermove', aoMover3d, { passive: true });
-  window.addEventListener('pointerleave', () => { alvoX3d = 0; alvoY3d = 0; });
+  window.addEventListener('pointerleave', aoSair3d);
 
   function medir() {
     dpr = Math.min(2, window.devicePixelRatio || 1);
@@ -270,7 +271,8 @@ export function criarOrbe(canvas, { modo } = {}) {
     canvas.width = Math.max(1, Math.round(w * dpr));
     canvas.height = Math.max(1, Math.round(h * dpr));
   }
-  new ResizeObserver(medir).observe(canvas);
+  const observador = new ResizeObserver(medir);
+  observador.observe(canvas);
 
   function linha(raio, amplitude, t, corDaCamada, grossura, alfa) {
     c.beginPath();
@@ -609,7 +611,8 @@ export function criarOrbe(canvas, { modo } = {}) {
   }
 
   function quadro(t) {
-    const dt = Math.min(0.05, (t - ultimo) / 1000 || 0.016);
+    const brutoDt = (t - ultimo) / 1000;
+    const dt = Number.isFinite(brutoDt) && brutoDt > 0 ? Math.min(0.05, brutoDt) : 0.016;
     ultimo = t;
     if (t - corLida > 800) {
       cor = hexParaHsl(getComputedStyle(document.documentElement).getPropertyValue('--core'));
@@ -658,7 +661,18 @@ export function criarOrbe(canvas, { modo } = {}) {
 
   return {
     iniciar() { if (rodando) return; rodando = true; medir(); ultimo = performance.now(); raf = requestAnimationFrame(quadro); },
-    parar() { rodando = false; cancelAnimationFrame(raf); raf = 0; },
+    parar() {
+      rodando = false;
+      cancelAnimationFrame(raf);
+      raf = 0;
+    },
+    destruir() {
+      this.parar();
+      observador.disconnect();
+      window.removeEventListener('pointermove', aoMover3d);
+      window.removeEventListener('pointerleave', aoSair3d);
+      document.removeEventListener('visibilitychange', aoVisibilidade);
+    },
     definir(e) { alvo = e; },
     definirModo,
     medir,
@@ -701,7 +715,8 @@ export function criarCampo(canvas) {
   function aoSair() { alvoX = 0; alvoY = 0; }
 
   function quadro(t) {
-    const dt = Math.min(0.05, (t - ultimo) / 1000 || 0.016);
+    const brutoDt = (t - ultimo) / 1000;
+    const dt = Number.isFinite(brutoDt) && brutoDt > 0 ? Math.min(0.05, brutoDt) : 0.016;
     ultimo = t;
     const amortece = 1 - Math.exp(-dt * 3.4);
     px += (alvoX - px) * amortece;

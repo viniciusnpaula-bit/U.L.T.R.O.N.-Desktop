@@ -1,6 +1,6 @@
 name: Testes
 
-# Roda a suíte a cada push/PR: 106 testes unitários + 50 testes de segurança.
+# Roda a suíte a cada push/PR: testes unitários (pytest) e testes de segurança.
 on:
   push:
     branches: [main]
@@ -35,6 +35,9 @@ jobs:
           python -m pip install --upgrade pip
           python -m pip install -r requirements.txt
           python -m pip install pytest
+
+      - name: Sintaxe (py_compile)
+        run: python -m compileall -q .
 
       - name: Testes unitários
         run: python -m pytest tests -q --tb=short

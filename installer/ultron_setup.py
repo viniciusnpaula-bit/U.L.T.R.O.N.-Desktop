@@ -39,8 +39,19 @@ LOG_MAX_BYTES = 512 * 1024
 
 REQUIRED_FILES = (
     "desktop.py",
+    "desktop_api.py",
+    "desktop_runtime.py",
     "main.py",
     "config.py",
+    "cerebro.py",
+    "ferramentas.py",
+    "seguranca.py",
+    "agendador.py",
+    "fluxos.py",
+    "skills.py",
+    "memoria.py",
+    "cofre.py",
+    "bandeja.py",
     "requirements.txt",
     "electron/package.json",
     "electron/main.js",
@@ -48,6 +59,7 @@ REQUIRED_FILES = (
     "electron/links.js",
     "electron/palco-protocol.js",
     "electron/site/index.html",
+    "electron/site/app.js",
 )
 
 RESERVED = {"con", "prn", "aux", "nul"} | {f"com{i}" for i in range(1, 10)} | {f"lpt{i}" for i in range(1, 10)}
@@ -517,19 +529,21 @@ def step_doctor(root: Path, console: Console, venv_python: Path, opened_env: boo
         checks.append(("internet", True, "api.github.com"))
     except Exception:
         checks.append(("internet", False, "sem conexão; o núcleo funciona, a IA não"))
-    failures = 0
+    critical_failures = 0
+    advisory_names = {"chave de IA configurada", "internet"}
     for name, passed, detail in checks:
         if passed:
             console.ok(f"{name}")
         else:
-            failures += 1
+            if name not in advisory_names:
+                critical_failures += 1
             console.warn(f"{name} — {detail}")
     if not keys_configured:
         console.info("Adicione GEMINI_API_KEY (grátis em https://aistudio.google.com/apikey) "
                      "no arquivo .env e abra o ULTRON.")
     if opened_env:
         console.info("O arquivo .env foi aberto no Bloco de Notas para você colar a chave.")
-    return 0 if failures == 0 else 0
+    return 0 if critical_failures == 0 else 1
 
 
 def offer_start(root: Path, console: Console, venv_python: Path) -> None:

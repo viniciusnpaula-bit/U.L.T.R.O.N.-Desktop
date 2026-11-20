@@ -10,13 +10,14 @@ export class RealTransport {
 
   async connect({ poll = true } = {}) {
     if (!this.bridge) throw new Error('A ponte segura do ULTRON não está disponível.');
-    if (poll) this.timer = setInterval(() => this.poll(), 750);
     try {
       await this.bridge.health();
       this.online = true;
       this.onEvent({ event: 'ULTRON_ONLINE', data: {} });
       await this.poll();
+      if (poll && !this.timer) this.timer = setInterval(() => this.poll(), 750);
     } catch (error) {
+      this.disconnect();
       this.online = false;
       this.onEvent({ event: 'ULTRON_OFFLINE', data: {} });
       throw error;
@@ -33,8 +34,9 @@ export class RealTransport {
       this.onEvent({ event: 'SYSTEM_STATUS', data: status });
       for (const event of result.events || []) {
         if (event.type === 'command_result') {
-          this.onEvent({ event: 'COMMAND_RESULT', request_id: event.operation_id,
-            data: { response: event.response } });
+          const data = { response: event.response };
+          if (typeof event.workflow_id === 'string') data.workflow_id = event.workflow_id;
+          this.onEvent({ event: 'COMMAND_RESULT', request_id: event.operation_id, data });
         } else if (event.type === 'notification') {
           this.onEvent({ event: 'NOTIFICATION', data: { message: event.message } });
         } else if (event.type === 'conversation_turn') {
@@ -63,6 +65,7 @@ export class RealTransport {
   }
 
   command(text) { return this.bridge.command(text); }
+  executarFluxo(id) { return this.bridge.executarFluxo(id); }
   setMicrophonePaused(paused) { return this.bridge.microphone(paused); }
   listMicrophones() { return this.bridge.microphones(); }
   conversation() { return this.bridge.conversation(); }
@@ -83,6 +86,19 @@ export class RealTransport {
   palcoFechar() { return this.bridge.palcoFechar(); }
   palcoAbrir(id) { return this.bridge.palcoAbrir(id); }
   shutdown() { return this.bridge.shutdown(); }
+  bloco1Status() { return this.bridge.bloco1Status ? this.bridge.bloco1Status() : Promise.resolve(null); }
+  bloco1Salvar(config) { return this.bridge.bloco1Salvar ? this.bridge.bloco1Salvar(config) : Promise.resolve(null); }
+  bloco1Executar(acao, params) { return this.bridge.bloco1Executar ? this.bridge.bloco1Executar(acao, params) : Promise.resolve(null); }
+  bloco2Status() { return this.bridge.bloco2Status ? this.bridge.bloco2Status() : Promise.resolve(null); }
+  bloco2Salvar(config) { return this.bridge.bloco2Salvar ? this.bridge.bloco2Salvar(config) : Promise.resolve(null); }
+  bloco2Executar(acao, params) { return this.bridge.bloco2Executar ? this.bridge.bloco2Executar(acao, params) : Promise.resolve(null); }
+  mobilePairingStatus() { return this.bridge.mobilePairingStatus ? this.bridge.mobilePairingStatus() : Promise.resolve(null); }
+  mobilePairingRotate(deviceId, killswitchSeparado) {
+    return this.bridge.mobilePairingRotate ? this.bridge.mobilePairingRotate(deviceId, killswitchSeparado) : Promise.resolve(null);
+  }
+  mobilePairingRevoke(deviceId) {
+    return this.bridge.mobilePairingRevoke ? this.bridge.mobilePairingRevoke(deviceId) : Promise.resolve(null);
+  }
 
   disconnect() {
     clearInterval(this.timer);

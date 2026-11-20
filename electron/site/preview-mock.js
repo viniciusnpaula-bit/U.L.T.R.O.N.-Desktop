@@ -1,7 +1,7 @@
 /* Pré-visualização local da interface: mock do núcleo para ver a tela no navegador.
    Não faz parte do app — o Electron injeta a ponte real (preload.js). */
 const verbose = new URLSearchParams(location.search).has('live');
-let estadoVersao = '1.9.6';
+let estadoVersao = '2.1.0';
 let jobUpdate = null;
 const agora = () => Date.now() / 1000;
 const status = () => ({
@@ -13,6 +13,14 @@ const status = () => ({
   autostart_installed: true, speaking: false,
 });
 const fila = [];
+const previewSkills = {
+  skills: [
+    { slug: 'rotina-matinal', nome: 'Rotina matinal', descricao: 'Resumo diário de agenda e clima.', quando: 'quando o usuário pedir resumo da manhã', estado: 'ativo' },
+  ],
+  pendentes: [
+    { slug: 'modo-foco', nome: 'Modo foco', quando: 'quando pedir foco no trabalho', corpo: '1. Pausar notificações\n2. Minimizar janelas secundárias' },
+  ],
+};
 window.ultron = {
   health: async () => ({ ok: true }),
   status: async () => status(),
@@ -28,8 +36,10 @@ window.ultron = {
   },
   microphone: async paused => ({ paused }),
   conversation: async () => ({ turns: [] }),
-  updateInfo: async () => ({ current_version: '1.9.4', auto_check: false, job: null }),
-  updateCheck: async () => ({ status: 'ok', current_version: '1.9.4', latest_version: '1.9.4', update_available: false, notes: '' }),
+  clearConversation: async () => ({ ok: true }),
+  version: '2.1.0',
+  updateInfo: async () => ({ current_version: '2.1.0', auto_check: false, job: null }),
+  updateCheck: async () => ({ status: 'ok', current_version: '2.1.0', latest_version: '2.1.0', update_available: false, notes: '' }),
   updateApply: async () => ({ status: 'baixando' }),
   updateLaunch: async () => true,
   updateRollback: async () => true,
@@ -87,7 +97,7 @@ window.ultron = {
   cofreGuardar: async () => ({ ok: true }),
   cofreRemover: async () => ({ ok: true }),
   cofreTestar: async () => ({ ok: true }),
-  fatosListar: async () => ({ fatos: [] }),
+  fatosListar: async busca => ({ fatos: [], limite: 50 }),
   fatoCorrigir: async () => ({ ok: true }),
   fatoApagar: async () => ({ ok: true }),
   lembreteCancelar: async () => ({ ok: true }),
@@ -95,10 +105,63 @@ window.ultron = {
   agendaListar: async () => ({ eventos: [], aviso: '' }),
   agendaCancelar: async () => ({ eventos: [], mensagem: '' }),
   fluxosListar: async () => ({ fluxos: [] }),
+  executarFluxo: async id => ({ operation_id: `preview-${id}` }),
+  skillsListar: async () => ({
+    skills: previewSkills.skills.map(s => ({ ...s })),
+    pendentes: previewSkills.pendentes.map(p => ({ ...p })),
+  }),
+  skillsAprovar: async nome => {
+    const idx = previewSkills.pendentes.findIndex(p => p.slug === nome);
+    if (idx === -1) throw new Error('A API local recusou a solicitação (409).');
+    const [item] = previewSkills.pendentes.splice(idx, 1);
+    previewSkills.skills.push({ slug: item.slug, nome: item.nome, descricao: item.quando, quando: item.quando, estado: 'ativo' });
+    return { ok: true, slug: nome };
+  },
+  skillsDescartar: async nome => {
+    const idx = previewSkills.pendentes.findIndex(p => p.slug === nome);
+    if (idx !== -1) previewSkills.pendentes.splice(idx, 1);
+    return { ok: true };
+  },
   abrirLink: async () => true,
   abrirExterno: async () => true,
   palcoFechar: async () => true,
   palcoAbrir: async () => true,
+  bloco1Status: async () => ({
+    config: {
+      downloads_pdf_ativo: true,
+      downloads_extrator_ativo: true,
+      capturas_desktop_ativo: true,
+      usb_ejetar_ativo: true,
+      disco_alerta_ativo: true,
+      disco_limite_pct: 80,
+      projetos_pastas: [],
+      backup_origens: [],
+      backup_destino: ""
+    },
+    status_monitores: { ativo: true, ultimo_relatorio: "monitores ativos" },
+    admin_elevated: true,
+    admin_mode: true
+  }),
+  bloco1Salvar: async config => ({ sucesso: true, config }),
+  bloco1Executar: async (acao, params) => ({ sucesso: true, acao, resultado: "simulado" }),
+  bloco2Status: async () => ({
+    config: {
+      suspensao_abas_ativo: true,
+      matar_travados_ativo: true,
+      otimizar_janela_ativa_ativo: true,
+      plano_energia_ativo: true,
+      protecao_termica_ativo: true,
+      guardiao_startup_ativo: true,
+      limpar_ram_ativo: true
+    },
+    status_monitores: { ativo: true, ultimo_relatorio: "monitores bloco 2 ativos" },
+    temperatura_cpu: 48.5,
+    plano_ativo: "Equilibrado",
+    admin_elevated: true,
+    admin_mode: true
+  }),
+  bloco2Salvar: async config => ({ sucesso: true, config }),
+  bloco2Executar: async (acao, params) => ({ sucesso: true, acao, resultado: "simulado" }),
 };
 /* modo ?chat: simula uma conversa de voz chegando, para ver o bat-papo */
 if (new URLSearchParams(location.search).has('chat')) {

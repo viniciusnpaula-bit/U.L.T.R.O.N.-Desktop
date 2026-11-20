@@ -94,13 +94,17 @@ def _rodar():
     app.add_handler(CommandHandler("parar", _parar))
     app.add_handler(CallbackQueryHandler(_botao, pattern=r"^c:"))
     app.add_handler(MessageHandler(filters.TEXT & ~filters.COMMAND, _mensagem))
-    cerebro.NOTIFICADORES.append(lambda t: asyncio.run_coroutine_threadsafe(
-        app.bot.send_message(config.TELEGRAM_USER_ID, t), loop))
+    notificador = lambda t: asyncio.run_coroutine_threadsafe(
+        app.bot.send_message(config.TELEGRAM_USER_ID, t), loop)
+    cerebro.NOTIFICADORES.append(notificador)
     try:
         app.run_polling(stop_signals=None, close_loop=False)
     except Exception as e:
         seguranca.log.error(f"Telegram caiu: {e}")
         print(f"[telegram] erro: {e}")
+    finally:
+        if notificador in cerebro.NOTIFICADORES:
+            cerebro.NOTIFICADORES.remove(notificador)
 
 
 async def _parar(update, ctx):

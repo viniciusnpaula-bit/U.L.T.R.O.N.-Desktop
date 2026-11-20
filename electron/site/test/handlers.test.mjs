@@ -77,3 +77,32 @@ test('o elemento de reserva aceita todo método chamado com ?.', async () => {
   const faltando = [...metodos].filter(nome => typeof vazio[nome] !== 'function').sort();
   assert.deepEqual(faltando, [], `métodos ausentes no reservatório VAZIO: ${faltando.join(', ')}`);
 });
+
+test('atalhos globais nao duplicam listener entre window e document', async () => {
+  const source = await readFile(appPath, 'utf8');
+  const ocorrencias = source.match(/addEventListener\(\s*['"]keydown['"]\s*,\s*atalhos\b/g) || [];
+  assert.equal(ocorrencias.length, 1);
+});
+
+test('acompanharAtualizacao limpa updateUi.timer ao encerrar polling', async () => {
+  const source = await readFile(appPath, 'utf8');
+  const bloco = source.slice(
+    source.indexOf('async function acompanharAtualizacao()'),
+    source.indexOf('function pedirReinicio('),
+  );
+  assert.match(bloco, /clearInterval\(updateUi\.timer\);\s*\r?\n\s*updateUi\.timer\s*=\s*null;/);
+  const clearsDentroLoop = (bloco.slice(bloco.indexOf('setInterval')).match(/clearInterval\(updateUi\.timer\);/g) || []).length;
+  const resetsDentroLoop = (bloco.slice(bloco.indexOf('setInterval')).match(/updateUi\.timer\s*=\s*null;/g) || []).length;
+  assert.equal(clearsDentroLoop, 3);
+  assert.equal(resetsDentroLoop, 3);
+});
+
+test('update:launch aceita objeto { launched: true } retornado pela API', async () => {
+  const mainSource = await readFile(join(here, '..', '..', 'main.js'), 'utf8');
+  const trecho = mainSource.slice(
+    mainSource.indexOf("ipcMain.handle('update:launch'"),
+    mainSource.indexOf("ipcMain.handle('update:rollback'"),
+  );
+  assert.match(trecho, /launched\.launched\s*===\s*true/);
+  assert.doesNotMatch(trecho, /return launched === true;/);
+});

@@ -11,8 +11,10 @@ import threading
 import time
 from pathlib import Path
 
+import config
+
 RAIZ = Path(__file__).resolve().parent
-ARQUIVO = RAIZ / "dados" / "personalidade.json"
+ARQUIVO = getattr(config, "DIR_DADOS", RAIZ / "dados") / "personalidade.json"
 _trava = threading.Lock()
 
 # Perfis prontos. Nenhum muda as regras de segurança: elas são fixas no system prompt.
@@ -140,17 +142,50 @@ def _caminho() -> Path:
     return ARQUIVO
 
 
+def _perfis_padrao() -> dict[str, dict]:
+    return {
+        chave: {
+            "tratamento": perfil["tratamento"],
+            "jeito": PADRAO_JEITO,
+            "tom": perfil["tom"],
+            "tamanho": perfil["tamanho"],
+            "extras": "",
+        }
+        for chave, perfil in PERFIS.items()
+    }
+
+
+def _aplicar_perfil_ativo(atual: dict, perfil: str) -> None:
+    if perfil not in PERFIS:
+        perfil = PADRAO
+    atual["perfil"] = perfil
+    atual["rotulo"] = PERFIS[perfil]["rotulo"]
+    perfis_salvos = atual.setdefault("perfis", _perfis_padrao())
+    escolhido = perfis_salvos.setdefault(perfil, _perfis_padrao()[perfil])
+    atual["tratamento"] = escolhido["tratamento"]
+    atual["jeito"] = escolhido["jeito"]
+    atual["tom"] = escolhido["tom"]
+    atual["tamanho"] = escolhido["tamanho"]
+    atual["extras"] = escolhido["extras"]
+    atual.setdefault("tratamentos", {})[perfil] = escolhido["tratamento"]
+    atual.setdefault("jeitos", {})[perfil] = escolhido["jeito"]
+
+
 def _padrao() -> dict:
+    perfis = _perfis_padrao()
+    tratamentos = {chave: cfg["tratamento"] for chave, cfg in perfis.items()}
+    jeitos = {chave: cfg["jeito"] for chave, cfg in perfis.items()}
     base = dict(PERFIS[PADRAO])
-    tratamentos = {chave: perfil["tratamento"] for chave, perfil in PERFIS.items()}
     return {
         "perfil": PADRAO,
         **base,
-        "tratamento": base["tratamento"],
-        # cada perfil guarda o próprio tratamento: trocar de perfil não
-        # sobrescreve o jeito de tratar que você escolheu para outro
+        "tratamento": perfis[PADRAO]["tratamento"],
+        # cada perfil guarda o próprio tratamento, jeito, tom, tamanho e extras:
+        # trocar ou editar um perfil não sobrescreve as escolhas dos outros
         "tratamentos": tratamentos,
-        "jeito": PADRAO_JEITO,
+        "jeito": perfis[PADRAO]["jeito"],
+        "jeitos": jeitos,
+        "perfis": perfis,
         "usuario": {"nome": "", "apelido": "", "idade": "", "genero": "", "sobre": ""},
         "saudacao": True,
         "extras": "",
@@ -192,26 +227,61 @@ def carregar() -> dict:
     perfil = str(dados.get("perfil") or PADRAO)
     if perfil not in PERFIS:
         perfil = PADRAO
-    atual.update(PERFIS[perfil])
-    atual["perfil"] = perfil
+
+    perfis_dados = dados.get("perfis")
+    if isinstance(perfis_dados, dict):
+        for chave, cfg in perfis_dados.items():
+            if chave not in PERFIS or not isinstance(cfg, dict):
+                continue
+            destino = atual["perfis"][chave]
+            if _texto(cfg.get("tratamento")):
+                destino["tratamento"] = _texto(cfg.get("tratamento"))
+            jeito_cfg = str(cfg.get("jeito") or "")
+            if jeito_cfg in JEITOS:
+                destino["jeito"] = jeito_cfg
+            for campo in ("tom", "tamanho", "extras"):
+                valor = _texto(cfg.get(campo))
+                if valor:
+                    destino[campo] = valor
 
     guardados = dados.get("tratamentos")
     if isinstance(guardados, dict):
         for chave, valor in guardados.items():
             if chave in PERFIS and _texto(valor):
-                atual["tratamentos"][chave] = _texto(valor)
-    # arquivo antigo tinha um único tratamento: ele pertence ao perfil ativo
-    legado = _texto(dados.get("tratamento"))
-    if legado and not (isinstance(guardados, dict) and _texto(guardados.get(perfil))):
-        atual["tratamentos"][perfil] = legado
-    atual["tratamento"] = atual["tratamentos"][perfil]
+                atual["perfis"][chave]["tratamento"] = _texto(valor)
 
-    for chave in ("ton", "tamanho", "extras"):
+    jeitos_guardados = dados.get("jeitos")
+    if isinstance(jeitos_guardados, dict):
+        for chave, valor in jeitos_guardados.items():
+            if chave in PERFIS and isinstance(valor, str) and valor in JEITOS:
+                atual["perfis"][chave]["jeito"] = valor
+
+    # arquivo antigo tinha campos planos únicos: eles pertencem só ao perfil ativo
+    tem_perfil_novo = isinstance(perfis_dados, dict) and isinstance(perfis_dados.get(perfil), dict)
+    legado_tratamento = _texto(dados.get("tratamento"))
+    if legado_tratamento and not (isinstance(guardados, dict) and _texto(guardados.get(perfil))) and not (
+        tem_perfil_novo and _texto(perfis_dados[perfil].get("tratamento"))
+    ):
+        atual["perfis"][perfil]["tratamento"] = legado_tratamento
+
+    legado_jeito = str(dados.get("jeito") or "")
+    if (
+        legado_jeito in JEITOS
+        and not (isinstance(jeitos_guardados, dict) and jeitos_guardados.get(perfil) in JEITOS)
+        and not (tem_perfil_novo and perfis_dados[perfil].get("jeito") in JEITOS)
+    ):
+        atual["perfis"][perfil]["jeito"] = legado_jeito
+
+    for chave in ("tom", "tamanho", "extras"):
         valor = _texto(dados.get(chave))
-        if valor:
-            atual[chave] = valor
-    jeito = str(dados.get("jeito") or PADRAO_JEITO)
-    atual["jeito"] = jeito if jeito in JEITOS else PADRAO_JEITO
+        if valor and not (tem_perfil_novo and _texto(perfis_dados[perfil].get(chave))):
+            atual["perfis"][perfil][chave] = valor
+
+    for chave in PERFIS:
+        atual["tratamentos"][chave] = atual["perfis"][chave]["tratamento"]
+        atual["jeitos"][chave] = atual["perfis"][chave]["jeito"]
+
+    _aplicar_perfil_ativo(atual, perfil)
     atual["usuario"] = _usuario(dados.get("usuario"))
     saudacao = dados.get("saudacao", True)
     atual["saudacao"] = saudacao if isinstance(saudacao, bool) else True
@@ -219,30 +289,57 @@ def carregar() -> dict:
 
 
 def salvar(configuracao: dict) -> dict:
-    """Grava só o que o usuário escolheu; devolve o estado final (já saneado)."""
+    """Grava só o que o usuário escolheu no perfil alvo; devolve o estado final (já saneado)."""
     with _trava:
         atual = carregar()
         # sem "perfil" no pedido (ex.: salvar só a saudação), mantém o perfil ativo
         perfil = str(configuracao.get("perfil") or atual["perfil"])
-        if perfil in PERFIS:
-            atual.update(PERFIS[perfil])
-            atual["perfil"] = perfil
+        if perfil not in PERFIS:
+            perfil = atual["perfil"]
+
+        recebidos_perfis = configuracao.get("perfis")
+        if isinstance(recebidos_perfis, dict):
+            for chave, cfg in recebidos_perfis.items():
+                if chave not in PERFIS or not isinstance(cfg, dict):
+                    continue
+                if _texto(cfg.get("tratamento")):
+                    atual["perfis"][chave]["tratamento"] = _texto(cfg.get("tratamento"))
+                jeito_cfg = str(cfg.get("jeito") or "")
+                if jeito_cfg in JEITOS:
+                    atual["perfis"][chave]["jeito"] = jeito_cfg
+                for campo in ("tom", "tamanho", "extras"):
+                    valor = _texto(cfg.get(campo))
+                    if valor:
+                        atual["perfis"][chave][campo] = valor
+
         recebidos = configuracao.get("tratamentos")
         if isinstance(recebidos, dict):
             for chave, valor in recebidos.items():
                 if chave in PERFIS and _texto(valor):
-                    atual["tratamentos"][chave] = _texto(valor)
+                    atual["perfis"][chave]["tratamento"] = _texto(valor)
+
+        recebidos_jeitos = configuracao.get("jeitos")
+        if isinstance(recebidos_jeitos, dict):
+            for chave, valor in recebidos_jeitos.items():
+                if chave in PERFIS and isinstance(valor, str) and valor in JEITOS:
+                    atual["perfis"][chave]["jeito"] = valor
+
         tratamento = _texto(configuracao.get("tratamento"))
         if tratamento:
-            atual["tratamentos"][atual["perfil"]] = tratamento
-        atual["tratamento"] = atual["tratamentos"][atual["perfil"]]
-        for chave in ("ton", "tamanho", "extras"):
+            atual["perfis"][perfil]["tratamento"] = tratamento
+        for chave in ("tom", "tamanho", "extras"):
             valor = _texto(configuracao.get(chave))
             if valor:
-                atual[chave] = valor
+                atual["perfis"][perfil][chave] = valor
         jeito = str(configuracao.get("jeito") or "")
         if jeito in JEITOS:
-            atual["jeito"] = jeito
+            atual["perfis"][perfil]["jeito"] = jeito
+
+        for chave in PERFIS:
+            atual["tratamentos"][chave] = atual["perfis"][chave]["tratamento"]
+            atual["jeitos"][chave] = atual["perfis"][chave]["jeito"]
+        _aplicar_perfil_ativo(atual, perfil)
+
         recebido_usuario = configuracao.get("usuario")
         if isinstance(recebido_usuario, dict):
             atual["usuario"] = _usuario({**atual.get("usuario", {}), **recebido_usuario})
@@ -263,11 +360,11 @@ def restaurar_padrao() -> dict:
 
 
 def perfis_disponiveis() -> list[dict]:
-    """Cada perfil com o tratamento que ele guarda (não o do perfil ativo)."""
+    """Cada perfil com as escolhas que ele próprio guarda (sem herdar de outro)."""
     atual = carregar()
-    tratamentos = atual.get("tratamentos") or {}
+    perfis_salvos = atual.get("perfis") or {}
     return [
-        {"id": chave, **valor, "tratamento": tratamentos.get(chave, valor["tratamento"])}
+        {"id": chave, **valor, **perfis_salvos.get(chave, {})}
         for chave, valor in PERFIS.items()
     ]
 
@@ -329,6 +426,8 @@ def frase_saudacao() -> str:
     """Frase curta falada ao abrir, respeitando o perfil e o tratamento."""
     atual = carregar()
     rotulo = (atual.get("rotulo") or "ULTRON").strip()
+    if rotulo.replace(".", "").upper() == "ULTRON":
+        rotulo = "Ultron"
     tratamento = (atual.get("tratamento") or "senhor").strip()
     return f"{rotulo} online. À sua disposição, {tratamento}."
 

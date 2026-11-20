@@ -29,8 +29,13 @@ import time
 from pathlib import Path
 
 _RAIZ = Path(__file__).resolve().parent
-ARQUIVO = _RAIZ / "dados" / "cofre.json"
-ARQUIVO_CHAVE = _RAIZ / "dados" / ".cofre.chave"
+try:
+    import config as _cfg
+    ARQUIVO = getattr(_cfg, "ARQUIVO_COFRE", getattr(_cfg, "DIR_DADOS", _RAIZ / "dados") / "cofre.json")
+    ARQUIVO_CHAVE = getattr(_cfg, "ARQUIVO_CHAVE_COFRE", getattr(_cfg, "DIR_DADOS", _RAIZ / "dados") / ".cofre.chave")
+except Exception:
+    ARQUIVO = _RAIZ / "dados" / "cofre.json"
+    ARQUIVO_CHAVE = _RAIZ / "dados" / ".cofre.chave"
 _trava = threading.Lock()
 
 PROVEDORES = ("gemini", "groq", "nvidia", "openai", "openrouter", "mistral",

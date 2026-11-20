@@ -17,7 +17,7 @@ from pathlib import Path
 
 import config
 
-BASE = Path(__file__).resolve().parent / "dados" / "skills"
+BASE = getattr(config, "DIR_SKILLS", Path(__file__).resolve().parent / "dados" / "skills")
 PENDENTES = BASE / ".pendentes"
 USO = BASE / ".uso.json"
 

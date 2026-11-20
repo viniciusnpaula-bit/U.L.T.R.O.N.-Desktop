@@ -2,6 +2,60 @@ const API_PREFIX = '/api/v1';
 const REQUEST_TIMEOUT_MS = 12000;
 const UNLOCK_TIMEOUT_MS = 70000;
 const MAX_COMMAND_LENGTH = 4000;
+const FLUXO_ID_RE = /^[a-z0-9][a-z0-9._-]{0,39}$/;
+const OPERATION_ID_RE = /^[a-f0-9]{32}$/;
+const SKILL_SLUG_RE = /^[a-z0-9][a-z0-9-]{0,39}$/;
+const SKILL_ESTADOS = new Set(['ativo', 'obsoleto', 'arquivado']);
+const SAFE_CONFLICT_RE = /^(skill pendente não encontrada: [a-z0-9-]+|já existe skill com esse nome: [a-z0-9-]+|limite de \d+ skills ativas:.*|nome de skill inválido|fila de skills cheia:.*)$/i;
+
+function assertWorkflowId(id) {
+  if (typeof id !== 'string' || !FLUXO_ID_RE.test(id)) {
+    throw new TypeError('Identificador de fluxo inválido.');
+  }
+  return id;
+}
+
+function assertSkillSlug(nome) {
+  if (typeof nome !== 'string' || !SKILL_SLUG_RE.test(nome)) {
+    throw new TypeError('Identificador de skill inválido.');
+  }
+  return nome;
+}
+
+function assertPlainObject(value) {
+  if (!value || typeof value !== 'object' || Array.isArray(value)) {
+    throw new Error('Resposta inválida da API local.');
+  }
+  return value;
+}
+
+function assertSkillsPayload(data) {
+  const payload = assertPlainObject(data);
+  if (!Array.isArray(payload.skills) || !Array.isArray(payload.pendentes)) {
+    throw new Error('Resposta inválida da API local.');
+  }
+  for (const s of payload.skills) {
+    if (!s || typeof s !== 'object' || Array.isArray(s) ||
+        typeof s.slug !== 'string' || !SKILL_SLUG_RE.test(s.slug) ||
+        typeof s.nome !== 'string' || !s.nome.trim() ||
+        typeof s.estado !== 'string' || !SKILL_ESTADOS.has(s.estado) ||
+        (s.descricao !== undefined && typeof s.descricao !== 'string') ||
+        (s.quando !== undefined && typeof s.quando !== 'string')) {
+      throw new Error('Resposta inválida da API local.');
+    }
+  }
+  for (const p of payload.pendentes) {
+    if (!p || typeof p !== 'object' || Array.isArray(p) ||
+        typeof p.slug !== 'string' || !SKILL_SLUG_RE.test(p.slug) ||
+        typeof p.nome !== 'string' || !p.nome.trim() ||
+        (p.descricao !== undefined && typeof p.descricao !== 'string') ||
+        (p.quando !== undefined && typeof p.quando !== 'string') ||
+        (p.corpo !== undefined && typeof p.corpo !== 'string')) {
+      throw new Error('Resposta inválida da API local.');
+    }
+  }
+  return payload;
+}
 
 function createApiClient({ baseUrl, token, fetchImpl = fetch }) {
   let url;
@@ -38,7 +92,13 @@ function createApiClient({ baseUrl, token, fetchImpl = fetch }) {
         throw new Error('Resposta inválida da API local.');
       }
       if (!response.ok) {
-        throw new Error(`A API local recusou a solicitação (${response.status}).`);
+        let suffix = '';
+        if (response.status === 409 && result && result.error === 'conflict' &&
+            typeof result.detail === 'string' && !result.detail.includes(token) &&
+            SAFE_CONFLICT_RE.test(result.detail.trim())) {
+          suffix = ` ${result.detail.trim().slice(0, 120)}`;
+        }
+        throw new Error(`A API local recusou a solicitação (${response.status}).${suffix}`);
       }
       return result;
     } catch (error) {
@@ -68,7 +128,16 @@ function createApiClient({ baseUrl, token, fetchImpl = fetch }) {
     cofreGuardar: (nome, valor) => request('POST', '/cofre', { nome: String(nome), valor: String(valor) }),
     cofreRemover: nome => request('POST', '/cofre/remover', { nome: String(nome) }),
     cofreTestar: nome => request('POST', '/cofre/testar', { nome: String(nome) }),
-    fatosListar: busca => request('GET', '/fatos' + (busca ? '' : '')),
+    fatosListar: busca => {
+      if (busca !== undefined && busca !== null && typeof busca !== 'string') {
+        throw new TypeError('Termo de busca inválido.');
+      }
+      if (typeof busca === 'string' && busca.length > 300) {
+        throw new TypeError('Termo de busca muito longo.');
+      }
+      const termo = typeof busca === 'string' ? busca.trim() : '';
+      return request('GET', '/fatos' + (termo ? `?busca=${encodeURIComponent(termo)}` : ''));
+    },
     fatoCorrigir: (id, texto) => request('POST', '/fatos', { id, texto: String(texto || '') }),
     fatoApagar: id => request('POST', '/fatos', { id }),
     lembreteCancelar: (numero, trecho) => request('POST', '/lembretes/cancelar',
@@ -77,6 +146,31 @@ function createApiClient({ baseUrl, token, fetchImpl = fetch }) {
     agendaCancelar: (numero, trecho) => request('POST', '/agenda/cancelar',
       numero == null ? { trecho: String(trecho || '') } : { numero }),
     fluxosListar: () => request('GET', '/fluxos'),
+    executarFluxo: async id => {
+      const workflowId = assertWorkflowId(id);
+      const result = assertPlainObject(await request('POST', '/fluxos/executar', { id: workflowId }));
+      if (typeof result.operation_id !== 'string' || !OPERATION_ID_RE.test(result.operation_id)) {
+        throw new Error('Resposta inválida da API local.');
+      }
+      return result;
+    },
+    skillsListar: async () => assertSkillsPayload(await request('GET', '/skills')),
+    skillsAprovar: async nome => {
+      const slug = assertSkillSlug(nome);
+      const result = assertPlainObject(await request('POST', '/skills/approve', { nome: slug }));
+      if (result.ok !== true || typeof result.slug !== 'string' || !SKILL_SLUG_RE.test(result.slug)) {
+        throw new Error('Resposta inválida da API local.');
+      }
+      return result;
+    },
+    skillsDescartar: async nome => {
+      const slug = assertSkillSlug(nome);
+      const result = assertPlainObject(await request('POST', '/skills/discard', { nome: slug }));
+      if (result.ok !== true) {
+        throw new Error('Resposta inválida da API local.');
+      }
+      return result;
+    },
     lembretesListar: () => request('GET', '/lembretes'),
     vozInfo: () => request('GET', '/voz'),
     vozSalvar: valores => request('POST', '/voz', valores || {}),
@@ -124,6 +218,22 @@ function createApiClient({ baseUrl, token, fetchImpl = fetch }) {
     emergencyStop: () => request('POST', '/emergency-stop', {}),
     palcoFechar: () => request('POST', '/palco/fechar', {}),
     shutdown: () => request('POST', '/shutdown', {}),
+    bloco1Status: () => request('GET', '/bloco1'),
+    bloco1Salvar: config => request('POST', '/bloco1', config || {}),
+    bloco1Executar: (acao, params) => request('POST', '/bloco1/executar', { acao: String(acao), params: params || {} }),
+    bloco2Status: () => request('GET', '/bloco2'),
+    bloco2Salvar: config => request('POST', '/bloco2', config || {}),
+    bloco2Executar: (acao, params) => request('POST', '/bloco2/executar', { acao: String(acao), params: params || {} }),
+    mobilePairingStatus: () => request('GET', '/mobile/pairing'),
+    mobilePairingRotate: (deviceId, killswitchSeparado) => {
+      const payload = { killswitch_separado: killswitchSeparado === true };
+      if (typeof deviceId === 'string' && deviceId.trim()) payload.device_id = deviceId.trim();
+      return request('POST', '/mobile/pairing/rotate', payload);
+    },
+    mobilePairingRevoke: deviceId => {
+      const payload = typeof deviceId === 'string' && deviceId.trim() ? { device_id: deviceId.trim() } : {};
+      return request('POST', '/mobile/pairing/revoke', payload);
+    },
   });
 }
 

@@ -44,11 +44,8 @@ jobs:
       - name: Testes do Desktop
         run: python -m pytest tests -q
 
-      - name: Testes do shell Electron
-        run: node --test electron/test/api.test.js
-
-      - name: Testes da interface
-        run: node --test electron/site/test/real.test.mjs electron/site/test/handlers.test.mjs
+      - name: Testes do Electron (shell e interface)
+        run: node --test electron/test/*.test.js electron/site/test/*.mjs
 
       - name: Verificar que nada proibido entrou
         shell: pwsh
@@ -56,7 +53,7 @@ jobs:
           # Valida o que está VERSIONADO, não artefatos criados pelos testes
           # (pytest gera dados/, logs/ e __pycache__ durante o job).
           # ".env.example" é documentação e NÃO deve ser barrado.
-          $proibidos = '(^|/)(\.env|dados|logs|venv|\.venv|node_modules|__pycache__)(/|$)'
+          $proibidos = '(^|/)(\.env|dados|logs|venv|\.venv|node_modules|__pycache__|runtime)(/|$)|\.(exe|zip)$'
           $achados = @(git ls-files | Where-Object { $_ -match $proibidos })
           if ($achados.Count -gt 0) {
             $achados | Select-Object -First 10

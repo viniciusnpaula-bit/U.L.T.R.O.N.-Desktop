@@ -24,7 +24,7 @@ function pintar(snapshot) {
   orb.definir({ energia: falando ? 0.7 : 0.15, brilho: online ? 0.9 : 0.4 });
 }
 
-window.ultron?.onHudSnapshot?.(pintar);
+const pararSnapshot = window.ultron?.onHudSnapshot?.(pintar);
 window.ultron?.getHudSnapshot?.().then(snapshot => { if (snapshot) pintar(snapshot); });
 
 /* verbos: só os nomes permitidos; o painel principal executa e devolve o aceite */
@@ -39,4 +39,9 @@ document.querySelectorAll('[data-hud-action]').forEach(botao => {
 
 document.addEventListener('visibilitychange', () => {
   document.hidden ? orb.parar() : orb.iniciar();
+});
+
+window.addEventListener('beforeunload', () => {
+  if (typeof pararSnapshot === 'function') pararSnapshot();
+  (orb.destruir || orb.parar).call(orb);
 });

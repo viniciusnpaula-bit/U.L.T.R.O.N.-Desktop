@@ -49,10 +49,18 @@ def _configuracao():
               "OPENROUTER_API_KEY", "MISTRAL_API_KEY", "DEEPSEEK_API_KEY",
               "CEREBRAS_API_KEY", "TOGETHER_API_KEY", "XAI_API_KEY")
     valores = {nome: os.environ.get(nome, "") for nome in chaves}
-    arquivo = BASE / ".env"
-    if arquivo.is_file():
-        from dotenv import dotenv_values
-        valores.update({nome: valor or "" for nome, valor in dotenv_values(arquivo).items() if nome in chaves})
+    env_candidatos = [BASE / ".env"]
+    try:
+        import config
+        env_cfg = Path(getattr(config, "ARQUIVO_ENV", BASE / ".env"))
+        if env_cfg not in env_candidatos:
+            env_candidatos.append(env_cfg)
+    except Exception:
+        pass
+    for arquivo in env_candidatos:
+        if arquivo.is_file():
+            from dotenv import dotenv_values
+            valores.update({nome: valor or "" for nome, valor in dotenv_values(arquivo).items() if nome in chaves})
     # Chaves coladas pela interface ficam no cofre cifrado, não no .env.
     try:
         import cofre

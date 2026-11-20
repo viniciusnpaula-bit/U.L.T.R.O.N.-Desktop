@@ -1,3 +1,4 @@
+from urllib.parse import quote
 import json
 import secrets
 import sys
@@ -10,6 +11,7 @@ from unittest.mock import patch
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
 
+import desktop_api
 from desktop_api import create_server
 from desktop_runtime import DesktopRuntime
 
@@ -33,7 +35,8 @@ class FakeRuntime:
                             "selected_available": True, "active_name": "Padrão do sistema"}
         self.selected_microphone = None
         self.palco_closed = False
-        self.fatos = [{"id": 1, "texto": "gosta de café"}]
+        self.fatos = [{"id": 1, "texto": "gosta de café"},
+                      {"id": 2, "texto": "mora em Curitiba"}]
         self.fatos_apagados = []
         self.agenda = [{"numero": 1, "texto": "reunião", "hora_local": "07/11 15:00"}]
         self.agenda_criada = None
@@ -126,8 +129,12 @@ class FakeRuntime:
         self.palco_closed = True
         return {"ok": True, "mensagem": "Palco fechado."}
 
-    def fatos_listar(self):
-        return {"fatos": list(self.fatos)}
+    def fatos_listar(self, busca: str = ""):
+        fatos = list(self.fatos)
+        if busca:
+            termo = str(busca).casefold()
+            fatos = [f for f in fatos if termo in f["texto"].casefold()]
+        return {"fatos": fatos}
 
     def fatos_corrigir(self, id, texto):
         self.fatos = [fato for fato in self.fatos if fato["id"] != id]
@@ -239,10 +246,16 @@ class DesktopApiTests(unittest.TestCase):
                 if tentativa:
                     raise
 
+    def test_server_version_header_matches_official_package_version(self):
+        self.assertEqual(
+            self.server.RequestHandlerClass.server_version,
+            f"ULTRONDesktop/{desktop_api._obter_versao()}",
+        )
+
     def test_health_status_and_events_require_token_and_return_expected_data(self):
         status, health = self.call("/api/v1/health")
         self.assertEqual(status, 200)
-        self.assertEqual(health["version"], "2.1.0")
+        self.assertEqual(health["version"], desktop_api._obter_versao())
         status, snapshot = self.call("/api/v1/status")
         self.assertEqual(status, 200)
         self.assertFalse(snapshot["microphone_paused"])
@@ -413,6 +426,99 @@ class DesktopApiTests(unittest.TestCase):
         self.assertEqual(self.call("/api/v1/cofre/testar", "POST", {"nome": "gemini"})[0], 200)
         self.assertEqual(self.call("/api/v1/cofre/testar", "POST", {"nome": "email_senha"})[0], 400)
 
+    def test_get_fatos_busca_filtrada_validada_e_segura(self):
+        # 1. Consulta sem filtro
+        status, data = self.call("/api/v1/fatos")
+        self.assertEqual(status, 200)
+        self.assertEqual(len(data["fatos"]), 2)
+        self.assertEqual(data["fatos"][0]["id"], 1)
+        self.assertEqual(data["fatos"][1]["id"], 2)
+
+        # 2. Consulta com termo existente
+        status, data = self.call("/api/v1/fatos?busca=caf%C3%A9")
+        self.assertEqual(status, 200)
+        self.assertEqual(len(data["fatos"]), 1)
+        self.assertEqual(data["fatos"][0]["texto"], "gosta de café")
+
+        status, data = self.call("/api/v1/fatos?busca=Curitiba")
+        self.assertEqual(status, 200)
+        self.assertEqual(len(data["fatos"]), 1)
+        self.assertEqual(data["fatos"][0]["texto"], "mora em Curitiba")
+
+        # Consulta com termo sem resultado
+        status, data = self.call("/api/v1/fatos?busca=inexistente")
+        self.assertEqual(status, 200)
+        self.assertEqual(data["fatos"], [])
+
+        # 3. Consulta vazia (? e ?busca= e ?busca)
+        status, data = self.call("/api/v1/fatos?")
+        self.assertEqual(status, 200)
+        self.assertEqual(len(data["fatos"]), 2)
+
+        status, data = self.call("/api/v1/fatos?busca=")
+        self.assertEqual(status, 200)
+        self.assertEqual(len(data["fatos"]), 2)
+
+        status, data = self.call("/api/v1/fatos?busca")
+        self.assertEqual(status, 200)
+        self.assertEqual(len(data["fatos"]), 2)
+
+        status, data = self.call("/api/v1/fatos?busca=%20%20")
+        self.assertEqual(status, 200)
+        self.assertEqual(len(data["fatos"]), 2)
+
+        # 4. Caracteres especiais (acentos, pontuação, espaços, símbolos)
+        status, data = self.call("/api/v1/fatos?busca=%26%20%25%20_%20%3F%20%21")
+        self.assertEqual(status, 200)
+        self.assertEqual(data["fatos"], [])
+
+        # 5. Parâmetro inválido ou não esperado (rejeitado com 400)
+        status, data = self.call("/api/v1/fatos?invalido=1")
+        self.assertEqual(status, 400)
+        self.assertEqual(data, {"error": "invalid_query"})
+
+        status, data = self.call("/api/v1/fatos?busca=cafe&extra=1")
+        self.assertEqual(status, 400)
+        self.assertEqual(data, {"error": "invalid_query"})
+
+        # Parâmetro duplicado
+        status, data = self.call("/api/v1/fatos?busca=a&busca=b")
+        self.assertEqual(status, 400)
+        self.assertEqual(data, {"error": "invalid_query"})
+
+        # Parâmetro com tamanho excessivo (> 300 caracteres)
+        status, data = self.call("/api/v1/fatos?busca=" + "a" * 301)
+        self.assertEqual(status, 400)
+        self.assertEqual(data, {"error": "query_too_long"})
+
+        # Caractere nulo
+        status, data = self.call("/api/v1/fatos?busca=cafe%00")
+        self.assertEqual(status, 400)
+        self.assertEqual(data, {"error": "invalid_query"})
+
+        # 6. Tentativa de injeção SQL tratada como texto literal seguro
+        status, data = self.call("/api/v1/fatos?busca=" + quote("' OR '1'='1"))
+        self.assertEqual(status, 200)
+        self.assertEqual(data["fatos"], [])
+
+        status, data = self.call("/api/v1/fatos?busca=" + quote("; DROP TABLE fatos; --"))
+        self.assertEqual(status, 200)
+        self.assertEqual(data["fatos"], [])
+
+        # 7. Outras rotas GET rejeitam query string com 400
+        status, data = self.call("/api/v1/health?foo=bar")
+        self.assertEqual(status, 400)
+        self.assertEqual(data, {"error": "query_not_supported"})
+
+        status, data = self.call("/api/v1/status?x=1")
+        self.assertEqual(status, 400)
+        self.assertEqual(data, {"error": "query_not_supported"})
+
+        # POST com query rejeitado com 400
+        status, data = self.call("/api/v1/fatos?busca=cafe", method="POST", data={"id": 1})
+        self.assertEqual(status, 400)
+        self.assertEqual(data, {"error": "query_not_supported"})
+
     def test_get_fatos_lists_and_post_corrects_or_deletes(self):
         status, data = self.call("/api/v1/fatos")
         self.assertEqual(status, 200)
@@ -571,6 +677,76 @@ class RuntimeSkillsTests(unittest.TestCase):
         with patch("skills.aprovar", side_effect=ValueError("já existe")):
             with self.assertRaises(ValueError):
                 self.runtime.skills_aprovar("x")
+
+
+    def test_skills_http_rotas_rejeitam_nao_autenticado_slug_invalido_e_ciclo_real(self):
+        import tempfile
+        import skills
+
+        with tempfile.TemporaryDirectory() as tmp:
+            base = Path(tmp) / "skills"
+            pend = base / ".pendentes"
+            with patch.object(skills, "BASE", base), \
+                 patch.object(skills, "PENDENTES", pend), \
+                 patch.object(skills, "USO", base / ".uso.json"):
+                skills.invalidar()
+                slug = skills.criar("Abrir Relatorio", "Abre relatorio", "pedir relatorio", "1. Abrir pasta")
+                server, url = create_server(self.runtime, "tok-" + "s" * 40)
+                thread = threading.Thread(target=server.serve_forever, daemon=True)
+                thread.start()
+                try:
+                    def req_call(path, method="GET", body=None, token="tok-" + "s" * 40):
+                        headers = {}
+                        if token is not None:
+                            headers["X-ULTRON-Token"] = token
+                        raw = None if body is None else json.dumps(body).encode()
+                        if raw is not None:
+                            headers["Content-Type"] = "application/json"
+                        r = Request(url + path, data=raw, headers=headers, method=method)
+                        try:
+                            with urlopen(r, timeout=2) as resp:
+                                return resp.status, json.loads(resp.read().decode())
+                        except HTTPError as err:
+                            data = err.read().decode()
+                            err.close()
+                            return err.code, json.loads(data) if data else {}
+
+                    # Sem token -> 401
+                    self.assertEqual(req_call("/api/v1/skills", token=None)[0], 401)
+                    self.assertEqual(req_call("/api/v1/skills/approve", "POST", {"nome": slug}, token=None)[0], 401)
+
+                    # Traversal e identificador inexistente -> rejeitados
+                    self.assertEqual(req_call("/api/v1/skills/approve", "POST", {"nome": "../evil"})[0], 409)
+                    self.assertEqual(req_call("/api/v1/skills/discard", "POST", {"nome": "../evil"})[0], 400)
+                    self.assertEqual(req_call("/api/v1/skills/approve", "POST", {"nome": "nao-existe"})[0], 409)
+                    self.assertEqual(req_call("/api/v1/skills/discard", "POST", {"nome": 123})[0], 400)
+
+                    # Listagem real devolve pendente com corpo e depois aprova
+                    st, lista = req_call("/api/v1/skills")
+                    self.assertEqual(st, 200)
+                    self.assertEqual(len(lista["pendentes"]), 1)
+                    self.assertEqual(lista["pendentes"][0]["slug"], slug)
+                    st, ok_ap = req_call("/api/v1/skills/approve", "POST", {"nome": slug})
+                    self.assertEqual(st, 200)
+                    self.assertEqual(ok_ap, {"ok": True, "slug": slug})
+
+                    # Dupla aprovação após já aprovada devolve 409 conflict
+                    st, _ = req_call("/api/v1/skills/approve", "POST", {"nome": slug})
+                    self.assertEqual(st, 409)
+
+                    # Novo rascunho pode ser descartado
+                    slug2 = skills.criar("Rascunho Temporario", "Tmp", "teste", "1. Nada")
+                    st, ok_ds = req_call("/api/v1/skills/discard", "POST", {"nome": slug2})
+                    self.assertEqual(st, 200)
+                    self.assertEqual(ok_ds, {"ok": True})
+                    _, final = req_call("/api/v1/skills")
+                    self.assertEqual(final["pendentes"], [])
+                    self.assertEqual([s["slug"] for s in final["skills"]], [slug])
+                finally:
+                    server.shutdown()
+                    server.server_close()
+                    thread.join(timeout=1)
+                    skills.invalidar()
 
 
 if __name__ == "__main__":

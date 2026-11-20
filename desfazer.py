@@ -32,7 +32,9 @@ from pathlib import Path
 
 from config import BASE
 
-DIARIO_DIR = BASE / "dados" / "desfazer"
+import config
+
+DIARIO_DIR = getattr(config, "ARQUIVO_DESFAZER_DIR", getattr(config, "DIR_DADOS", BASE / "dados") / "desfazer")
 DIARIO = DIARIO_DIR / "diario.json"
 
 MAX_ENTRADAS = 50

@@ -1,12 +1,13 @@
 {
   "name": "ultron-desktop",
   "version": "2.1.0",
-  "description": "U.L.T.R.O.N. Desktop para Windows \u2014 interface nativa baseada na camada web do ULTRON",
+  "description": "U.L.T.R.O.N. Desktop para Windows — interface nativa baseada na camada web do ULTRON",
   "main": "main.js",
   "author": "U.L.T.R.O.N.",
   "license": "UNLICENSED",
   "scripts": {
     "start": "electron .",
+    "test": "node --test --test-concurrency=1 test/*.test.js site/test/*.mjs",
     "dist": "electron-builder --win nsis portable",
     "pack": "electron-builder --dir"
   },
@@ -41,6 +42,13 @@
       "site/src/real.js",
       "package.json",
       "site/src/orb.js",
+      "site/src/skills.js",
+      "site/src/unlock.js",
+      "site/src/boot-screen.js",
+      "site/src/personalidade-painel.js",
+      "site/src/memoria-painel.js",
+      "site/src/bloco12-painel.js",
+      "site/src/palco-noticias.js",
       "site/zoom-lock.js"
     ],
     "win": {

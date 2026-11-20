@@ -216,6 +216,72 @@ class PalcoTests(unittest.TestCase):
         self.assertLessEqual(len(eventos), 33)
         self.assertEqual(eventos[-1]["indice"], 79)
 
+    def test_noticias_deduplica_imagens_e_sanitiza_urls(self):
+        payload = json.dumps({
+            "tema": "tecnologia",
+            "itens": [
+                {"titulo": "Manchete 1", "resumo": "Resumo 1", "imagem": "https://cdn/1.jpg", "url": "https://site/1"},
+                {"titulo": "Manchete 2", "resumo": "Resumo 2", "imagem": "https://cdn/1.jpg", "url": "http://127.0.0.1/x"},
+                {"titulo": "Manchete 3", "resumo": "Resumo 3", "imagem": "https://cdn/3.jpg", "url": "https://site/3"},
+            ],
+        })
+
+        def validar(u):
+            if "127.0.0.1" in u:
+                raise ValueError("local recusado")
+            return u
+
+        with patch.object(palco, "_url_remota", side_effect=validar):
+            res = palco.mostrar("noticias", payload, "Notícias · tecnologia")
+
+        self.assertTrue(res["ok"], res)
+        dados = res["palco"]
+        self.assertEqual(dados["tipo"], "noticias")
+        self.assertEqual(len(dados["itens"]), 3)
+        self.assertEqual(dados["itens"][0]["imagem"], "https://cdn/1.jpg")
+        self.assertEqual(dados["itens"][1]["imagem"], "")
+        self.assertEqual(dados["itens"][1]["url"], "")
+        self.assertEqual(dados["itens"][2]["imagem"], "https://cdn/3.jpg")
+
+    def test_youtube_como_site_ou_auto_vira_video_embed(self):
+        with patch.object(palco, "_url_remota", side_effect=lambda url: url):
+            res_site = palco.mostrar("site", "https://www.youtube.com/watch?v=dQw4w9WgXcQ")
+            res_auto = palco.mostrar("auto", "https://youtu.be/dQw4w9WgXcQ")
+        self.assertTrue(res_site["ok"], res_site)
+        self.assertEqual(res_site["palco"]["tipo"], "video")
+        self.assertTrue(res_site["palco"]["embed"])
+        self.assertTrue(res_auto["ok"], res_auto)
+        self.assertEqual(res_auto["palco"]["tipo"], "video")
+        self.assertTrue(res_auto["palco"]["embed"])
+
+    def test_mostrar_na_interface_busca_youtube_quando_site_de_busca_ou_termo(self):
+        import ferramentas
+        with patch.object(ferramentas, "_buscar_url_youtube", return_value="https://www.youtube.com/watch?v=sY180yIyx_g") as mk_yt, \
+             patch.object(palco, "_url_remota", side_effect=lambda url: url):
+            r1 = ferramentas.executar(
+                "mostrar_na_interface",
+                {"tipo": "site", "alvo": "https://www.youtube.com/results?search_query=videos+engracados", "titulo": "Vídeos"},
+                lambda *_: True, "teste",
+            )
+            r2 = ferramentas.executar(
+                "mostrar_na_interface",
+                {"tipo": "video", "alvo": "video engraçado"},
+                lambda *_: True, "teste",
+            )
+        self.assertEqual(mk_yt.call_count, 2)
+        self.assertIn("YouTube no palco", r1)
+        self.assertIn("YouTube no palco", r2)
+        self.assertEqual(palco.estado()["tipo"], "video")
+        self.assertTrue(palco.estado()["embed"])
+
+    def test_acao_rapida_video_no_palco(self):
+        import cerebro
+        self.assertEqual(cerebro._acao_rapida("mostre me um video engraçado no palco"), "palco_video:engraçado")
+        self.assertEqual(cerebro._acao_rapida("mostra um vídeo do YouTube sobre IA no modo palco"), "palco_video:IA")
+        self.assertEqual(cerebro._acao_rapida("reproduza um vídeo de gatos"), "palco_video:gatos")
+        self.assertEqual(cerebro._acao_rapida("toca um vídeo sobre Python"), "palco_video:Python")
+        self.assertIsNone(cerebro._acao_rapida("mostra um vídeo de gatos no navegador"))
+
 
 if __name__ == "__main__":
     unittest.main()

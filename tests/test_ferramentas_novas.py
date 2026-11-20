@@ -68,27 +68,23 @@ class RiscosDasFerramentasNovasTests(unittest.TestCase):
         self.assertEqual(cls.risco, ferramentas.MEDIO)
 
     def test_palco_texto_e_fechar_nao_pedem_confirmacao(self):
-        for tipo in ("texto", "fechar"):
+        for tipo in ("texto", "fechar", "noticias"):
             cls = ferramentas.FERRAMENTAS["mostrar_na_interface"]["classificar"](
                 tipo=tipo, alvo="oi")
             self.assertEqual(cls.risco, ferramentas.BAIXO, tipo)
             self.assertTrue(cls.na_allowlist, tipo)
 
-    def test_palco_site_pede_confirmacao(self):
-        cls = ferramentas.FERRAMENTAS["mostrar_na_interface"]["classificar"](
-            tipo="site", alvo="https://example.com")
-        self.assertEqual(cls.risco, ferramentas.MEDIO)
-        self.assertFalse(cls.na_allowlist)
-
-    def test_palco_youtube_e_video_direto_tem_riscos_diferentes(self):
-        cls = ferramentas.FERRAMENTAS["mostrar_na_interface"]["classificar"](
-            tipo="video", alvo="https://www.youtube.com/watch?v=dQw4w9WgXcQ")
-        self.assertEqual(cls.risco, ferramentas.BAIXO)
-        self.assertTrue(cls.na_allowlist)
-        cls = ferramentas.FERRAMENTAS["mostrar_na_interface"]["classificar"](
-            tipo="video", alvo="https://example.com/clip.mp4")
-        self.assertEqual(cls.risco, ferramentas.MEDIO)
-        self.assertFalse(cls.na_allowlist)
+    def test_palco_site_e_midia_remota_nao_pedem_confirmacao(self):
+        for tipo, alvo in (
+            ("site", "https://example.com"),
+            ("imagem", "https://example.com/foto.jpg"),
+            ("video", "https://www.youtube.com/watch?v=dQw4w9WgXcQ"),
+            ("video", "https://example.com/clip.mp4"),
+        ):
+            cls = ferramentas.FERRAMENTAS["mostrar_na_interface"]["classificar"](
+                tipo=tipo, alvo=alvo)
+            self.assertEqual(cls.risco, ferramentas.BAIXO, f"{tipo}:{alvo}")
+            self.assertTrue(cls.na_allowlist, f"{tipo}:{alvo}")
 
     def test_palco_recusa_caminho_protegido(self):
         with patch.object(ferramentas, "_protegido", return_value=True):
@@ -96,19 +92,12 @@ class RiscosDasFerramentasNovasTests(unittest.TestCase):
                 tipo="video", alvo="C:/Windows/clip.mp4")
         self.assertEqual(cls.negar, "protected_path")
 
-    def test_palco_arquivo_local_segue_a_allowlist(self):
-        with patch.object(ferramentas, "_protegido", return_value=False), \
-                patch.object(ferramentas, "_pasta_ok", return_value=True):
-            cls = ferramentas.FERRAMENTAS["mostrar_na_interface"]["classificar"](
-                tipo="imagem", alvo="C:/Users/x/Documents/foto.png")
-        self.assertEqual(cls.risco, ferramentas.BAIXO)
-        self.assertTrue(cls.na_allowlist)
-        with patch.object(ferramentas, "_protegido", return_value=False), \
-                patch.object(ferramentas, "_pasta_ok", return_value=False):
+    def test_palco_arquivo_local_nao_protegido_nao_pede_confirmacao(self):
+        with patch.object(ferramentas, "_protegido", return_value=False):
             cls = ferramentas.FERRAMENTAS["mostrar_na_interface"]["classificar"](
                 tipo="imagem", alvo="C:/Users/x/Outro/foto.png")
-        self.assertEqual(cls.risco, ferramentas.MEDIO)
-        self.assertFalse(cls.na_allowlist)
+        self.assertEqual(cls.risco, ferramentas.BAIXO)
+        self.assertTrue(cls.na_allowlist)
 
 
 class ArquivosNovosTests(unittest.TestCase):
@@ -233,6 +222,16 @@ class PalcoFerramentaTests(unittest.TestCase):
                 lambda *_: True, "teste")
         self.assertIn("Não consegui mostrar", saida)
         self.assertIn("área protegida", saida)
+
+
+class AppRodandoTests(unittest.TestCase):
+    def test_app_rodando_desempacota_tupla_de_tres_elementos_da_janela(self):
+        with patch("time.sleep", return_value=None), \
+             patch("psutil.process_iter", return_value=[]), \
+             patch.object(ferramentas, "_janelas_visiveis",
+                          return_value=[(101, "Bloco de Notas", "notepad.exe")]):
+            self.assertIs(ferramentas._app_rodando(None, "Bloco de Notas"), True)
+            self.assertIs(ferramentas._app_rodando(None, "Calculadora"), False)
 
 
 if __name__ == "__main__":
