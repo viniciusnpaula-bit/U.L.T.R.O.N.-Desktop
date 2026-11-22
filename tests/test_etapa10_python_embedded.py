@@ -34,6 +34,8 @@ MANIFEST_FILE = RUNTIME_DIR / "RUNTIME_INFO.json"
 def garantir_runtime_construido() -> None:
     """Garante que o runtime Python Embedded exista antes de rodar os testes."""
     if not PYTHON_EXE.exists() or not MANIFEST_FILE.exists():
+        if os.environ.get("GITHUB_ACTIONS") == "true" or os.environ.get("CI") == "true":
+            pytest.skip(f"Runtime Python Embedded local ausente no CI: {RUNTIME_DIR}")
         pytest.fail(
             f"Runtime Python Embedded não encontrado em {RUNTIME_DIR}. "
             "Execute 'python tools/build_python_runtime.py' primeiro."

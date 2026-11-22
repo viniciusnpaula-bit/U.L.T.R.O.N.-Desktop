@@ -1,4 +1,5 @@
 import os
+import sys
 import time
 import pytest
 from pathlib import Path
@@ -60,5 +61,6 @@ def test_arquivar_projetos_antigos_compacta_em_tar_zst(tmp_path):
         res = disco_ops.arquivar_projetos_antigos(pasta=str(tmp_path), meses=6, executar=True)
         assert res["compactados"] == 1
         mock_trash.assert_called_once()
-        archive_path = tmp_path / "projeto_antigo.tar.zst"
+        ext = ".tar.zst" if sys.version_info >= (3, 14) else ".tar.gz"
+        archive_path = tmp_path / f"projeto_antigo{ext}"
         assert archive_path.exists()

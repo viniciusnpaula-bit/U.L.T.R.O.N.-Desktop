@@ -497,6 +497,8 @@ class T15_Logs(Base):
 class T17_SessaoDesbloqueada(Base):
     def setUp(self):
         super().setUp()
+        self._eh_admin_orig = seguranca.eh_admin
+        seguranca.eh_admin = lambda: False
         config.PIN = "2468"
         sessao.desbloquear("pin")
 
@@ -504,6 +506,7 @@ class T17_SessaoDesbloqueada(Base):
         sessao.bloquear()
         config.PIN = ""
         config.PIN_HASH = ""
+        seguranca.eh_admin = self._eh_admin_orig
 
     def test_alto_local_reversivel_executa_sem_confirmacao(self):
         c = Conf(False)

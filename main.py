@@ -321,7 +321,8 @@ def modo_voz(bandeja=False, entrada_teclado=True, stop_event=None,
         class _PartesAbortaveis:
             def __iter__(self_it):
                 for item in partes:
-                    if voz._parar.is_set():
+                    parar_voz = getattr(voz, "_parar", None)
+                    if parar_voz is not None and parar_voz.is_set():
                         break
                     yield item
 
@@ -450,16 +451,20 @@ def modo_voz(bandeja=False, entrada_teclado=True, stop_event=None,
                     except Exception:
                         pass
                 exigir_wake = time.time() >= janela
-                try:
-                    detalhe = ouvido.escutar_detalhado(exigir_wake=exigir_wake)
-                except TypeError:
-                    detalhe = ouvido.escutar_detalhado() if hasattr(ouvido, "escutar_detalhado") else {"texto": ouvido.escutar(), "alternativas": [], "erro": None}
+                if hasattr(ouvido, "escutar_detalhado"):
+                    try:
+                        detalhe = ouvido.escutar_detalhado(exigir_wake=exigir_wake)
+                    except TypeError:
+                        detalhe = ouvido.escutar_detalhado()
+                else:
+                    detalhe = {"texto": ouvido.escutar(), "alternativas": [], "erro": None}
                 texto = detalhe.get("texto")
                 if texto:
                     # O Whisper pode devolver "EIULTRON"/"EIUTRON"; sem isso o WAKE não acha.
                     texto = fala.normalizar_despertar(texto)
                 erro_reconhecimento = detalhe.get("erro") or getattr(ouvido, "ultimo_erro", None)
-                if erro_reconhecimento and str(erro_reconhecimento) == voz.ERROS.get("nao_entendi"):
+                erros_voz = getattr(voz, "ERROS", {}) or {}
+                if erro_reconhecimento and str(erro_reconhecimento) == erros_voz.get("nao_entendi"):
                     # Só conta como "não entendi" quando houve fala e ela não foi
                     # compreendida; silêncio e falta de internet não pedem recalibração.
                     getattr(ouvido, "notificar_nao_entendido", lambda: None)()

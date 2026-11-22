@@ -10,6 +10,7 @@ import os
 import re
 import shutil
 import subprocess
+import sys
 import time
 from datetime import datetime
 from pathlib import Path
@@ -712,19 +713,22 @@ def arquivar_projetos_antigos(
     detalhes = []
 
     for proj in candidatos:
-        tar_nome = f"{proj.name}.tar.zst"
+        usar_zst = sys.version_info >= (3, 14)
+        tar_nome = f"{proj.name}.tar.zst" if usar_zst else f"{proj.name}.tar.gz"
+        modo_w = "w:zst" if usar_zst else "w:gz"
+        modo_r = "r:zst" if usar_zst else "r:gz"
         destino_tar = arquivos.nome_livre(proj.parent / tar_nome)
-        temp_tar = destino_tar.with_suffix(".tmp.tar.zst")
+        temp_tar = destino_tar.with_suffix(".tmp" + (".zst" if usar_zst else ".gz"))
 
         info = {"projeto": str(proj), "arquivo": str(destino_tar), "status": "simulado"}
 
         if executar:
             try:
-                with tarfile.open(temp_tar, "w:zst") as tar:
+                with tarfile.open(temp_tar, modo_w) as tar:
                     tar.add(proj, arcname=proj.name)
 
                 # Validação pós-compactação obrigatória
-                with tarfile.open(temp_tar, "r:zst") as tar_val:
+                with tarfile.open(temp_tar, modo_r) as tar_val:
                     membros = tar_val.getmembers()
                     if not membros:
                         raise ValueError("Arquivo .tar.zst gerado está vazio")

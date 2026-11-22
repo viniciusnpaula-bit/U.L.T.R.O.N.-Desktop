@@ -73,6 +73,8 @@ def test_04_bloqueio_de_pastas_de_desenvolvimento_no_iss():
 
 def test_05_arquivos_de_origem_existem():
     """5. Todos os caminhos de origem referenciados no script .iss devem existir no repositório."""
+    if os.environ.get("GITHUB_ACTIONS") == "true" or os.environ.get("CI") == "true":
+        pytest.skip("Artefatos binários locais (.exe/runtime/win-unpacked) não são versionados no CI")
     installer_dir = ROOT / "installer"
     expected_sources = [
         ROOT / "ULTRON.exe",
@@ -101,6 +103,8 @@ def test_05_arquivos_de_origem_existem():
 
 def test_06_instalador_compilado_existe_e_valido():
     """6. O instalador compilado ULTRON-Setup-v<versao>.exe deve existir e ter tamanho compatível."""
+    if os.environ.get("GITHUB_ACTIONS") == "true" or os.environ.get("CI") == "true":
+        pytest.skip("Instalador compilado não é versionado no CI")
     versao = _versao_atual()
     setup_exe = ROOT / "installer" / "dist" / f"ULTRON-Setup-v{versao}.exe"
     assert setup_exe.is_file(), f"O instalador compilado deve existir em {setup_exe}"
@@ -111,6 +115,8 @@ def test_06_instalador_compilado_existe_e_valido():
 
 def test_07_launcher_ultron_exe_valido():
     """7. O launcher ULTRON.exe deve ser um binário Win32 PE limpo (sem bootloader PyInstaller --onefile)."""
+    if os.environ.get("GITHUB_ACTIONS") == "true" or os.environ.get("CI") == "true":
+        pytest.skip("ULTRON.exe compilado não é versionado no CI")
     ultron_exe = ROOT / "ULTRON.exe"
     assert ultron_exe.is_file()
     dados = ultron_exe.read_bytes()
