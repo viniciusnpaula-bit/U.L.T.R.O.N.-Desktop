@@ -61,7 +61,9 @@ contextBridge.exposeInMainWorld('ultron', Object.freeze({
   selectMicrophone: deviceId => ipcRenderer.invoke('api:microphone-device', deviceId),
   confirmation: (requestId, approved, pin) => ipcRenderer.invoke('api:confirmation', requestId, approved, pin),
   emergencyStop: () => ipcRenderer.invoke('api:emergency-stop'),
+  setAutostart: enabled => ipcRenderer.invoke('api:autostart', enabled === true),
   shutdown: () => ipcRenderer.invoke('api:shutdown'),
+  quitApp: () => ipcRenderer.invoke('app:quit'),
   toggleHud: () => ipcRenderer.invoke('hud:toggle'),
   publishHudSnapshot: snapshot => ipcRenderer.invoke('hud:publish', snapshot),
   onHudVisibility: callback => {
@@ -74,8 +76,13 @@ contextBridge.exposeInMainWorld('ultron', Object.freeze({
     ipcRenderer.on('hud:run-action', listener);
     return () => ipcRenderer.removeListener('hud:run-action', listener);
   },
+  onHudCommand: callback => {
+    const listener = (_event, request) => callback(request);
+    ipcRenderer.on('hud:run-command', listener);
+    return () => ipcRenderer.removeListener('hud:run-command', listener);
+  },
   hudActionResult: (requestId, accepted) => ipcRenderer.send('hud:action-result', requestId, accepted === true),
-  version: '2.1.0',
+  version: '3.0.0',
   onSessionLocked: callback => {
     const listener = () => callback();
     ipcRenderer.on('session:locked', listener);

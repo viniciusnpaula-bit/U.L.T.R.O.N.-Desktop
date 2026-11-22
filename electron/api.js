@@ -216,6 +216,10 @@ function createApiClient({ baseUrl, token, fetchImpl = fetch }) {
       return request('POST', '/confirmations', body);
     },
     emergencyStop: () => request('POST', '/emergency-stop', {}),
+    setAutostart: enabled => {
+      if (typeof enabled !== 'boolean') throw new TypeError('Valor de início automático inválido.');
+      return request('POST', '/autostart', { enabled });
+    },
     palcoFechar: () => request('POST', '/palco/fechar', {}),
     shutdown: () => request('POST', '/shutdown', {}),
     bloco1Status: () => request('GET', '/bloco1'),

@@ -51,6 +51,21 @@ class NormalizarDespertarTests(unittest.TestCase):
         uma = fala.normalizar_despertar("EIULTRON, abrir o Chrome")
         self.assertEqual(fala.normalizar_despertar(uma), uma)
 
+    def test_despertar_dinamico_por_identidade(self):
+        from unittest.mock import patch
+
+        casos = [
+            ("jarvis", "jarvis, que horas são?", "Ei, JARVIS, que horas são?", "ei jarvis", "ei ultron"),
+            ("edith", "edit, abrir o chrome", "Ei, EDITH, abrir o chrome", "ei edit", "ei jarvis"),
+            ("visao", "visão, qual a previsão?", "Ei, VISÃO, qual a previsão?", "ei visao", "ei ultron"),
+        ]
+        for pid, entrada, esperado, wake_ok, wake_outro in casos:
+            with patch.object(fala, "perfil_despertar_ativo", return_value=pid):
+                self.assertEqual(fala.normalizar_despertar(entrada), esperado)
+                rx = fala.regex_wake()
+                self.assertIsNotNone(rx.search(wake_ok))
+                self.assertIsNone(rx.search(wake_outro))
+
 
 if __name__ == "__main__":
     unittest.main()

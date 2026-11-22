@@ -97,6 +97,108 @@ class SpotifyTests(unittest.TestCase):
     def test_tocar_e_baixo_risco(self):
         self.assertEqual(ferramentas.FERRAMENTAS["spotify_tocar"]["risco"], "BAIXO")
 
+    def test_minhas_playlists_lista_e_normaliza(self):
+        corpo = {
+            "items": [
+                {
+                    "id": "pl_1",
+                    "name": "Treino Pesado",
+                    "uri": "spotify:playlist:pl_1",
+                    "public": False,
+                    "collaborative": False,
+                    "owner": {"display_name": "Pedro"},
+                    "tracks": {"total": 42},
+                },
+                None,
+            ]
+        }
+        with mock.patch("spotify._pedir", return_value=(200, corpo)):
+            pls = spotify.minhas_playlists()
+        self.assertEqual(len(pls), 1)
+        self.assertEqual(pls[0]["id"], "pl_1")
+        self.assertEqual(pls[0]["nome"], "Treino Pesado")
+        self.assertEqual(pls[0]["total_faixas"], 42)
+
+    def test_adicionar_musica_tocando_a_playlist_por_nome_aproximado(self):
+        estado_atual = {
+            "tocando": True,
+            "id": "trk_99",
+            "uri": "spotify:track:trk_99",
+            "faixa": "Harder, Better, Faster, Stronger",
+            "artista": "Daft Punk",
+            "dispositivo": "PC",
+        }
+        playlists_fake = [
+            {"id": "pl_rock", "nome": "Rock Clássico", "uri": "spotify:playlist:pl_rock", "total_faixas": 10},
+            {"id": "pl_treino", "nome": "Meu Treino 2026", "uri": "spotify:playlist:pl_treino", "total_faixas": 25},
+        ]
+        with mock.patch("spotify.estado", return_value=estado_atual), \
+             mock.patch("spotify.minhas_playlists", return_value=playlists_fake), \
+             mock.patch("spotify._playlist_ja_contem_faixa", return_value=False), \
+             mock.patch("spotify._pedir", return_value=(201, {"snapshot_id": "snap_1"})) as mk_pedir:
+            saida = ferramentas.executar(
+                "spotify_adicionar_playlist",
+                {"playlist": "treino"},
+                lambda *_: True,
+                "teste",
+            )
+        mk_pedir.assert_called_once_with(
+            "POST",
+            "/playlists/pl_treino/items",
+            json={"uris": ["spotify:track:trk_99"]},
+        )
+        self.assertEqual(
+            saida,
+            "Adicionei Harder, Better, Faster, Stronger — Daft Punk à playlist Meu Treino 2026 no Spotify.",
+        )
+
+    def test_adicionar_musica_evita_duplicata_na_playlist(self):
+        estado_atual = {
+            "tocando": True,
+            "id": "trk_1",
+            "uri": "spotify:track:trk_1",
+            "faixa": "One More Time",
+            "artista": "Daft Punk",
+            "dispositivo": "PC",
+        }
+        playlists_fake = [{"id": "pl_1", "nome": "Favoritas", "uri": "spotify:playlist:pl_1", "total_faixas": 5}]
+        with mock.patch("spotify.estado", return_value=estado_atual), \
+             mock.patch("spotify.minhas_playlists", return_value=playlists_fake), \
+             mock.patch("spotify._playlist_ja_contem_faixa", return_value=True), \
+             mock.patch("spotify._pedir") as mk_pedir:
+            saida = spotify.adicionar_a_playlist("Favoritas")
+        mk_pedir.assert_not_called()
+        self.assertIn("já está na playlist Favoritas", saida)
+
+    def test_adicionar_musica_as_curtidas(self):
+        estado_atual = {
+            "tocando": True,
+            "id": "trk_77",
+            "uri": "spotify:track:trk_77",
+            "faixa": "Instant Crush",
+            "artista": "Daft Punk",
+            "dispositivo": "PC",
+        }
+        with mock.patch("spotify.estado", return_value=estado_atual), \
+             mock.patch("spotify.minhas_playlists", return_value=[]), \
+             mock.patch("spotify._pedir", return_value=(200, {})) as mk_pedir:
+            saida = spotify.adicionar_a_playlist("curtidas")
+        mk_pedir.assert_called_once_with("PUT", "/me/library", params={"uris": "spotify:track:trk_77"})
+        self.assertIn("Músicas Curtidas", saida)
+
+    def test_adicionar_quando_nada_tocando_avisa_claramente(self):
+        with mock.patch("spotify.estado", return_value={"tocando": False}):
+            saida = spotify.adicionar_a_playlist("Treino")
+        self.assertIn("Nenhuma música está tocando", saida)
+
+    def test_listar_playlists_ferramenta_marca_dados_externos(self):
+        with mock.patch("spotify.minhas_playlists", return_value=[
+            {"id": "1", "nome": "Foco", "uri": "u1", "total_faixas": 12}
+        ]):
+            saida = ferramentas.executar("spotify_listar_playlists", {}, lambda *_: True, "teste")
+        self.assertIn("DADOS EXTERNOS", saida)
+        self.assertIn("Foco (12 faixas)", saida)
+
 
 class IntencaoSpotifyTests(unittest.TestCase):
     def test_pedido_com_conteudo_vai_para_o_nucleo(self):
@@ -120,6 +222,18 @@ class IntencaoSpotifyTests(unittest.TestCase):
         self.assertEqual(cerebro._acao_rapida("música anterior"), "midia:anterior")
         self.assertEqual(cerebro._acao_rapida("toca Daft Punk no Spotify"), "spotify_tocar:Daft Punk")
         self.assertIsNone(cerebro._acao_rapida("toca uma música no Spotify"))
+        self.assertEqual(
+            cerebro._acao_rapida("adiciona essa música na minha playlist Treino"),
+            "spotify_playlist:Treino",
+        )
+        self.assertEqual(
+            cerebro._acao_rapida("coloca a música que está tocando na playlist de Rock no Spotify"),
+            "spotify_playlist:Rock",
+        )
+        self.assertEqual(
+            cerebro._acao_rapida("curte essa música no Spotify"),
+            "spotify_playlist:curtidas",
+        )
 
     def test_executar_acao_rapida_midia_aciona_controlar_midia(self):
         import cerebro

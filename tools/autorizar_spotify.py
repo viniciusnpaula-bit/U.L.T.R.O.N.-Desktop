@@ -29,7 +29,12 @@ import config
 cofre.aplicar_na_config()          # o client id salvo pela interface vale aqui
 
 REDIRECT = "http://127.0.0.1:8888/callback"
-ESCOPOS = "user-modify-playback-state user-read-playback-state"
+ESCOPOS = (
+    "user-modify-playback-state user-read-playback-state user-read-currently-playing "
+    "playlist-read-private playlist-read-collaborative "
+    "playlist-modify-public playlist-modify-private "
+    "user-library-modify user-library-read"
+)
 _codigo = {}
 
 
@@ -82,6 +87,13 @@ def main() -> int:
     print("\nGuarde no cofre (Configurações → Spotify):")
     print(f"  SPOTIFY_CLIENT_ID={cliente}")
     print(f"  SPOTIFY_REFRESH={dados['refresh_token']}")
+    try:
+        cofre.guardar("spotify_client_id", cliente)
+        cofre.guardar("spotify_refresh", dados["refresh_token"])
+        cofre.aplicar_na_config()
+        print("\n[OK] Refresh token salvo automaticamente no cofre do ULTRON!")
+    except Exception as e:
+        print(f"\n[Aviso] Não foi possível salvar automaticamente no cofre ({e}); cole manualmente nas Configurações.")
     return 0
 
 

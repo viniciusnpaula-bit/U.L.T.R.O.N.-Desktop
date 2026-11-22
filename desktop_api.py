@@ -20,7 +20,7 @@ def _obter_versao() -> str:
             return versao
     except (OSError, ValueError, AttributeError):
         pass
-    return "2.1.0"
+    return "3.0.0"
 
 
 
@@ -361,6 +361,11 @@ def create_server(runtime, token: str, host: str = "127.0.0.1", port: int = PREF
                     import seguranca
                     seguranca.parar_tudo()
                     self._send(200, {"stopped": True})
+                elif path == _PREFIX + "autostart":
+                    if set(body) != {"enabled"} or type(body["enabled"]) is not bool:
+                        self._send(400, {"error": "invalid_autostart_payload"})
+                        return
+                    self._send(200, runtime.set_autostart(body["enabled"]))
                 elif path == _PREFIX + "palco/fechar":
                     if body:
                         self._send(400, {"error": "empty_payload_required"})

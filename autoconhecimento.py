@@ -75,8 +75,8 @@ _GRUPOS = {
         "controlar_mouse_com_gesto", "detectar_gestos_mao", "detectar_objetos", "webcam_foto",
     ),
     "mídia e palco": ("ajustar_volume_app", "controlar_midia", "listar_volumes_apps",
-                      "mostrar_na_interface", "spotify_buscar",
-                      "spotify_estado", "spotify_tocar", "youtube"),
+                      "mostrar_na_interface", "spotify_adicionar_playlist", "spotify_buscar",
+                      "spotify_estado", "spotify_listar_playlists", "spotify_tocar", "youtube"),
     "memória e lembretes": (
         "briefing_matinal", "cancelar_evento", "cancelar_lembrete", "criar_evento",
         "criar_lembrete", "esquecer_fato", "lembrar_fato", "listar_agenda", "listar_lembretes",

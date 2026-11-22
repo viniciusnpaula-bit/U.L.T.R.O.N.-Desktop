@@ -314,9 +314,9 @@ CHAVES = {
     "xai": _env("XAI_API_KEY"),
 }
 MODELOS = {
-    "gemini": _env("GEMINI_MODEL", "gemini-2.0-flash"),
+    "gemini": _env("GEMINI_MODEL", "gemini-3.5-flash"),
     "groq": _env("GROQ_MODEL", "openai/gpt-oss-120b"),
-    "nvidia": _env("NVIDIA_MODEL", "openai/gpt-oss-20b"),
+    "nvidia": _env("NVIDIA_MODEL", "mistralai/mistral-large-4-1t-a52b"),
     "openai": _env("OPENAI_MODEL", "gpt-4o-mini"),
     "openrouter": _env("OPENROUTER_MODEL", "openai/gpt-4o-mini"),
     "mistral": _env("MISTRAL_MODEL", "mistral-small-latest"),
@@ -450,9 +450,9 @@ except ValueError:
     JANELA_SEGUIMENTO = 15.0
 # Bloqueio automático da sessão após N minutos sem uso (0 desliga).
 try:
-    SESSAO_MINUTOS = max(0.0, float(_env("ULTRON_SESSAO_MINUTOS", "15") or 15))
+    SESSAO_MINUTOS = max(0.0, float(_env("ULTRON_SESSAO_MINUTOS", "60") or 60))
 except ValueError:
-    SESSAO_MINUTOS = 15.0
+    SESSAO_MINUTOS = 60.0
 PIN = _env("ULTRON_PIN")   # opcional: exigido em ações CRÍTICAS (digitado no teclado/Telegram, nunca por voz)
 # Preferido: hash PBKDF2 do PIN (tools/definir_pin.py). Quando presente, ULTRON_PIN
 # em texto é ignorado; o texto só continua valendo por compatibilidade.

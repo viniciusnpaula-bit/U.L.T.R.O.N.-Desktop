@@ -107,7 +107,7 @@ export function criarPainelPersonalidade({
       onPerfilMudou?.(perfilAtivo);
       preencherUsuario(atual.usuario || {});
       pintarSaudacao(atual.saudacao !== false);
-      $('profileNote').textContent = `perfil ${perfilAtivo} · jeito ${atual.jeito || 'equilibrado'} · tratamento “${atual.tratamento || '—'}”`;
+      $('profileNote').textContent = `perfil ${perfilAtivo} · jeito ${atual.jeito || 'equilibrado'} · tratamento "${atual.tratamento || '--'}"`;
       $('profileNote').className = 'micro nano ok';
     } catch (error) {
       $('profileNote').textContent = `não consegui ler a personalidade (${error.message})`;
@@ -138,7 +138,7 @@ export function criarPainelPersonalidade({
       if (usuario && salvo.usuario) preencherUsuario(salvo.usuario);
       pintarSaudacao(salvo.saudacao !== false);
       const nomeJeito = jeitosCache.find(j => j.id === salvo.jeito)?.rotulo || salvo.jeito;
-      $('profileNote').textContent = `aplicado: ${salvo.perfil} · ${nomeJeito} · tratamento “${salvo.tratamento}”`;
+      $('profileNote').textContent = `aplicado: ${salvo.perfil} · ${nomeJeito} · tratamento "${salvo.tratamento}"`;
       $('profileNote').className = 'micro nano ok';
       return salvo;
     } catch (error) {

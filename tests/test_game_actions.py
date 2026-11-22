@@ -30,7 +30,7 @@ class GameActionTests(unittest.TestCase):
         processar.assert_called_once_with("ative o modo jogo", None, "voz")
 
     def test_game_mode_runs_tools_in_order_and_stops_on_first_failure(self):
-        execute = Mock(side_effect=["Abrindo Rocket League.", "Abrindo Spotify.", "Minimizei 3 janela(s) visível(is)."])
+        execute = Mock(side_effect=["Abrindo Rocket League.", "Spotify aberto.", "Minimizei 3 janela(s) visível(is)."])
         result = cerebro._executar_acao_rapida("modo_jogo", execute, None, "desktop")
         self.assertEqual([call.args[0] for call in execute.call_args_list],
                          ["abrir_programa", "abrir_programa", "minimizar_janelas"])

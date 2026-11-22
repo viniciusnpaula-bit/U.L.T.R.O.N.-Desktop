@@ -1,37 +1,129 @@
 <!doctype html>
-<html lang="pt-BR">
+<html lang="pt-BR" data-theme="ultron">
 <head>
-<meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1">
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
 <meta name="color-scheme" content="dark">
-<title>U.L.T.R.O.N. — flutuante</title>
+<title>U.L.T.R.O.N. Segundo Plano</title>
 <link rel="stylesheet" href="mini-hud.css">
 <meta http-equiv="Content-Security-Policy" content="default-src 'self'; script-src 'self'; style-src 'self' 'unsafe-inline'; img-src 'self' data:; connect-src 'none'; object-src 'none'; base-uri 'none'; form-action 'none'">
 </head>
-<body>
-<!-- Janela flutuante: o mesmo núcleo em miniatura, resposta recente e três verbos. -->
-<header class="hud-top">
-  <span class="hud-dot" id="hudDot"></span>
-  <b id="hudTitle">U.L.T.R.O.N.</b>
-  <span class="hud-spacer"></span>
-  <button class="hud-x" id="hudReturn" title="Voltar para a janela principal">↩</button>
-</header>
+<body data-style="island" data-pos="top-center">
+<!-- ── Estilo 1: Dynamic Island (Notch) ──────────────────────────────────── -->
+<div class="island" id="island" data-expanded="false" data-mode="auto" data-state="idle">
+  <header class="island-bar" id="islandBar">
+    <div class="island-brand" id="islandToggleArea" role="button" tabindex="0" aria-label="Expandir ou recolher Dynamic Island">
+      <div class="island-orb"><canvas id="hudOrb" aria-hidden="true"></canvas></div>
+      <div class="island-ident">
+        <b id="hudTitle">U.L.T.R.O.N.</b>
+        <span class="island-pill-state" id="hudStateBadge">ouvindo</span>
+      </div>
+    </div>
 
-<main class="hud-body">
-  <div class="hud-orb"><canvas id="hudOrb" aria-hidden="true"></canvas></div>
-  <p class="hud-response" id="hudResponse">aguardando o núcleo</p>
-  <div class="hud-states">
-    <span><i id="hudCore"></i><span id="hudCoreText">—</span></span>
-    <span><i id="hudMic"></i><span id="hudMicText">—</span></span>
+    <div class="island-waves" id="islandWaves" aria-hidden="true">
+      <i></i><i></i><i></i><i></i>
+    </div>
+
+    <div class="island-telemetry" id="islandTelemetry">
+      <span id="hudCpu">CPU --</span>
+      <span id="hudRam">RAM --</span>
+    </div>
+
+    <div class="island-head-actions">
+      <button type="button" class="island-icon-btn" id="islandMicQuick" data-hud-action="mic" aria-pressed="false" title="Mutar ou retomar microfone">
+        <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M12 3a3 3 0 0 0-3 3v6a3 3 0 0 0 6 0V6a3 3 0 0 0-3-3z"/><path d="M19 10v2a7 7 0 0 1-14 0v-2"/><path d="M12 19v3"/><path class="mic-slash" d="M4 4l16 16"/></svg>
+      </button>
+      <button type="button" class="island-icon-btn expanded-only" id="hudReturn" title="Abrir janela principal">
+        <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M15 3h6v6"/><path d="M10 14L21 3"/><path d="M18 13v6a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2V8a2 2 0 0 1 2-2h6"/></svg>
+      </button>
+      <button type="button" class="island-icon-btn expanded-only danger-icon" id="hudQuit" title="Encerrar ULTRON">
+        <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M12 2v10"/><path d="M18.4 6.6a9 9 0 1 1-12.77.04"/></svg>
+      </button>
+    </div>
+  </header>
+
+  <div class="island-expanded" id="islandExpanded">
+    <div class="island-context" id="islandContext">
+      <span class="ctx-tag" id="ctxTag">VOZ</span>
+      <span class="ctx-text" id="ctxText">Diga "Ei, Ultron"</span>
+      <span class="ctx-dot" id="hudDot"></span>
+    </div>
+
+    <p class="island-response" id="hudResponse">Pronto em segundo plano.</p>
+
+    <form class="island-form" id="islandForm" autocomplete="off">
+      <input id="islandInput" type="text" maxlength="500" spellcheck="false" placeholder='Comando rápido para Ultron...'>
+      <button type="submit" id="islandSend" title="Enviar comando">↵</button>
+    </form>
+
+    <footer class="island-actions">
+      <button type="button" id="actMic" data-hud-action="mic" title="Mutar / retomar microfone"><span>Mic</span></button>
+      <button type="button" data-hud-action="media" title="Play / Pause mídia"><span>Mídia</span></button>
+      <button type="button" data-hud-action="vol_down" title="Diminuir volume"><span>Vol −</span></button>
+      <button type="button" data-hud-action="vol_up" title="Aumentar volume"><span>Vol +</span></button>
+      <button type="button" data-hud-action="game" title="Ativar Modo Jogo"><span>Jogo</span></button>
+      <button type="button" class="act-danger" data-hud-action="stop" title="Parada de emergência"><span>Parar</span></button>
+    </footer>
   </div>
-</main>
+</div>
 
-<footer class="hud-verbs">
-  <button data-hud-action="browser" title="Abrir navegador">↗</button>
-  <button data-hud-action="media" title="Pausar / retomar mídia">❚❚</button>
-  <button data-hud-action="volume" title="Aumentar volume">+</button>
-  <button data-hud-action="rocket" title="Abrir Rocket League">◆</button>
-  <button data-hud-action="game" title="Modo jogo">⚡</button>
-  <button data-hud-action="minimize" title="Minimizar tudo">▁</button>
-</footer>
+<!-- ── Estilo 2: Núcleo Solto (Orbe 3D 96px + Projeção Holográfica) ─────── -->
+<div class="free-core" id="freeCore" data-expanded="false" data-side="left" data-state="idle">
+  <div class="core-anchor" id="coreAnchor">
+    <div class="core-orb-btn" id="coreOrbBtn" role="button" tabindex="0" title="Arraste para mover · Clique para abrir projeção · Duplo clique para abrir o app">
+      <canvas id="freeOrbCanvas" aria-hidden="true"></canvas>
+    </div>
+    <button type="button" class="core-mic-fab" id="coreMicFab" data-hud-action="mic" aria-pressed="false" title="Mutar ou retomar microfone">
+      <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M12 3a3 3 0 0 0-3 3v6a3 3 0 0 0 6 0V6a3 3 0 0 0-3-3z"/><path d="M19 10v2a7 7 0 0 1-14 0v-2"/><path d="M12 19v3"/><path class="mic-slash" d="M4 4l16 16"/></svg>
+    </button>
+  </div>
+
+  <aside class="core-card" id="coreCard" aria-label="Projeção holográfica do U.L.T.R.O.N.">
+    <header class="core-card-head">
+      <div class="core-card-ident">
+        <b id="coreTitle">U.L.T.R.O.N.</b>
+        <span class="core-state-pill" id="coreStateBadge">pronto</span>
+      </div>
+      <div class="core-card-meta">
+        <span id="coreCpu">CPU --</span>
+        <span id="coreRam">RAM --</span>
+      </div>
+      <div class="core-card-btns">
+        <button type="button" class="island-icon-btn" id="coreReturn" title="Abrir janela principal">
+          <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M15 3h6v6"/><path d="M10 14L21 3"/><path d="M18 13v6a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2V8a2 2 0 0 1 2-2h6"/></svg>
+        </button>
+        <button type="button" class="island-icon-btn danger-icon" id="coreQuit" title="Encerrar ULTRON">
+          <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M12 2v10"/><path d="M18.4 6.6a9 9 0 1 1-12.77.04"/></svg>
+        </button>
+      </div>
+    </header>
+
+    <div class="core-palco" id="corePalco" hidden>
+      <div class="core-palco-top">
+        <span class="ctx-tag" id="corePalcoTag">PALCO</span>
+        <b class="core-palco-title" id="corePalcoTitle">--</b>
+        <button type="button" class="core-palco-open" id="corePalcoOpen">abrir</button>
+      </div>
+      <p class="core-palco-summary" id="corePalcoSummary"></p>
+    </div>
+
+    <p class="core-response" id="coreResponse">Pronto ao seu lado. Diga "Ei, Ultron".</p>
+
+    <form class="island-form" id="coreForm" autocomplete="off">
+      <input id="coreInput" type="text" maxlength="500" spellcheck="false" placeholder='Pergunte ao Ultron...'>
+      <button type="submit" id="coreSend" title="Enviar comando">↵</button>
+    </form>
+
+    <footer class="island-actions">
+      <button type="button" id="coreActMic" data-hud-action="mic" title="Mutar / retomar microfone"><span>Mic</span></button>
+      <button type="button" data-hud-action="media" title="Play / Pause mídia"><span>Mídia</span></button>
+      <button type="button" data-hud-action="vol_down" title="Diminuir volume"><span>Vol −</span></button>
+      <button type="button" data-hud-action="vol_up" title="Aumentar volume"><span>Vol +</span></button>
+      <button type="button" data-hud-action="game" title="Ativar Modo Jogo"><span>Jogo</span></button>
+      <button type="button" class="act-danger" data-hud-action="stop" title="Parada de emergência"><span>Parar</span></button>
+    </footer>
+  </aside>
+</div>
 <script type="module" src="mini-hud.js"></script>
-</body></html>
+</body>
+</html>

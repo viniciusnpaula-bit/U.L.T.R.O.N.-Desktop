@@ -1,11 +1,11 @@
 ; ==============================================================================
 ; U.L.T.R.O.N. Desktop - Script de Instalação Oficial (Inno Setup)
-; Versão: 2.1.0
+; Versão: 3.0.0
 ; Arquitetura: x64
 ; ==============================================================================
 
 #ifndef MyAppVersion
-  #define MyAppVersion "2.1.0"
+  #define MyAppVersion "3.0.0"
 #endif
 #define MyAppName "U.L.T.R.O.N. Desktop"
 #define MyAppPublisher "ULTRON"

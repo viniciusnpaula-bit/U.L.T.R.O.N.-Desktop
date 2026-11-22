@@ -24,6 +24,58 @@ UNLOCK_FALHAS_MAX = 5
 UNLOCK_ESPERA_S = 30.0
 ARQUIVO_SESSAO = getattr(config, "ARQUIVO_SESSAO", getattr(config, "DIR_DADOS", config.BASE / "dados") / "sessao.json")
 
+_CLASSES_DESKTOP = frozenset({
+    "Progman", "WorkerW", "Shell_TrayWnd", "Shell_SecondaryTrayWnd",
+    "NotifyIconOverflowWindow", "Windows.UI.Core.CoreWindow",
+})
+
+
+def _janela_tela_cheia_ativa() -> bool:
+    """Detecta se há um jogo ou aplicativo em tela cheia real no Windows."""
+    if sys.platform != "win32":
+        return False
+    import ctypes
+    from ctypes import wintypes
+
+    user32 = ctypes.windll.user32
+    hwnd = user32.GetForegroundWindow()
+    if not hwnd or user32.IsIconic(hwnd):
+        return False
+    cls_buf = ctypes.create_unicode_buffer(128)
+    user32.GetClassNameW(hwnd, cls_buf, 128)
+    if cls_buf.value in _CLASSES_DESKTOP:
+        return False
+    title_buf = ctypes.create_unicode_buffer(128)
+    user32.GetWindowTextW(hwnd, title_buf, 128)
+    if title_buf.value.upper().startswith("U.L.T.R.O.N."):
+        return False
+
+    class _RECT(ctypes.Structure):
+        _fields_ = [("left", wintypes.LONG), ("top", wintypes.LONG),
+                    ("right", wintypes.LONG), ("bottom", wintypes.LONG)]
+
+    class _MONITORINFO(ctypes.Structure):
+        _fields_ = [("cbSize", wintypes.DWORD), ("rcMonitor", _RECT),
+                    ("rcWork", _RECT), ("dwFlags", wintypes.DWORD)]
+
+    rect = _RECT()
+    if not user32.GetWindowRect(hwnd, ctypes.byref(rect)):
+        return False
+    hmon = user32.MonitorFromWindow(hwnd, 2)
+    if not hmon:
+        return False
+    info = _MONITORINFO()
+    info.cbSize = ctypes.sizeof(_MONITORINFO)
+    if not user32.GetMonitorInfoW(hmon, ctypes.byref(info)):
+        return False
+    mon = info.rcMonitor
+    return (
+        rect.left <= mon.left + 2
+        and rect.top <= mon.top + 2
+        and rect.right >= mon.right - 2
+        and rect.bottom >= mon.bottom - 2
+    )
+
 
 class DesktopRuntime:
     """Runs one core voice loop and serializes Desktop commands through the core."""
@@ -163,9 +215,31 @@ class DesktopRuntime:
     def _inatividade_limite(self) -> float:
         """Segundos sem uso até bloquear; 0 desliga o monitor."""
         try:
-            return max(0.0, float(getattr(config, "SESSAO_MINUTOS", 15) or 0)) * 60
+            return max(0.0, float(getattr(config, "SESSAO_MINUTOS", 60) or 0)) * 60
         except (TypeError, ValueError):
-            return 15 * 60
+            return 60 * 60
+
+    @staticmethod
+    def _segundos_inatividade_windows() -> float | None:
+        """Segundos desde a última entrada de teclado/mouse no Windows (GetLastInputInfo)."""
+        if sys.platform != "win32":
+            return None
+        try:
+            import ctypes
+            from ctypes import wintypes
+
+            class _LASTINPUTINFO(ctypes.Structure):
+                _fields_ = [("cbSize", wintypes.UINT), ("dwTime", wintypes.DWORD)]
+
+            info = _LASTINPUTINFO()
+            info.cbSize = ctypes.sizeof(_LASTINPUTINFO)
+            if not ctypes.windll.user32.GetLastInputInfo(ctypes.byref(info)):
+                return None
+            tick_atual = ctypes.windll.kernel32.GetTickCount() & 0xFFFFFFFF
+            delta_ms = (tick_atual - (info.dwTime & 0xFFFFFFFF)) & 0xFFFFFFFF
+            return max(0.0, delta_ms / 1000.0)
+        except Exception:
+            return None
 
     def _verificar_inatividade(self) -> bool:
         """Bloqueia a sessão se passou do limite. True quando acabou de bloquear."""
@@ -175,8 +249,18 @@ class DesktopRuntime:
         estado = sessao.estado()
         if not estado.get("desbloqueada"):
             return False
+        agora = time.time()
         desde = estado.get("ultima_atividade") or estado.get("desde") or 0.0
-        if time.time() - desde < limite:
+        inativo_sessao = max(0.0, agora - desde)
+        inativo_pc = self._segundos_inatividade_windows()
+        if inativo_pc is not None and inativo_pc < inativo_sessao:
+            if inativo_pc < limite:
+                sessao.tocar()
+                return False
+            inativo_efetivo = inativo_pc
+        else:
+            inativo_efetivo = inativo_sessao
+        if inativo_efetivo < limite:
             return False
         sessao.bloquear()
         self._log_seg("lock", "ALLOW", "inactivity_timeout")
@@ -819,6 +903,8 @@ class DesktopRuntime:
             raise RuntimeError("O ULTRON Desktop não está em execução.")
         if not isinstance(text, str) or not text.strip() or len(text) > 4000:
             raise ValueError("O comando deve conter de 1 a 4000 caracteres.")
+        if sessao.estado().get("desbloqueada"):
+            sessao.tocar()
         operation_id = uuid.uuid4().hex
         self._commands.put((operation_id, "comando", text.strip()))
         return operation_id
@@ -828,6 +914,8 @@ class DesktopRuntime:
             raise RuntimeError("O ULTRON Desktop não está em execução.")
         if not isinstance(fluxo_id, str) or not re.fullmatch(r"[a-z0-9][a-z0-9._-]{0,39}", fluxo_id):
             raise ValueError("Identificador de fluxo inválido.")
+        if sessao.estado().get("desbloqueada"):
+            sessao.tocar()
         with self._workflow_lock:
             pendente = self._workflow_pending.get(fluxo_id)
             if pendente:
@@ -991,12 +1079,32 @@ class DesktopRuntime:
         self._log_seg("lock", "ALLOW", "session_locked")
         return {"locked": True}
 
+    def set_autostart(self, enabled: bool) -> dict:
+        """Ativa ou desativa a inicialização automática do ULTRON com o Windows."""
+        autostart_mod = importlib.import_module("desktop_autostart")
+        if enabled:
+            exe_atual = Path(sys.executable)
+            pythonw = exe_atual.with_name("pythonw.exe")
+            python_exe = pythonw if pythonw.is_file() else exe_atual
+            script_path = Path(__file__).resolve().with_name("desktop.py")
+            autostart_mod.install(None, python_exe, script_path)
+            self._log_seg("autostart", "ALLOW", "enabled")
+        else:
+            autostart_mod.remove(None)
+            self._log_seg("autostart", "ALLOW", "disabled")
+        return {"autostart_installed": bool(autostart_mod.is_installed())}
+
     def get_snapshot(self) -> dict:
         autostart = False
         try:
             autostart = importlib.import_module("desktop_autostart").is_installed()
         except Exception:
             autostart = False
+        fullscreen = False
+        try:
+            fullscreen = _janela_tela_cheia_ativa()
+        except Exception:
+            fullscreen = False
         metrics = {}
         try:
             psutil = importlib.import_module("psutil")
@@ -1027,6 +1135,7 @@ class DesktopRuntime:
             "microphone_device": self._microphone_preference["name"] if self._microphone_preference else "Padrão do sistema",
             "microphone_device_available": self._microphone_device_index != -1,
             "autostart_installed": autostart,
+            "fullscreen_active": fullscreen,
             "shutdown_requested": self._shutdown_requested,
             "admin_elevated": getattr(self._security, "eh_admin", lambda: False)(),
             "admin_mode": getattr(self._security, "modo_admin_ativo", lambda o: False)("desktop"),

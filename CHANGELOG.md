@@ -1,3 +1,11 @@
+ULTRON Desktop 3.0.0 — HUD/Orb flutuante, Spotify playlists, sessão de 1h, wake-word multi-perfil e instalador nativo
+
+- **Spotify Playlists & Músicas Curtidas (`spotify.py`, `ferramentas.py`, `cerebro.py`):** novas ferramentas `spotify_adicionar_playlist` e `spotify_listar_playlists`, atalhos rápidos de voz/texto (*"adiciona essa música na playlist X"*, *"curte essa música"*), suporte aos endpoints atuais da Web API do Spotify (`/me/library` e `/playlists/{id}/items`), prevenção de duplicatas e atualização automática do cache de token no `cofre.py` e `tools/autorizar_spotify.py`.
+- **Sessão inteligente de 1 hora (`config.py`, `desktop_runtime.py`):** tempo padrão de inatividade ampliado para 60 minutos (`ULTRON_SESSAO_MINUTOS=60`) com monitoramento de atividade real de teclado/mouse no Windows (`GetLastInputInfo`), mantendo o bloqueio imediato ao suspender ou bloquear a tela do Windows.
+- **Dynamic Island & Orbe Flutuante (`electron/main.js`, `electron/site/mini-hud.*`):** novo modo Orbe arrastável com posição persistida, barra lateral/topo da Dynamic Island expandível, ocultação automática em tela cheia e ações rápidas (microfone, parada de emergência e volume).
+- **Despertar multi-perfil (`afe.py`, `fala.py`, `main.py`):** suporte a palavra de ativação dinâmica conforme o perfil escolhido (`Ultron`, `Jarvis`, `Edith` e `Visão`), além de inicialização automática do Windows via UI/API (`/api/v1/autostart`) e lançamento direto de jogos Epic por executável local (`ferramentas_apps.py`).
+- **Resiliência de IA e Mobile LAN (`cerebro.py`, `mobile_api.py`, `installer/`):** descoberta automática de modelos em HTTP 404/410 e fallback grátis em 402, integração Mobile LAN bidirecional HMAC/QR Code e empacotamento oficial com runtime Python 3.14 embutido, launcher nativo `ULTRON.exe` e instalador `ULTRON-Setup-v3.0.0.exe`.
+
 ULTRON Desktop 2.1.0 — agenda, fluxos do usuário, briefing matinal e integração Spotify
 
 - Agenda local (`memoria.py`): criação, listagem e cancelamento de eventos com recorrência configurável (diária, semanal, mensal, intervalos em minutos).

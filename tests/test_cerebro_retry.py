@@ -298,6 +298,32 @@ class ChamarTests(unittest.TestCase):
         self.assertIn("groq", cerebro._sem_reasoning)
         self.assertEqual(cliente.chamadas, 2)
 
+    def test_404_sem_texto_e_410_descobrem_novo_modelo(self):
+        for status, texto in ((404, "Error code: 404"), (410, "Error code: 410 Gone")):
+            cerebro.esquecer_clientes()
+            cliente = ClienteFalso([ErroHTTP(status, texto=texto), "ok"])
+            with self._config(), \
+                    patch.object(cerebro, "_provedores_com_chave", return_value=["gemini"]), \
+                    patch.object(cerebro, "_cliente", return_value=cliente), \
+                    patch.object(cerebro, "_descobrir_modelo", return_value="gemini-3.5-flash") as descobrir, \
+                    patch.object(cerebro.ferramentas, "schemas", return_value=[]):
+                msg = cerebro._chamar([])
+            self.assertEqual(msg.content, "ok")
+            self.assertEqual(descobrir.call_count, 1)
+            self.assertEqual(cerebro._escolhido["gemini"], "gemini-3.5-flash")
+
+    def test_402_openrouter_busca_modelo_gratis(self):
+        cliente = ClienteFalso([ErroHTTP(402, texto="Error code: 402 - Payment Required"), "ok"])
+        with self._config(), \
+                patch.object(cerebro, "_provedores_com_chave", return_value=["openrouter"]), \
+                patch.object(cerebro, "_cliente", return_value=cliente), \
+                patch.object(cerebro, "_descobrir_modelo", return_value="openrouter/free") as descobrir, \
+                patch.object(cerebro.ferramentas, "schemas", return_value=[]):
+            msg = cerebro._chamar([])
+        self.assertEqual(msg.content, "ok")
+        self.assertEqual(descobrir.call_args.kwargs.get("apenas_gratis"), True)
+        self.assertEqual(cerebro._escolhido["openrouter"], "openrouter/free")
+
 
 class VisaoTests(unittest.TestCase):
     def setUp(self):

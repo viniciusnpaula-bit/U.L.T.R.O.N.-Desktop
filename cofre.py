@@ -252,8 +252,18 @@ def mascarar(valor: str) -> str:
 def _esquecer_cache() -> None:
     """A chave mudou: o próximo comando precisa criar clientes novos."""
     try:
+        aplicar_na_config()
+    except Exception:
+        pass
+    try:
         import cerebro
         cerebro.esquecer_clientes()
+    except Exception:
+        pass
+    try:
+        import spotify
+        spotify._token = ""
+        spotify._expira = 0.0
     except Exception:
         pass
 

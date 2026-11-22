@@ -303,16 +303,16 @@ export function criarGerenciadorSkills({ bridge, confirmar, doc = globalThis.doc
     atualizarBotoes();
     try {
       const aviso = acao === 'aprovar'
-        ? `Aprovar e ativar a skill “${alvo.nome}” (${alvo.slug})?\n\nQuando usar: ${alvo.quando || '—'}\n\nRevise os passos antes de confirmar.`
-        : `Descartar permanentemente a skill pendente “${alvo.nome}” (${alvo.slug})?`;
+        ? `Aprovar e ativar a skill "${alvo.nome}" (${alvo.slug})?\n\nQuando usar: ${alvo.quando || '--'}\n\nRevise os passos antes de confirmar.`
+        : `Descartar permanentemente a skill pendente "${alvo.nome}" (${alvo.slug})?`;
       if (!await pedirConfirmacao(aviso)) {
-        nota(`Operação cancelada para “${alvo.nome}”.`);
+        nota(`Operação cancelada para "${alvo.nome}".`);
         return { ok: false, motivo: 'cancelled' };
       }
 
       atualizarCarregamento(true, acao === 'aprovar'
-        ? `aprovando “${alvo.nome}”…`
-        : `descartando “${alvo.nome}”…`);
+        ? `aprovando "${alvo.nome}"…`
+        : `descartando "${alvo.nome}"…`);
 
       const resposta = await ponte[metodo](slug);
       if (!resposta || typeof resposta !== 'object' || Array.isArray(resposta) ||
@@ -322,21 +322,21 @@ export function criarGerenciadorSkills({ bridge, confirmar, doc = globalThis.doc
 
       const carga = await carregar({ forcar: true, silenciosoNota: true, preservarOcupado: true });
       if (!carga.ok) {
-        const msg = `${acao === 'aprovar' ? 'Skill aprovada' : 'Skill descartada'}: “${alvo.nome}”. Não foi possível atualizar a lista (${carga.error}).`;
+        const msg = `${acao === 'aprovar' ? 'Skill aprovada' : 'Skill descartada'}: "${alvo.nome}". Não foi possível atualizar a lista (${carga.error}).`;
         nota(msg, 'err');
         return { ok: true, slug };
       }
       nota(
         acao === 'aprovar'
-          ? `Skill “${alvo.nome}” aprovada e ativada.`
-          : `Skill “${alvo.nome}” descartada.`,
+          ? `Skill "${alvo.nome}" aprovada e ativada.`
+          : `Skill "${alvo.nome}" descartada.`,
         'ok',
       );
       return { ok: true, slug };
     } catch (erro) {
       const msg = limparErro(erro);
       const rotulo = acao === 'aprovar' ? 'Não foi possível aprovar' : 'Não foi possível descartar';
-      const completo = `${rotulo} “${alvo.nome}”: ${msg}`;
+      const completo = `${rotulo} "${alvo.nome}": ${msg}`;
       nota(completo, 'err');
       await carregar({ forcar: true, silenciosoNota: true, preservarOcupado: true });
       return { ok: false, motivo: 'error', erro: completo };

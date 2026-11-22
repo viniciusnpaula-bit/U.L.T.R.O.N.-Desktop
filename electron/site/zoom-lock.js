@@ -4,7 +4,7 @@
 // Aqui fechamos todas as portas do zoom do Chromium:
 //   * Ctrl + roda / Ctrl + "+" / Ctrl + "-" / Ctrl + "0" viram no-op;
 //   * o fator de zoom é reafirmado a cada carregamento (o Electron guarda o último
-//     por origem — um Ctrl+roda esquecido reabria a janela ampliada);
+//     por origem; um Ctrl+roda esquecido reabria a janela ampliada);
 //   * o main process também chama setZoomFactor(1) e limita o visual zoom a 1.
 //
 // Para reativar no futuro (ex.: acessibilidade): `window.ultron.setZoom(true)`

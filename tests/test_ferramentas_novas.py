@@ -233,6 +233,33 @@ class AppRodandoTests(unittest.TestCase):
             self.assertIs(ferramentas._app_rodando(None, "Bloco de Notas"), True)
             self.assertIs(ferramentas._app_rodando(None, "Calculadora"), False)
 
+    def test_app_rodando_uri_launcher_retorna_none_quando_ainda_iniciando(self):
+        item_epic = ("Rocket League®", "uri", "com.epicgames.launcher://apps/rocket?action=launch&silent=true")
+        with patch("time.sleep", return_value=None), \
+             patch("psutil.process_iter", return_value=[]), \
+             patch.object(ferramentas, "_janelas_visiveis", return_value=[]):
+            self.assertIsNone(ferramentas._app_rodando(item_epic, "Rocket League®"))
+
+    def test_jogos_epic_prefere_executavel_local_quando_disponivel(self):
+        import json, tempfile
+        import ferramentas_apps
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            exe = root / "game" / "Binaries" / "Win64" / "Launcher.exe"
+            exe.parent.mkdir(parents=True)
+            exe.write_bytes(b"MZ")
+            manifest = root / "item1.item"
+            manifest.write_text(json.dumps({
+                "DisplayName": "Rocket League®",
+                "CatalogNamespace": "ns",
+                "CatalogItemId": "cid",
+                "AppName": "Sugar",
+                "InstallLocation": str(root / "game"),
+                "LaunchExecutable": "Binaries/Win64/Launcher.exe",
+            }), encoding="utf-8")
+            jogos = ferramentas_apps._jogos_epic(root)
+            self.assertEqual(jogos["Rocket League®"], ("arquivo", str(exe)))
+
 
 if __name__ == "__main__":
     unittest.main()

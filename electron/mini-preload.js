@@ -8,6 +8,10 @@ contextBridge.exposeInMainWorld('ultron', Object.freeze({
     return () => ipcRenderer.removeListener('hud:snapshot', listener);
   },
   returnToMain: () => ipcRenderer.invoke('hud:return'),
+  setIslandExpanded: expanded => ipcRenderer.invoke('hud:expand', expanded === true),
+  moveOrb: (dx, dy, commit) => ipcRenderer.invoke('hud:move', { dx, dy, commit: commit === true }),
   runHudAction: actionId => ipcRenderer.invoke('hud:action', actionId),
-  version: '2.1.0',
+  sendHudCommand: text => ipcRenderer.invoke('hud:command', text),
+  quitApp: () => ipcRenderer.invoke('hud:quit'),
+  version: '3.0.0',
 }));

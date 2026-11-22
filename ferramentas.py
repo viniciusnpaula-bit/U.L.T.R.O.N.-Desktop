@@ -709,6 +709,7 @@ def _app_rodando(item, nome_exibicao):
     import time as _t
     _t.sleep(1.0)
     alvo = _norm(nome_exibicao)
+    eh_uri = isinstance(item, (tuple, list)) and len(item) >= 2 and item[1] == "uri"
     try:
         nomes = {p.info["name"].lower().replace(".exe", "")
                  for p in __import__("psutil").process_iter(["name"]) if p.info.get("name")}
@@ -720,6 +721,9 @@ def _app_rodando(item, nome_exibicao):
         titulos = [titulo for _h, titulo, _proc in _janelas_visiveis()]
         if any(alvo in _norm(titulo) or _norm(titulo)[:12] == alvo[:12] for titulo in titulos):
             return True
+        # Jogos via URI (Epic Games / Steam) iniciam pelo launcher e levam vários segundos.
+        if eh_uri:
+            return None
         return False
     except Exception:
         return None
@@ -1398,6 +1402,40 @@ def spotify_estado():
     if not atual["tocando"]:
         return "Nada tocando no Spotify agora."
     return _dados(f"Tocando {atual['faixa']} — {atual['artista']} em {atual['dispositivo']}.")
+
+
+@ferramenta("Lista as playlists da conta do usuário no Spotify.", risco=BAIXO)
+def spotify_listar_playlists():
+    import spotify
+    if not spotify.configurado():
+        return "O Spotify não está configurado (client id, secret e refresh token no cofre)."
+    try:
+        playlists = spotify.minhas_playlists()
+    except Exception as e:      # noqa: BLE001
+        return f"Não consegui falar com o Spotify: {e}"
+    if not playlists:
+        return "Você ainda não tem playlists na sua conta do Spotify."
+    linhas = [f"- {pl['nome']} ({pl['total_faixas']} faixas)" for pl in playlists]
+    return _dados("Suas playlists no Spotify:\n" + "\n".join(linhas))
+
+
+@ferramenta(
+    "Adiciona a música que está tocando agora no Spotify (ou uma música específica) a uma playlist do usuário "
+    "ou às Músicas Curtidas ('curtidas' / 'favoritas').",
+    risco=BAIXO,
+    params={
+        "playlist": "Nome da playlist de destino (ex.: 'Treino', 'Rock', 'Foco') ou 'curtidas' para Músicas Curtidas.",
+        "musica": "Opcional. Deixe vazio para adicionar a música que está tocando agora; ou informe nome da música/artista.",
+    },
+)
+def spotify_adicionar_playlist(playlist: str, musica: str = ""):
+    import spotify
+    if not spotify.configurado():
+        return "O Spotify não está configurado (client id, secret e refresh token no cofre)."
+    try:
+        return spotify.adicionar_a_playlist(playlist=playlist, musica=musica)
+    except Exception as e:      # noqa: BLE001
+        return f"Não consegui falar com o Spotify: {e}"
 
 
 @ferramenta("Informações do PC: CPU, memória e bateria.")

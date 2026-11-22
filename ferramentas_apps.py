@@ -95,7 +95,16 @@ def _jogos_epic(pasta=None):
         try:
             d = json.loads(item.read_text(encoding="utf-8", errors="replace"))
             nome = d.get("DisplayName")
-            if nome and d.get("CatalogNamespace") and d.get("CatalogItemId") and d.get("AppName"):
+            if not nome:
+                continue
+            inst = d.get("InstallLocation")
+            launch_rel = d.get("LaunchExecutable")
+            if inst and launch_rel:
+                exe = Path(inst) / launch_rel
+                if exe.is_file():
+                    jogos[nome] = ("arquivo", str(exe))
+                    continue
+            if d.get("CatalogNamespace") and d.get("CatalogItemId") and d.get("AppName"):
                 jogos[nome] = (
                     "uri",
                     f"com.epicgames.launcher://apps/{d['CatalogNamespace']}%3A"
@@ -150,5 +159,8 @@ def _lancar(item):
     _, tipo, valor = item
     if tipo == "appid":
         subprocess.Popen(["explorer.exe", f"shell:AppsFolder\\{valor}"])
+    elif tipo == "arquivo" and str(valor).lower().endswith(".exe"):
+        exe = Path(valor)
+        subprocess.Popen([str(exe)], cwd=str(exe.parent))
     else:
         os.startfile(valor)

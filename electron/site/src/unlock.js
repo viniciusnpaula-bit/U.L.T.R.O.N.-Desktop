@@ -81,7 +81,7 @@ export function criarDesbloqueio({ transport, aoMudarSessao = () => {},
     escrever('unlockHistorico', info?.historico
       ? `AES-256-GCM · ${info.historico.chave === 'indisponivel' ? 'chave indisponível' : 'cifrado'}`
       : 'histórico local');
-    escrever('unlockVersion', info?.versao || '—');
+    escrever('unlockVersion', info?.versao || '--');
     escrever('unlockSession', info?.session?.desbloqueada
       ? `liberado via ${info.session.metodo}` : 'bloqueado');
   }

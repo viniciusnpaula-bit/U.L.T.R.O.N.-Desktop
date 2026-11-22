@@ -149,34 +149,73 @@ def normalizar(texto: str) -> str:
 
 # O Whisper às vezes devolve o despertar grudado ("EIULTRON") ou sem o "Ei"
 # ("E ULTRON"). A normalização devolve sempre a forma canônica que o main.py
-# reconhece, sem tocar no restante da frase.
-_DESPERTAR_LIMPO = re.compile(
-    r"^\s*(?:ei|hey|oi|ouça|e aí)(?:\s*,\s*|\s+)"
-    r"(?:ultr[oa]n|ultrom|ultra\s*on|altron|utron|utrom)\b", re.IGNORECASE)
-_DESPERTAR_GRUDADO = re.compile(
-    r"\b(ei|hey|oi)(ultr[oa]n|ultrom|altron|utron|utrom)\b", re.IGNORECASE)
-_DESPERTAR_VARIANTE = re.compile(
-    r"\b(?:ei|hey|oi|ouça|e aí|e)\s*[,.]?\s*"
-    r"(?:ultr[oa]n|ultrom|ultra\s*on|altron|utron|utrom)\b", re.IGNORECASE)
-_DESPERTAR_SOZINHO = re.compile(
-    r"^\s*(?:ultr[oa]n|ultrom|ultra\s*on|altron|utron|utrom)\b", re.IGNORECASE)
+# reconhece, sem tocar no restante da frase, acompanhando a identidade ativa.
+_DESPERTARES = {
+    "ultron": {
+        "canonico": "Ei, ULTRON",
+        "nome": "Ultron",
+        "nucleo": r"(?:ultr[oa]n|ultrom|ultra\s*on|altron|utron|utrom)",
+    },
+    "jarvis": {
+        "canonico": "Ei, JARVIS",
+        "nome": "Jarvis",
+        "nucleo": r"(?:j[aá]rvis|jarves|jarvi)",
+    },
+    "edith": {
+        "canonico": "Ei, EDITH",
+        "nome": "Edith",
+        "nucleo": r"(?:[eé]dith|edite|edit)",
+    },
+    "visao": {
+        "canonico": "Ei, VISÃO",
+        "nome": "Visão",
+        "nucleo": r"(?:vis[aã]o|vision)",
+    },
+}
 
 
-def normalizar_despertar(texto: str) -> str:
-    """Deixa o despertar sempre como "Ei, ULTRON", preservando o comando.
+def perfil_despertar_ativo() -> str:
+    """Devolve o id da identidade ativa ('ultron', 'jarvis', 'edith' ou 'visao')."""
+    try:
+        import personalidade
+        pid = str(personalidade.carregar().get("id") or "ultron").strip().lower()
+        if pid in _DESPERTARES:
+            return pid
+    except Exception:
+        pass
+    return "ultron"
 
-    É idempotente: uma frase que já começa com "Ei, ULTRON" ou "Ei Ultron"
-    volta exatamente como veio (inclusive maiúsculas e pontuação).
-    """
+
+def nome_despertar(perfil: str | None = None) -> str:
+    pid = perfil if perfil in _DESPERTARES else perfil_despertar_ativo()
+    return _DESPERTARES[pid]["nome"]
+
+
+def regex_wake(perfil: str | None = None) -> re.Pattern:
+    pid = perfil if perfil in _DESPERTARES else perfil_despertar_ativo()
+    nucleo = _DESPERTARES[pid]["nucleo"]
+    return re.compile(rf"(?:\b(?:ei|hey|oi|ouça|e aí)\b[\s,]*)?\b({nucleo})\b[\s,.!?]*")
+
+
+def normalizar_despertar(texto: str, perfil: str | None = None) -> str:
+    """Deixa o despertar na forma canônica da identidade ativa, preservando o comando."""
     original = str(texto or "")
     if not original.strip():
         return original
-    if _DESPERTAR_LIMPO.match(original):
+    pid = perfil if perfil in _DESPERTARES else perfil_despertar_ativo()
+    cfg = _DESPERTARES[pid]
+    nucleo = cfg["nucleo"]
+    canonico = cfg["canonico"]
+    limpo = re.compile(rf"^\s*(?:ei|hey|oi|ouça|e aí)(?:\s*,\s*|\s+){nucleo}\b", re.IGNORECASE)
+    if limpo.match(original):
         return original
-    corrigido = _DESPERTAR_GRUDADO.sub("Ei, ULTRON", original, count=1)
-    corrigido = _DESPERTAR_VARIANTE.sub("Ei, ULTRON", corrigido, count=1)
+    grudado = re.compile(rf"\b(ei|hey|oi)({nucleo})\b", re.IGNORECASE)
+    variante = re.compile(rf"\b(?:ei|hey|oi|ouça|e aí|e)\s*[,.]?\s*{nucleo}\b", re.IGNORECASE)
+    sozinho = re.compile(rf"^\s*{nucleo}\b", re.IGNORECASE)
+    corrigido = grudado.sub(canonico, original, count=1)
+    corrigido = variante.sub(canonico, corrigido, count=1)
     if corrigido == original:
-        corrigido = _DESPERTAR_SOZINHO.sub("Ei, ULTRON", corrigido, count=1)
+        corrigido = sozinho.sub(canonico, corrigido, count=1)
     return corrigido
 
 

@@ -425,7 +425,7 @@ def modo_voz(bandeja=False, entrada_teclado=True, stop_event=None,
                             time.sleep(0.75)
                         if (stop_event is None or not stop_event.is_set()) and not pausado.is_set():
                             voz.falar(personalidade.frase_saudacao(), eco=_eco_atual())
-                    print("Diga 'Ei, Ultron' seguido do comando.")
+                    print(f"Diga 'Ei, {fala.nome_despertar()}' seguido do comando.")
                 if falar_agora.is_set() and not pausado.is_set():
                     # "segurar para falar": grava só enquanto a tecla está pressionada
                     publicar_estado("ouvindo")
@@ -498,7 +498,7 @@ def modo_voz(bandeja=False, entrada_teclado=True, stop_event=None,
                 janela = time.time() + getattr(config, "JANELA_SEGUIMENTO", 15.0)
                 continue
             ultimo_texto_usuario = texto
-            m = WAKE.search(texto.lower())
+            m = fala.regex_wake().search(texto.lower())
             if m:
                 cmd = texto[m.end():].strip()
                 if not cmd:

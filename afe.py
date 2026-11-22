@@ -21,10 +21,21 @@ SAMPLE_RATE = 16000
 BLOCO_AMOSTRAS = 512  # 32 ms a 16 kHz (alinhado ao Silero VAD v5)
 PRE_BUFFER_BLOCOS = 48  # ~1,54 s de histórico pré-fala
 GRAMATICA_WAKE = json.dumps(
-    ["ei ultron", "ei o tron", "ei", "ultron", "para", "[unk]"],
+    [
+        "ei ultron", "ei o tron", "ultron",
+        "ei jarvis", "jarvis",
+        "ei edith", "ei edit", "edith", "edit",
+        "ei visao", "visao",
+        "ei", "para", "[unk]",
+    ],
     ensure_ascii=False,
 )
-_RE_WAKE_LOCAL = re.compile(r"\b(?:ei\s+)?(?:ultron|o\s+tron)\b", re.IGNORECASE)
+_RE_WAKE_LOCAL_POR_PERFIL = {
+    "ultron": re.compile(r"\b(?:ei\s+)?(?:ultron|o\s+tron)\b", re.IGNORECASE),
+    "jarvis": re.compile(r"\b(?:ei\s+)?(?:jarvis|jarves|jarvi)\b", re.IGNORECASE),
+    "edith": re.compile(r"\b(?:ei\s+)?(?:[eé]dith|edite|edit)\b", re.IGNORECASE),
+    "visao": re.compile(r"\b(?:ei\s+)?(?:vis[aã]o|vision)\b", re.IGNORECASE),
+}
 _RE_PARA_LOCAL = re.compile(r"\bpara\b", re.IGNORECASE)
 
 
@@ -32,7 +43,13 @@ def _classificar_kws(texto: str) -> str | None:
     limpo = str(texto or "").strip().lower()
     if not limpo:
         return None
-    if _RE_WAKE_LOCAL.search(limpo):
+    try:
+        import fala
+        pid = fala.perfil_despertar_ativo()
+    except Exception:
+        pid = "ultron"
+    re_wake = _RE_WAKE_LOCAL_POR_PERFIL.get(pid, _RE_WAKE_LOCAL_POR_PERFIL["ultron"])
+    if re_wake.search(limpo):
         return "wake"
     if _RE_PARA_LOCAL.search(limpo):
         return "para"

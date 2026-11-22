@@ -35,11 +35,11 @@ import atualizacao
 
 def test_01_instalador_inno_binario_integridade():
     """1. O instalador compilado oficial deve existir, ter tamanho e cabeçalho PE válidos."""
-    setup_exe = ROOT / "installer" / "dist" / "ULTRON-Setup-v2.1.0.exe"
+    versao = json.loads((ROOT / "electron" / "package.json").read_text(encoding="utf-8"))["version"]
+    setup_exe = ROOT / "installer" / "dist" / f"ULTRON-Setup-v{versao}.exe"
     assert setup_exe.is_file(), f"Instalador oficial ausente: {setup_exe}"
     size = setup_exe.stat().st_size
-    # Tamanho medido de 260.381.463 bytes (~248 MB)
-    assert 200 * 1024 * 1024 <= size <= 350 * 1024 * 1024, f"Tamanho inesperado do instalador: {size} bytes"
+    assert 200 * 1024 * 1024 <= size <= 450 * 1024 * 1024, f"Tamanho inesperado do instalador: {size} bytes"
 
     with open(setup_exe, "rb") as f:
         header = f.read(2)

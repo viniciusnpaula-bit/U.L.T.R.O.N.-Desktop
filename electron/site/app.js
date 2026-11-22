@@ -20,16 +20,31 @@ const VAZIO = { textContent: '', value: '', hidden: true, dataset: {}, style: {}
 const $ = id => document.getElementById(id) || VAZIO;
 const hudActions = Object.freeze({
   browser: 'Abra o navegador', spotify: 'Abra o Spotify', media: 'Pause ou retome a música',
-  volume: 'Aumente o volume do PC', rocket: 'Abra o Rocket League', game: 'Ative o modo jogo',
-  minimize: 'Minimize tudo',
+  volume: 'Aumente o volume do PC', vol_up: 'Aumente o volume do PC', vol_down: 'Diminua o volume do PC',
+  rocket: 'Abra o Rocket League', game: 'Ative o modo jogo', minimize: 'Minimize tudo',
+  mic: '__TOGGLE_MIC__', stop: '__EMERGENCY_STOP__',
 });
+const ISLAND_STYLES = ['island', 'orb'];
+const ISLAND_MODES = ['auto', 'hover', 'click', 'activity'];
+const ISLAND_POSITIONS = ['top-center', 'top-left', 'top-right', 'right', 'left'];
+let islandStyle = 'island';
+let islandMode = 'auto';
+let islandPos = 'top-center';
+try {
+  const estiloSalvo = localStorage.getItem('ultron-island-style');
+  if (ISLAND_STYLES.includes(estiloSalvo)) islandStyle = estiloSalvo;
+  const salvo = localStorage.getItem('ultron-island-mode');
+  if (ISLAND_MODES.includes(salvo)) islandMode = salvo;
+  const posSalva = localStorage.getItem('ultron-island-pos');
+  if (ISLAND_POSITIONS.includes(posSalva)) islandPos = posSalva;
+} catch {}
 const THEMES = ['ultron', 'jarvis', 'amber', 'emerald'];
 const PERFIL_POR_TEMA = { ultron: 'ultron', jarvis: 'jarvis', amber: 'visao', emerald: 'edith' };
 const TEMA_POR_PERFIL = { ultron: 'ultron', jarvis: 'jarvis', visao: 'amber', edith: 'emerald' };
 const state = {
   connected: false, paused: false, history: [], commands: new Map(),
   pending: null, status: {}, lastResponse: '',
-  turns: [],          // bate-papo: {role, text, source, at} — últimas 15
+  turns: [],          // bate-papo: {role, text, source, at}, últimas 15
   turnKeys: new Set(),
   writing: 0,         // turnos que vieram do campo de texto nesta sessão
   palco: null,        // mídia exibida no lugar do núcleo
@@ -107,6 +122,12 @@ function orbLoop(on) {
 }
 
 /* ── tema ────────────────────────────────────────────────────────────────── */
+const WAKE_POR_TEMA = { ultron: 'Ultron', jarvis: 'Jarvis', amber: 'Visão', emerald: 'Edith' };
+function wakeAtivo() {
+  const tema = document.documentElement.dataset.theme || 'ultron';
+  return WAKE_POR_TEMA[tema] || 'Ultron';
+}
+
 function applyTheme(theme) {
   const selected = THEMES.includes(theme) ? theme : 'ultron';
   document.documentElement.dataset.theme = selected;
@@ -115,6 +136,13 @@ function applyTheme(theme) {
   document.querySelectorAll('[data-theme-pill]').forEach(node => {
     node.setAttribute('aria-pressed', String(node.dataset.themePill === selected));
   });
+  const wake = WAKE_POR_TEMA[selected] || 'Ultron';
+  const input = $('commandInput');
+  if (input) input.placeholder = `Diga "Ei, ${wake}" ou digite um comando`;
+  const reply = $('responseText');
+  if (reply && /^Pronto\. Diga "Ei, [^"]+" ou escreva abaixo\.$/.test(reply.textContent.trim())) {
+    reply.textContent = `Pronto. Diga "Ei, ${wake}" ou escreva abaixo.`;
+  }
   publishHudSnapshot();
 }
 
@@ -135,15 +163,56 @@ function aplicarModoNucleo(modo, { avisar = false } = {}) {
   if (avisar) toast(`Núcleo ${modoNucleo.toUpperCase()}`);
 }
 
-/* ── HUD flutuante ───────────────────────────────────────────────────────── */
+/* ── Dynamic Island (modo segundo plano) ─────────────────────────────────── */
+function resumoPalcoAtual(palcoAtual) {
+  if (!palcoAtual || typeof palcoAtual !== 'object') return '';
+  if (typeof palcoAtual.conteudo === 'string' && palcoAtual.conteudo.trim()) {
+    if (palcoAtual.tipo === 'noticias') {
+      try {
+        const parsed = JSON.parse(palcoAtual.conteudo);
+        if (Array.isArray(parsed?.itens) && parsed.itens.length) {
+          return parsed.itens.slice(0, 3).map(it => it?.titulo).filter(Boolean).join(' · ').slice(0, 300);
+        }
+      } catch {}
+    }
+    return palcoAtual.conteudo.trim().replace(/\s+/g, ' ').slice(0, 300);
+  }
+  if (Array.isArray(palcoAtual.itens) && palcoAtual.itens.length) {
+    return palcoAtual.itens.slice(0, 3).map(it => it?.titulo).filter(Boolean).join(' · ').slice(0, 300);
+  }
+  return '';
+}
+
 function publishHudSnapshot() {
   if (!window.ultron?.publishHudSnapshot) return;
+  const st = state.status || {};
+  const threshold = Number(st.microphone_threshold);
+  const level = Number(st.microphone_level);
+  const micLevel = Number.isFinite(threshold) && threshold > 0 && Number.isFinite(level) && level >= 0
+    ? Math.min(100, Math.round(level / threshold * 100))
+    : 0;
+  const palcoAtual = state.palco || st.palco || null;
   window.ultron.publishHudSnapshot({
-    core: typeof state.status.core_running === 'boolean' ? (state.status.core_running ? 'Online' : 'Parado') : 'Indisponível',
-    api: typeof state.status.api_running === 'boolean' ? (state.status.api_running ? 'Conectada' : 'Parada') : 'Indisponível',
+    core: typeof st.core_running === 'boolean' ? (st.core_running ? 'Online' : 'Parado') : 'Indisponível',
+    api: typeof st.api_running === 'boolean' ? (st.api_running ? 'Conectada' : 'Parada') : 'Indisponível',
     microphone: $('micVal')?.textContent || 'Indisponível',
     response: state.lastResponse || 'Indisponível',
     theme: document.documentElement.dataset.theme || 'ultron',
+    wake: wakeAtivo(),
+    islandStyle,
+    islandMode,
+    islandPos,
+    paused: state.paused === true,
+    capturing: st.microphone_capturing === true,
+    speaking: st.speaking === true,
+    processing: String(st.microphone_state || '').toLowerCase() === 'processando',
+    micLevel,
+    cpu: typeof st.cpu_percent === 'number' ? Math.round(st.cpu_percent) : null,
+    ram: typeof st.ram_percent === 'number' ? Math.round(st.ram_percent) : null,
+    palcoTipo: palcoAtual?.tipo || '',
+    palcoTitulo: palcoAtual?.titulo || '',
+    palcoResumo: resumoPalcoAtual(palcoAtual),
+    fullscreen: st.fullscreen_active === true,
   }).catch(() => {});
 }
 
@@ -250,7 +319,7 @@ function renderTurnos(turnos) {
     const vazio = document.createElement('div');
     vazio.className = 'comms-empty';
     vazio.id = 'commsEmpty';
-    vazio.innerHTML = '<b>Ainda não há mensagens.</b><span>Diga “Ei, Ultron” ou escreva abaixo — cada mensagem, de voz ou texto, aparece aqui.</span>';
+    vazio.innerHTML = '<b>Ainda não há mensagens.</b><span>Diga "Ei, Ultron" ou escreva abaixo. Cada mensagem, de voz ou texto, aparece aqui.</span>';
     lista.append(vazio);
     $('commsCount').textContent = '0 mensagens';
     return;
@@ -269,7 +338,7 @@ async function carregarConversa() {
 /* ── diário do dock direito: GET /api/v1/undo, somente leitura ───────────── */
 /* Cada linha é o que o núcleo já fez. Não há botão por linha: o comando real
    desfaz a última operação, não a linha clicada. Com a sessão bloqueada a lista
-   é limpa e não volta a ser buscada — o diário contém caminhos do usuário. */
+   é limpa e não volta a ser buscada, pois o diário contém caminhos do usuário. */
 function linhaDesfazer(item) {
   const linha = document.createElement('article');
   linha.className = 'undo-row';
@@ -399,7 +468,13 @@ function updateStatus(data) {
   setMetric('signalCoreText', $('coreVal').textContent);
   const signalAdmin = $('signalAdmin');
   if (signalAdmin) signalAdmin.hidden = !data.admin_elevated;
-  setMetric('autostartVal', typeof data.autostart_installed === 'boolean' ? (data.autostart_installed ? 'início automático ativo' : 'início automático desligado') : 'início —');
+  const autostartAtivo = typeof data.autostart_installed === 'boolean' ? data.autostart_installed : null;
+  setMetric('autostartVal', autostartAtivo === null ? 'início indefinido' : (autostartAtivo ? 'início automático ativo' : 'início automático desligado'));
+  const autostartBtn = $('autostartToggle');
+  if (autostartBtn && autostartAtivo !== null) {
+    autostartBtn.setAttribute('aria-checked', String(autostartAtivo));
+    autostartBtn.textContent = autostartAtivo ? 'iniciar com o Windows: ativo' : 'iniciar com o Windows: desligado';
+  }
   if ($('authStatus') && data.api_running) $('authStatus').textContent = 'sessão autenticada';
   if ($('uptime')) $('uptime').textContent = data.core_running && data.api_running ? 'CORE + API ONLINE' : 'AGUARDANDO NÚCLEO';
 
@@ -416,7 +491,7 @@ function updateStatus(data) {
   const meter = $('micMeter');
   bar.style.width = `${percent ?? 0}%`;
   meter.classList.toggle('live', percent !== null && !state.paused);
-  setMetric('micLevelVal', percent === null ? '—' : `${percent}%`);
+  setMetric('micLevelVal', percent === null ? '--' : `${percent}%`);
   const detalheMic = data.microphone_error || (state.paused ? 'Escuta pausada' : data.microphone_capturing ? 'Capturando áudio' : data.microphone_state || 'indisponível');
   if ($('micDetail')) $('micDetail').textContent = detalheMic;
   // #voiceSubStatus vive dentro do #reply[aria-live]: só escrever quando muda,
@@ -426,7 +501,7 @@ function updateStatus(data) {
 
   for (const [valueId, barId, value] of [['cpuVal', 'cpuBar', data.cpu_percent], ['ramVal', 'ramBar', data.ram_percent], ['diskVal', 'diskBar', data.disk_percent]]) {
     const n = value == null || !Number.isFinite(Number(value)) ? null : Math.max(0, Math.min(100, Number(value)));
-    setMetric(valueId, n === null ? '—' : `${Math.round(n)}%`);
+    setMetric(valueId, n === null ? '--' : `${Math.round(n)}%`);
     const fill = $(barId);
     if (fill) fill.style.width = `${n ?? 0}%`;
   }
@@ -527,7 +602,7 @@ function confirmation(event) {
 /* ── palco: vídeo, imagem, PDF, site, notícias ou texto no lugar do núcleo ─ */
 const PALCO_ROTULO = Object.freeze({ video: 'vídeo', imagem: 'imagem', pdf: 'PDF', site: 'site', texto: 'texto', noticias: 'notícias' });
 // Vídeo começa mudo (autoplay confiável e sem susto). Em player de outra origem
-// o som só liga recarregando sem o parâmetro de mudo — daí o estado fixo.
+// o som só liga recarregando sem o parâmetro de mudo, por isso o estado fixo.
 let palcoSomLigado = false;
 let palcoSaindo = 0;
 
@@ -563,8 +638,8 @@ function esconderPalco({ avisar = false } = {}) {
   $('palcoExternal').dataset.id = '';
   $('palcoExternal').textContent = 'abrir no navegador';
   $('palcoKind').textContent = 'palco';
-  $('palcoTitle').textContent = '—';
-  $('palcoNote').textContent = '—';
+  $('palcoTitle').textContent = '--';
+  $('palcoNote').textContent = '--';
   $('palcoSource').textContent = '';
   // sai com o mesmo fade da gaveta; reabrir no meio cancela a saída
   clearTimeout(palcoSaindo);
@@ -830,7 +905,7 @@ async function toggleMicrophone() {
     const result = await transport.setMicrophonePaused(!state.paused);
     state.paused = result.paused;
     updateStatus({ core_running: true, microphone_paused: state.paused, microphone_state: state.paused ? 'pausado' : 'ativo' });
-    toast(state.paused ? 'Escuta pausada.' : 'Escuta retomada. Diga “Ei, Ultron”.');
+    toast(state.paused ? 'Escuta pausada.' : `Escuta retomada. Diga "Ei, ${wakeAtivo()}".`);
   } catch (error) { toast(`Não foi possível alterar o microfone: ${error.message}`); }
 }
 
@@ -843,7 +918,7 @@ async function refreshMicrophones() {
     if (!result.selected_available) {
       const missing = document.createElement('option');
       missing.value = '__missing__';
-      missing.textContent = `indisponível — ${result.selected_name}`;
+      missing.textContent = `indisponível: ${result.selected_name}`;
       select.append(missing);
     }
     for (const device of result.devices || []) {
@@ -855,7 +930,7 @@ async function refreshMicrophones() {
     select.value = result.selected_available ? (result.selected_id ?? '') : '__missing__';
     status.textContent = result.selected_available
       ? `ativo: ${result.active_name || result.selected_name}`
-      : `o microfone salvo (“${result.selected_name}”) não está conectado; escolha outra entrada.`;
+      : `O microfone salvo "${result.selected_name}" não está conectado. Escolha outra entrada.`;
   } catch (error) {
     status.textContent = `não foi possível listar as entradas: ${error.message}`;
   }
@@ -965,7 +1040,7 @@ async function carregarVoz() {
     const atual = vozCache.preferencias?.voz || vozCache.ativas?.id || '';
     select.value = [...select.options].some(o => o.value === atual) ? atual : '';
     renderVoiceCards(vozCache.vozes || [], atual);
-    $('voiceActive').textContent = `voz ativa: ${vozCache.ativas?.id || atual || '—'} · reserva: ${vozCache.ativas?.reserva || 'pyttsx3'}`;
+    $('voiceActive').textContent = `voz ativa: ${vozCache.ativas?.id || atual || '--'} · reserva: ${vozCache.ativas?.reserva || 'pyttsx3'}`;
   } catch (error) {
     vozNota(`não consegui ler as vozes (${error.message})`, 'err');
   }
@@ -1002,7 +1077,7 @@ async function testarVoz() {
   vozNota('gerando o áudio de teste…');
   try {
     const r = await window.ultron.vozTestar('Ultrason, teste de voz concluído.');
-    if (r.ok) vozNota(`${r.aviso || ''} voz: ${r.voz?.id || '—'}`, 'ok');
+    if (r.ok) vozNota(`${r.aviso || ''} voz: ${r.voz?.id || '--'}`, 'ok');
     else vozNota(r.erro || 'não consegui falar', 'err');
   } catch (error) {
     vozNota(`falha no teste de voz (${error.message})`, 'err');
@@ -1053,6 +1128,19 @@ function mostrarAba(nome) {
   }
 }
 
+/* categorias da gaveta de sistema: nucleo · cofre · memoria · skills · automacao */
+function mostrarCategoriaDrawer(categoria) {
+  const selecionada = categoria || 'nucleo';
+  document.querySelectorAll('[data-drawer-tab]').forEach(botao => {
+    botao.setAttribute('aria-selected', String(botao.dataset.drawerTab === selecionada));
+  });
+  document.querySelectorAll('#drawer [data-drawer-cat]').forEach(bloco => {
+    bloco.hidden = bloco.dataset.drawerCat !== selecionada;
+  });
+  const corpo = $('drawer')?.querySelector('.drawer-body');
+  if (corpo) corpo.scrollTop = 0;
+}
+
 
 /* Confirmação de fala incerta: mostramos as interpretações e NADA é executado
    sem escolha. Cancelar significa não executar. */
@@ -1072,6 +1160,9 @@ function confirmarFala(event) {
 
 /* ── cofre de chaves: salvar cifrado, testar e remover ───────────────────── */
 /* A chave NUNCA volta para a tela: o status traz só o final mascarado e a fonte. */
+let cofreStatusAtual = null;
+let cofreFiltro = 'all';
+
 function notaCofre(texto, classe = '') {
   const alvo = $('cofreNote');
   alvo.textContent = texto;
@@ -1079,24 +1170,53 @@ function notaCofre(texto, classe = '') {
 }
 
 function pintarCofre(status) {
+  cofreStatusAtual = status;
+  const itens = Array.isArray(status?.itens) ? status.itens : [];
+  const configuradas = itens.filter(i => i.configurada).length;
+  const contador = $('cofreCount');
+  if (contador) contador.textContent = `${configuradas} de ${itens.length} ativas`;
+
+  const visiveis = cofreFiltro === 'active' ? itens.filter(i => i.configurada) : itens;
   const lista = $('cofreList');
   lista.replaceChildren();
-  for (const item of status.itens || []) {
+  if (!visiveis.length) {
+    const vazio = document.createElement('span');
+    vazio.className = 'micro nano';
+    vazio.textContent = cofreFiltro === 'active'
+      ? 'nenhuma credencial ativa ainda'
+      : 'nenhuma credencial listada';
+    lista.append(vazio);
+  }
+  for (const item of visiveis) {
     const linha = document.createElement('div');
     linha.className = 'cofre-item';
+    const info = document.createElement('div');
+    info.className = 'cofre-item-info';
+    info.title = 'Selecionar no formulário acima';
+    info.onclick = () => {
+      const select = $('cofreNome');
+      if (select && [...select.options].some(o => o.value === item.nome)) {
+        select.value = item.nome;
+      }
+      $('cofreValor')?.focus();
+    };
+    const dot = document.createElement('i');
+    dot.className = `cofre-dot ${item.configurada ? 'ok' : ''}`;
     const nome = document.createElement('span');
     nome.textContent = item.rotulo;
+    info.append(dot, nome);
+
     const estado = document.createElement('b');
     estado.className = item.configurada ? 'ok' : 'nok';
     estado.textContent = item.configurada
       ? `${item.fonte === 'cofre' ? 'cofre' : '.env'} · ${item.dica || '••••'}`
-      : 'não configurada';
+      : 'pendente';
     const acoes = document.createElement('div');
 
     if (item.link) {
       const link = document.createElement('button');
       link.type = 'button';
-      link.textContent = 'obter chave';
+      link.textContent = 'obter';
       link.title = 'Abrir a página oficial no navegador';
       link.onclick = async () => {
         try {
@@ -1134,7 +1254,7 @@ function pintarCofre(status) {
       };
       acoes.append(remover);
     }
-    linha.append(nome, estado, acoes);
+    linha.append(info, estado, acoes);
     lista.append(linha);
   }
   $('cofreProtecao').textContent = `proteção: ${status.protecao} · precedência: ${status.precedencia}`;
@@ -1267,7 +1387,7 @@ painelBlocos.vincularControles();
      2. baixar, conferir o SHA-256 e aplicar;
      3. se sobrar arquivo em uso, pedir o reinício (ou reiniciar na hora, se o
         usuário confirmar). O progresso aparece na própria barra.               */
-const updateUi = { job: null, timer: null, version: window.ultron?.version || '2.1.0', busy: false };
+const updateUi = { job: null, timer: null, version: window.ultron?.version || '3.0.0', busy: false };
 
 function updateLinha(texto, classe = '') {
   const alvo = $('updateState');
@@ -1300,7 +1420,7 @@ function mostrarVersao(info) {
   if (check?.status === 'erro') updateLinha(check.message || 'não foi possível verificar', 'err');
   else if (check?.status === 'sem_release') updateLinha('sem release no GitHub');
   else if (check?.update_available) updateLinha(`versão ${check.latest_version} disponível`, 'warn');
-  else if (check) updateLinha('atualizado ✓', 'ok');
+  else if (check) updateLinha('atualizado', 'ok');
   if (info.needs_restart) {
     $('updateRestart').hidden = false;
     updateLinha('reinicie para concluir', 'warn');
@@ -1329,7 +1449,7 @@ async function acompanharAtualizacao() {
           $('updateRollback').hidden = false;
           pedirReinicio(job);
         } else {
-          updateLinha(job.message || 'atualização aplicada ✓', 'ok');
+          updateLinha(job.message || 'atualização aplicada', 'ok');
         }
       } else if (job.status === 'erro') {
         clearInterval(updateUi.timer);
@@ -1380,7 +1500,7 @@ async function atualizarUltron() {
     if (info.status === 'sem_release') { updateLinha('ainda não há release publicado', 'warn'); progresso(null); return; }
     if (!info.update_available) {
       progresso(100);
-      updateLinha(`você já está na versão mais recente (${info.current_version}) ✓`, 'ok');
+      updateLinha(`você já está na versão mais recente (${info.current_version})`, 'ok');
       return;
     }
     updateLinha(`versão ${info.latest_version} encontrada · baixando…`, 'warn');
@@ -1399,7 +1519,7 @@ async function atualizarUltron() {
 async function desfazerAtualizacao() {
   try {
     await window.ultron.updateRollback();
-    updateLinha('backup restaurado ✓', 'ok');
+    updateLinha('backup restaurado', 'ok');
     toast('Versão anterior restaurada.');
   } catch {
     updateLinha('não há backup para restaurar', 'err');
@@ -1555,9 +1675,45 @@ $('voiceStart').onclick = toggleMicrophone;
 $('refreshMicrophones').onclick = () => refreshMicrophones();
 $('saveMicrophone').onclick = saveMicrophone;
 $('testConnection').onclick = () => refreshStatus(true);
+if ($('autostartToggle')) {
+  $('autostartToggle').onclick = async () => {
+    const btn = $('autostartToggle');
+    if (!window.ultron?.setAutostart) {
+      if ($('settingsResult')) $('settingsResult').textContent = 'Controle de início automático disponível apenas no app.';
+      return;
+    }
+    const proximo = btn.getAttribute('aria-checked') !== 'true';
+    btn.disabled = true;
+    try {
+      const res = await window.ultron.setAutostart(proximo);
+      const ativo = Boolean(res?.autostart_installed);
+      btn.setAttribute('aria-checked', String(ativo));
+      btn.textContent = ativo ? 'iniciar com o Windows: ativo' : 'iniciar com o Windows: desligado';
+      setMetric('autostartVal', ativo ? 'início automático ativo' : 'início automático desligado');
+      if ($('settingsResult')) {
+        $('settingsResult').textContent = ativo
+          ? 'Início automático com o Windows ativado.'
+          : 'Início automático com o Windows desligado.';
+      }
+    } catch (erro) {
+      if ($('settingsResult')) $('settingsResult').textContent = erro?.message || 'Não consegui alterar o início automático.';
+    } finally {
+      btn.disabled = false;
+    }
+  };
+}
 
 $('cofreSalvar').onclick = salvarNoCofre;
 $('cofreValor').addEventListener('keydown', event => { if (event.key === 'Enter') salvarNoCofre(); });
+document.querySelectorAll('[data-cofre-filter]').forEach(botao => {
+  botao.addEventListener('click', () => {
+    cofreFiltro = botao.dataset.cofreFilter || 'all';
+    document.querySelectorAll('[data-cofre-filter]').forEach(b => {
+      b.setAttribute('aria-pressed', String(b === botao));
+    });
+    if (cofreStatusAtual) pintarCofre(cofreStatusAtual);
+  });
+});
 $('factsRefresh').onclick = carregarFatos;
 $('skillsRefresh').onclick = carregarSkills;
 $('factsSearch').addEventListener('keydown', event => { if (event.key === 'Enter') carregarFatos(); });
@@ -1571,6 +1727,9 @@ $('tabVoice').onclick = () => mostrarAba('voz');
 $('tabStyle').onclick = () => mostrarAba('jeito');
 $('tabMic').onclick = () => mostrarAba('microfone');
 $('tabAbout').onclick = () => mostrarAba('sobre');
+document.querySelectorAll('[data-drawer-tab]').forEach(botao => {
+  botao.addEventListener('click', () => mostrarCategoriaDrawer(botao.dataset.drawerTab));
+});
 $('updateAction').onclick = atualizarUltron;
 $('previewPersonality').onclick = previaPersonalidade;
 $('resetPersonality').onclick = restaurarPersonalidade;
@@ -1626,15 +1785,23 @@ function limparQrPareamento() {
   $('mobilePairCopyLink').hidden = true;
   $('mobilePairManual').hidden = true;
   $('mobilePairManual').open = false;
-  $('mobilePairManualUrl').textContent = '—';
-  $('mobilePairManualDevice').textContent = '—';
-  $('mobilePairManualSecret').textContent = '—';
+  $('mobilePairManualUrl').textContent = '--';
+  $('mobilePairManualDevice').textContent = '--';
+  $('mobilePairManualSecret').textContent = '--';
 }
 function atualizarBotaoParear(info) {
   const conectado = Boolean(info && info.configured);
   const btn = $('pairPhoneButton');
   btn.dataset.state = conectado ? 'on' : 'off';
   btn.textContent = conectado ? 'celular pareado' : 'parear celular';
+  const dockBadge = $('dockPairState');
+  dockBadge.dataset.state = conectado ? 'on' : 'off';
+  const aparelhos = Array.isArray(info?.devices) ? info.devices.map(d => d?.device_id).filter(Boolean) : [];
+  dockBadge.textContent = conectado ? (aparelhos[0] || 'conectado') : 'desconectado';
+  const dockUri = $('dockPairUri');
+  dockUri.textContent = conectado && info?.lan_url
+    ? `ultron://pair · ${info.lan_url}`
+    : 'ultron://pair · LAN HMAC';
 }
 function fecharModalPareamento() {
   limparQrPareamento();
@@ -1655,9 +1822,9 @@ async function gerarQrPareamento() {
     $('mobilePairCopyLink').hidden = false;
     $('mobilePairRevoke').hidden = false;
     $('mobilePairManual').hidden = false;
-    $('mobilePairManualUrl').textContent = dados.lan_url || '—';
-    $('mobilePairManualDevice').textContent = dados.device_id || '—';
-    $('mobilePairManualSecret').textContent = dados.shared_secret || '—';
+    $('mobilePairManualUrl').textContent = dados.lan_url || '--';
+    $('mobilePairManualDevice').textContent = dados.device_id || '--';
+    $('mobilePairManualSecret').textContent = dados.shared_secret || '--';
     $('mobilePairGenerate').textContent = 'gerar novo QR Code';
     $('mobilePairStatus').textContent = dados.mobile_server_running
       ? `Pronto para conectar (${dados.lan_url})`
@@ -1694,6 +1861,7 @@ async function abrirModalPareamento() {
   await gerarQrPareamento();
 }
 $('pairPhoneButton').onclick = abrirModalPareamento;
+$('dockPairOpen').onclick = abrirModalPareamento;
 $('mobilePairClose').onclick = fecharModalPareamento;
 $('mobilePairGenerate').onclick = gerarQrPareamento;
 $('mobilePairCopyLink').onclick = async () => {
@@ -1702,7 +1870,7 @@ $('mobilePairCopyLink').onclick = async () => {
     await navigator.clipboard.writeText(mobilePairLinkAtual);
     toast('Link de pareamento copiado.');
   } catch {
-    toast('Não consegui copiar automaticamente — abra os dados manuais.');
+    toast('Não consegui copiar automaticamente. Abra os dados manuais.');
   }
 };
 $('mobilePairRevoke').onclick = async () => {
@@ -1754,17 +1922,79 @@ $('palcoExternal').onclick = async () => {
   }
 };
 window.ultron.onHudVisibility(visible => {
-  $('toggleHud').textContent = visible ? 'fechar flutuante' : 'janela flutuante';
-  $('toggleHud').title = visible ? 'Fechar painel flutuante' : 'Abrir painel flutuante';
+  $('toggleHud').textContent = visible ? 'ocultar island' : 'dynamic island';
+  $('toggleHud').title = visible ? 'Ocultar Dynamic Island' : 'Mostrar Dynamic Island';
 });
 window.ultron.onHudAction(async request => {
   if (!request || !Number.isSafeInteger(request.requestId) || !Object.hasOwn(hudActions, request.actionId)) return;
-  $('commandInput').focus();
+  if (request.actionId === 'mic') {
+    await toggleMicrophone();
+    window.ultron.hudActionResult(request.requestId, true);
+    return;
+  }
+  if (request.actionId === 'stop') {
+    await pararTudo();
+    window.ultron.hudActionResult(request.requestId, true);
+    return;
+  }
   window.ultron.hudActionResult(request.requestId, await send(hudActions[request.actionId]));
 });
+if (typeof window.ultron.onHudCommand === 'function') {
+  window.ultron.onHudCommand(async request => {
+    if (!request || !Number.isSafeInteger(request.requestId) || typeof request.text !== 'string') return;
+    window.ultron.hudActionResult(request.requestId, await send(request.text));
+  });
+}
+function atualizarVisibilidadePosicaoIsland() {
+  const row = $('islandPosRow');
+  if (row && row.isConnected) row.hidden = islandStyle === 'orb';
+}
+const islandStyleSelect = $('islandStyleSelect');
+if (islandStyleSelect && islandStyleSelect.isConnected) {
+  islandStyleSelect.value = islandStyle;
+  atualizarVisibilidadePosicaoIsland();
+  islandStyleSelect.onchange = () => {
+    const escolhido = islandStyleSelect.value;
+    islandStyle = ISLAND_STYLES.includes(escolhido) ? escolhido : 'island';
+    try { localStorage.setItem('ultron-island-style', islandStyle); } catch {}
+    atualizarVisibilidadePosicaoIsland();
+    publishHudSnapshot();
+    if ($('settingsResult')) {
+      $('settingsResult').textContent = islandStyle === 'orb'
+        ? 'Núcleo Solto (Orbe 3D) selecionado — arraste para qualquer lugar da tela.'
+        : 'Dynamic Island selecionada.';
+    }
+  };
+}
+const islandModeSelect = $('islandModeSelect');
+if (islandModeSelect && islandModeSelect.isConnected) {
+  islandModeSelect.value = islandMode;
+  islandModeSelect.onchange = () => {
+    const escolhido = islandModeSelect.value;
+    islandMode = ISLAND_MODES.includes(escolhido) ? escolhido : 'auto';
+    try { localStorage.setItem('ultron-island-mode', islandMode); } catch {}
+    publishHudSnapshot();
+    if ($('settingsResult')) $('settingsResult').textContent = 'Modo da Dynamic Island atualizado.';
+  };
+}
+const islandPosSelect = $('islandPosSelect');
+if (islandPosSelect && islandPosSelect.isConnected) {
+  islandPosSelect.value = islandPos;
+  islandPosSelect.onchange = () => {
+    const escolhida = islandPosSelect.value;
+    islandPos = ISLAND_POSITIONS.includes(escolhida) ? escolhida : 'top-center';
+    try { localStorage.setItem('ultron-island-pos', islandPos); } catch {}
+    publishHudSnapshot();
+    if ($('settingsResult')) $('settingsResult').textContent = 'Posição da Dynamic Island atualizada.';
+  };
+}
 $('emergencyStopButton').onclick = async () => {
   if (!window.confirm('Acionar a parada de emergência do ULTRON?')) return;
   pararTudo();
+};
+$('quitAppButton').onclick = async () => {
+  if (!window.confirm('Encerrar completamente o ULTRON e liberar o microfone?')) return;
+  await window.ultron?.quitApp?.();
 };
 
 /* parada de emergência sem confirmação: usada pelo botão e pelo Esc duplo */

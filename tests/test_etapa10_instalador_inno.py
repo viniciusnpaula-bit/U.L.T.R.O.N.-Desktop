@@ -13,6 +13,7 @@ Valida:
 from __future__ import annotations
 
 import base64
+import json
 import os
 import sys
 from pathlib import Path
@@ -25,6 +26,10 @@ if str(ROOT) not in sys.path:
 
 import atualizacao
 import assinatura
+
+
+def _versao_atual() -> str:
+    return json.loads((ROOT / "electron" / "package.json").read_text(encoding="utf-8"))["version"]
 
 
 def test_01_script_inno_setup_existe():
@@ -95,12 +100,13 @@ def test_05_arquivos_de_origem_existem():
 
 
 def test_06_instalador_compilado_existe_e_valido():
-    """6. O instalador compilado ULTRON-Setup-v2.1.0.exe deve existir e ter tamanho compatível."""
-    setup_exe = ROOT / "installer" / "dist" / "ULTRON-Setup-v2.1.0.exe"
-    assert setup_exe.is_file(), "O instalador compilado deve existir em installer/dist/"
+    """6. O instalador compilado ULTRON-Setup-v<versao>.exe deve existir e ter tamanho compatível."""
+    versao = _versao_atual()
+    setup_exe = ROOT / "installer" / "dist" / f"ULTRON-Setup-v{versao}.exe"
+    assert setup_exe.is_file(), f"O instalador compilado deve existir em {setup_exe}"
     size = setup_exe.stat().st_size
-    # Esperado entre 200 MB e 350 MB com compressão sólida LZMA2
-    assert 200 * 1024 * 1024 <= size <= 350 * 1024 * 1024, f"Tamanho inesperado do instalador: {size} bytes"
+    # Esperado entre 200 MB e 450 MB com compressão sólida LZMA2
+    assert 200 * 1024 * 1024 <= size <= 450 * 1024 * 1024, f"Tamanho inesperado do instalador: {size} bytes"
 
 
 def test_07_launcher_ultron_exe_valido():

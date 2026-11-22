@@ -26,6 +26,7 @@ class InatividadeTests(unittest.TestCase):
     def test_bloqueia_apos_o_limite_e_emite_evento(self):
         sessao.desbloquear("pin")
         with patch.object(config, "SESSAO_MINUTOS", 0.01), \
+                patch.object(self.runtime, "_segundos_inatividade_windows", return_value=None), \
                 patch.object(sessao, "estado", return_value=self._estado_com_atividade(100)):
             self.assertTrue(self.runtime._verificar_inatividade())
         self.assertFalse(sessao.estado()["desbloqueada"])
@@ -36,9 +37,32 @@ class InatividadeTests(unittest.TestCase):
     def test_atividade_recente_nao_bloqueia(self):
         sessao.desbloquear("pin")
         sessao.tocar()
-        with patch.object(config, "SESSAO_MINUTOS", 15):
+        with patch.object(config, "SESSAO_MINUTOS", 60):
             self.assertFalse(self.runtime._verificar_inatividade())
         self.assertTrue(sessao.estado()["desbloqueada"])
+
+    def test_atividade_no_windows_mantem_sessao_desbloqueada_e_atualiza_atividade(self):
+        sessao.desbloquear("pin")
+        estado_antigo = self._estado_com_atividade(4000)
+        with patch.object(config, "SESSAO_MINUTOS", 60), \
+                patch.object(self.runtime, "_segundos_inatividade_windows", return_value=12.0), \
+                patch.object(sessao, "estado", return_value=estado_antigo), \
+                patch.object(sessao, "tocar") as mock_tocar:
+            self.assertFalse(self.runtime._verificar_inatividade())
+            mock_tocar.assert_called_once()
+        self.assertTrue(sessao.ultima_atividade() is not None)
+
+    def test_inatividade_no_windows_acima_do_limite_bloqueia_sessao(self):
+        sessao.desbloquear("pin")
+        with patch.object(config, "SESSAO_MINUTOS", 60), \
+                patch.object(self.runtime, "_segundos_inatividade_windows", return_value=3605.0), \
+                patch.object(sessao, "estado", return_value=self._estado_com_atividade(3700)):
+            self.assertTrue(self.runtime._verificar_inatividade())
+        self.assertFalse(sessao.estado()["desbloqueada"])
+
+    def test_padrao_sessao_minutos_eh_uma_hora(self):
+        self.assertEqual(config.SESSAO_MINUTOS, 60.0)
+        self.assertEqual(self.runtime._inatividade_limite(), 3600)
 
     def test_zero_desliga_o_bloqueio(self):
         sessao.desbloquear("pin")

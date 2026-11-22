@@ -2,7 +2,7 @@
 // Camadas: casca octaédrica → cristal geodésico → núcleo → anéis → ondas → scanlines.
 // Traduz o status real em { rotulo, energia, brilho, humor, nivel, dica }.
 // `humor` escolhe a animação e `nivel` é o volume do microfone já normalizado
-// pelo limiar calibrado — nada aqui é inventado: se o campo não vier, é zero.
+// pelo limiar calibrado. Nada aqui é inventado: se o campo não vier, é zero.
 const HUMORES = ['ocioso', 'escutando', 'respondendo', 'trabalhando'];
 
 export function normalizarHumor(valor) {
@@ -34,12 +34,12 @@ export function estadoDoOrbe(s, mem, agora) {
   if (s.microphone_capturing && limiar > 0 && Number(s.microphone_level) > limiar * 0.8) mem.ateFala = agora + 700;
   const nivel = nivelDoMicrofone(s);
   if (agora < (mem.ateFala || 0)) {
-    return { rotulo: 'OUVINDO VOCÊ', dica: 'Fale — estou captando sua voz.', energia: 1, brilho: 1, humor: 'escutando', nivel: Math.max(0.35, nivel) };
+    return { rotulo: 'OUVINDO VOCÊ', dica: 'Fale. Estou captando sua voz.', energia: 1, brilho: 1, humor: 'escutando', nivel: Math.max(0.35, nivel) };
   }
   if (s.microphone_state === 'calibrando' || s.microphone_state === 'iniciando') {
     return { rotulo: 'CALIBRANDO', dica: 'Medindo o ruído do ambiente…', energia: 0.25, brilho: 0.7, humor: 'trabalhando', nivel: 0 };
   }
-  return { rotulo: 'À ESCUTA', dica: 'Diga “Ei, Ultron” ou escreva abaixo.', energia: 0, brilho: 0.85, humor: 'ocioso', nivel };
+  return { rotulo: 'À ESCUTA', dica: 'Diga "Ei, Ultron" ou escreva abaixo.', energia: 0, brilho: 0.85, humor: 'ocioso', nivel };
 }
 
 const CAMERA_PADRAO = Object.freeze({ z: 7.4, foco: (45 * Math.PI) / 180 });
@@ -584,7 +584,7 @@ export function criarOrbe(canvas, { modo } = {}) {
     }
 
     // 6) scanlines e varredura: confinadas ao volume do núcleo, não à tela
-    //    inteira — fora dele viram um filtro de vídeo sobre o fundo
+    //    inteira; fora dele viram um filtro de vídeo sobre o fundo
     const raioLinhas = R * 0.54;
     c.save();
     c.beginPath(); c.arc(0, 0, raioLinhas, 0, Math.PI * 2); c.clip();
@@ -680,7 +680,7 @@ export function criarOrbe(canvas, { modo } = {}) {
 }
 
 // Campo estelar: poeira distante quase parada e poeira próxima com parallax.
-// Deriva lenta para baixo, cintilação e nada de órbita — leitura de céu, não de sistema solar.
+// Deriva lenta para baixo, cintilação e nada de órbita: leitura de céu, não de sistema solar.
 export function criarCampo(canvas) {
   const c = canvas.getContext('2d');
   const reduzir = window.matchMedia?.('(prefers-reduced-motion: reduce)').matches;

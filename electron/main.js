@@ -1,3 +1,4 @@
+const fs = require('node:fs');
 const path = require('node:path');
 const { pathToFileURL } = require('node:url');
 const { app, BrowserWindow, ipcMain, powerMonitor, protocol, screen, session, shell } = require('electron');
@@ -27,14 +28,29 @@ const LINK_HOSTS = Object.freeze([
 ]);
 const quickActions = Object.freeze({
   browser: 'Abra o navegador', spotify: 'Abra o Spotify', media: 'Pause ou retome a música',
-  volume: 'Aumente o volume do PC', rocket: 'Abra o Rocket League', game: 'Ative o modo jogo', minimize: 'Minimize tudo',
+  volume: 'Aumente o volume do PC', vol_up: 'Aumente o volume do PC', vol_down: 'Diminua o volume do PC',
+  rocket: 'Abra o Rocket League', game: 'Ative o modo jogo', minimize: 'Minimize tudo',
+  mic: '__TOGGLE_MIC__', stop: '__EMERGENCY_STOP__',
 });
+const ISLAND_POSITIONS = Object.freeze(['top-center', 'top-left', 'top-right', 'right', 'left']);
+const ISLAND_STYLES = Object.freeze(['island', 'orb']);
+const ISLAND_COMPACT_TOP = Object.freeze({ width: 256, height: 40 });
+const ISLAND_COMPACT_SIDE = Object.freeze({ width: 46, height: 144 });
+const ISLAND_EXPANDED = Object.freeze({ width: 460, height: 256 });
+const ORB_COMPACT = Object.freeze({ width: 116, height: 116 });
+const ORB_EXPANDED = Object.freeze({ width: 492, height: 320 });
 let mainWindow;
 let miniWindow;
 let lastHudSnapshot = null;
 let nextActionRequest = 0;
 const pendingActions = new Map();
 let quitting = false;
+let closingFromIsland = false;
+let islandExpanded = false;
+let islandStyle = 'island';
+let islandPosition = 'top-center';
+let orbSavedPos = null;
+let islandHiddenByFullscreen = false;
 let zoomsEnabled = false;
 let lockPendente = false;
 
@@ -61,6 +77,10 @@ function registerApiHandlers() {
     return api.unlockPin(pin);
   });
   ipcMain.handle('unlock:lock', event => isSender(event, mainWindow) ? api.lock() : null);
+  ipcMain.handle('api:autostart', (event, enabled) => {
+    if (!isSender(event, mainWindow) || typeof enabled !== 'boolean') return null;
+    return api.setAutostart(enabled);
+  });
   ipcMain.handle('undo:list', event => isSender(event, mainWindow) ? api.undoList() : null);
 
   ipcMain.handle('api:microphones', event => {
@@ -303,19 +323,92 @@ function registerApiHandlers() {
     createMiniWindow();
     return true;
   });
+  ipcMain.handle('app:quit', event => {
+    if (!isSender(event, mainWindow)) return false;
+    quitting = true;
+    app.quit();
+    return true;
+  });
   ipcMain.handle('hud:snapshot', event => isSender(event, miniWindow) ? lastHudSnapshot : null);
   ipcMain.handle('hud:publish', (event, snapshot) => {
     if (!isSender(event, mainWindow) || !snapshot || typeof snapshot !== 'object') return false;
     const theme = ['ultron', 'jarvis', 'amber', 'emerald'].includes(snapshot.theme) ? snapshot.theme : 'ultron';
-    const clean = value => typeof value === 'string' ? value.slice(0, 500) : 'Indisponível';
-    lastHudSnapshot = Object.freeze({ core: clean(snapshot.core), api: clean(snapshot.api), microphone: clean(snapshot.microphone), response: clean(snapshot.response), theme });
-    if (miniWindow && !miniWindow.isDestroyed()) miniWindow.webContents.send('hud:snapshot', lastHudSnapshot);
+    const islandMode = ['auto', 'hover', 'click', 'activity'].includes(snapshot.islandMode) ? snapshot.islandMode : 'auto';
+    const nextStyle = ISLAND_STYLES.includes(snapshot.islandStyle) ? snapshot.islandStyle : 'island';
+    const islandPos = ISLAND_POSITIONS.includes(snapshot.islandPos) ? snapshot.islandPos : 'top-center';
+    const geometriaMudou = islandPos !== islandPosition || nextStyle !== islandStyle;
+    islandStyle = nextStyle;
+    islandPosition = islandPos;
+    const clean = (value, max = 500) => typeof value === 'string' ? value.slice(0, max) : '';
+    const num = (value, min, max) => {
+      const n = Number(value);
+      return Number.isFinite(n) ? Math.min(max, Math.max(min, Math.round(n))) : null;
+    };
+    const fullscreen = snapshot.fullscreen === true;
+    const layoutInfo = computeOrbLayout(islandExpanded);
+    lastHudSnapshot = Object.freeze({
+      core: clean(snapshot.core, 40) || 'Indisponível',
+      api: clean(snapshot.api, 40) || 'Indisponível',
+      microphone: clean(snapshot.microphone, 60) || 'Indisponível',
+      response: clean(snapshot.response, 500) || 'Indisponível',
+      wake: clean(snapshot.wake, 24) || 'Ultron',
+      theme,
+      islandStyle,
+      islandMode,
+      islandPos,
+      orbSide: layoutInfo.side,
+      orbOffsetY: layoutInfo.orbOffsetY,
+      paused: snapshot.paused === true,
+      capturing: snapshot.capturing === true,
+      speaking: snapshot.speaking === true,
+      processing: snapshot.processing === true,
+      micLevel: num(snapshot.micLevel, 0, 100) ?? 0,
+      cpu: num(snapshot.cpu, 0, 100),
+      ram: num(snapshot.ram, 0, 100),
+      palcoTipo: clean(snapshot.palcoTipo, 30),
+      palcoTitulo: clean(snapshot.palcoTitulo, 120),
+      palcoResumo: clean(snapshot.palcoResumo, 320),
+      fullscreen,
+    });
+    if (miniWindow && !miniWindow.isDestroyed()) {
+      if (geometriaMudou) miniWindow.setBounds(islandBounds(islandExpanded, islandPosition), false);
+      miniWindow.webContents.send('hud:snapshot', lastHudSnapshot);
+      if (fullscreen && miniWindow.isVisible()) {
+        islandHiddenByFullscreen = true;
+        miniWindow.hide();
+      } else if (!fullscreen && islandHiddenByFullscreen) {
+        islandHiddenByFullscreen = false;
+        miniWindow.showInactive();
+      }
+    }
     return true;
+  });
+  ipcMain.handle('hud:expand', (event, expanded) => {
+    if (!isSender(event, miniWindow) || typeof expanded !== 'boolean') return null;
+    return resizeMiniWindow(expanded);
+  });
+  ipcMain.handle('hud:move', (event, payload) => {
+    if (!isSender(event, miniWindow) || !payload || typeof payload !== 'object') return null;
+    const dx = Number(payload.dx);
+    const dy = Number(payload.dy);
+    if (!Number.isFinite(dx) || !Number.isFinite(dy)) return null;
+    return moveOrbBy(Math.round(dx), Math.round(dy), payload.commit === true);
   });
   ipcMain.handle('hud:return', event => {
     if (!isSender(event, miniWindow)) return false;
+    if (mainWindow && !mainWindow.isDestroyed()) {
+      if (mainWindow.isMinimized()) mainWindow.restore();
+      mainWindow.show();
+      mainWindow.focus();
+    }
     miniWindow.close();
-    if (mainWindow && !mainWindow.isDestroyed()) { if (mainWindow.isMinimized()) mainWindow.restore(); mainWindow.show(); mainWindow.focus(); }
+    return true;
+  });
+  ipcMain.handle('hud:quit', event => {
+    if (!isSender(event, miniWindow)) return false;
+    quitting = true;
+    if (miniWindow && !miniWindow.isDestroyed()) miniWindow.close();
+    app.quit();
     return true;
   });
   ipcMain.handle('hud:action', async (event, actionId) => {
@@ -325,6 +418,17 @@ function registerApiHandlers() {
       const timeout = setTimeout(() => { pendingActions.delete(requestId); resolve(false); }, 15000);
       pendingActions.set(requestId, accepted => { clearTimeout(timeout); pendingActions.delete(requestId); resolve(accepted === true); });
       mainWindow.webContents.send('hud:run-action', { requestId, actionId });
+    });
+  });
+  ipcMain.handle('hud:command', async (event, text) => {
+    if (!isSender(event, miniWindow) || typeof text !== 'string' || !mainWindow || mainWindow.isDestroyed()) return false;
+    const limpo = text.trim().slice(0, 500);
+    if (!limpo) return false;
+    const requestId = ++nextActionRequest;
+    return new Promise(resolve => {
+      const timeout = setTimeout(() => { pendingActions.delete(requestId); resolve(false); }, 15000);
+      pendingActions.set(requestId, accepted => { clearTimeout(timeout); pendingActions.delete(requestId); resolve(accepted === true); });
+      mainWindow.webContents.send('hud:run-command', { requestId, text: limpo });
     });
   });
   ipcMain.on('hud:action-result', (event, requestId, accepted) => {
@@ -380,32 +484,167 @@ function secureLocalWindow(window, file) {
   window.webContents.setWindowOpenHandler(() => ({ action: 'deny' }));
 }
 
-function createMiniWindow() {
-  if (miniWindow && !miniWindow.isDestroyed()) { miniWindow.show(); miniWindow.focus(); return miniWindow; }
-  const file = path.join(__dirname, 'site', 'mini-hud.html');
+function orbPosFile() {
+  try { return path.join(app.getPath('userData'), 'ultron-orb-pos.json'); }
+  catch { return ''; }
+}
+
+function getOrbPos() {
   const area = screen.getPrimaryDisplay().workArea;
-  const width = Math.min(390, area.width);
-  const height = Math.min(650, area.height);
+  if (!orbSavedPos) {
+    try {
+      const file = orbPosFile();
+      if (file && fs.existsSync(file)) {
+        const parsed = JSON.parse(fs.readFileSync(file, 'utf8'));
+        if (Number.isFinite(parsed?.x) && Number.isFinite(parsed?.y)) {
+          orbSavedPos = { x: Math.round(parsed.x), y: Math.round(parsed.y) };
+        }
+      }
+    } catch {}
+  }
+  if (!orbSavedPos) {
+    orbSavedPos = {
+      x: area.x + area.width - ORB_COMPACT.width - 24,
+      y: Math.round(area.y + area.height * 0.42),
+    };
+  }
+  orbSavedPos = {
+    x: Math.max(area.x, Math.min(area.x + area.width - ORB_COMPACT.width, orbSavedPos.x)),
+    y: Math.max(area.y, Math.min(area.y + area.height - ORB_COMPACT.height, orbSavedPos.y)),
+  };
+  return orbSavedPos;
+}
+
+function saveOrbPos() {
+  try {
+    const file = orbPosFile();
+    if (file && orbSavedPos) fs.writeFileSync(file, JSON.stringify(orbSavedPos), 'utf8');
+  } catch {}
+}
+
+function computeOrbLayout(expanded) {
+  const area = screen.getPrimaryDisplay().workArea;
+  const pos = getOrbPos();
+  const centerX = pos.x + ORB_COMPACT.width / 2;
+  const side = centerX > area.x + area.width / 2 ? 'left' : 'right';
+  if (!expanded) {
+    return {
+      rect: { x: pos.x, y: pos.y, width: ORB_COMPACT.width, height: ORB_COMPACT.height },
+      side,
+      orbOffsetY: 0,
+    };
+  }
+  const width = Math.min(ORB_EXPANDED.width, area.width - 16);
+  const height = Math.min(ORB_EXPANDED.height, area.height - 16);
+  const rawX = side === 'left' ? pos.x + ORB_COMPACT.width - width : pos.x;
+  const x = Math.max(area.x + 8, Math.min(area.x + area.width - width - 8, rawX));
+  const rawY = pos.y - 24;
+  const y = Math.max(area.y + 8, Math.min(area.y + area.height - height - 8, rawY));
+  const orbOffsetY = Math.max(0, Math.min(height - ORB_COMPACT.height, pos.y - y));
+  return { rect: { x, y, width, height }, side, orbOffsetY };
+}
+
+function moveOrbBy(dx, dy, commit) {
+  const pos = getOrbPos();
+  const area = screen.getPrimaryDisplay().workArea;
+  orbSavedPos = {
+    x: Math.max(area.x, Math.min(area.x + area.width - ORB_COMPACT.width, pos.x + dx)),
+    y: Math.max(area.y, Math.min(area.y + area.height - ORB_COMPACT.height, pos.y + dy)),
+  };
+  if (commit) saveOrbPos();
+  const layout = computeOrbLayout(islandExpanded);
+  if (miniWindow && !miniWindow.isDestroyed() && islandStyle === 'orb') {
+    miniWindow.setBounds(layout.rect, false);
+  }
+  return { side: layout.side, orbOffsetY: layout.orbOffsetY };
+}
+
+function islandBounds(expanded, pos = islandPosition) {
+  if (islandStyle === 'orb') {
+    return computeOrbLayout(expanded).rect;
+  }
+  const area = screen.getPrimaryDisplay().bounds;
+  const side = pos === 'right' || pos === 'left';
+  const spec = expanded ? ISLAND_EXPANDED : (side ? ISLAND_COMPACT_SIDE : ISLAND_COMPACT_TOP);
+  const width = Math.min(spec.width, area.width - 16);
+  const height = Math.min(spec.height, area.height - 16);
+  if (pos === 'right') {
+    return {
+      x: area.x + area.width - width,
+      y: Math.round(area.y + (area.height - height) / 2),
+      width,
+      height,
+    };
+  }
+  if (pos === 'left') {
+    return {
+      x: area.x,
+      y: Math.round(area.y + (area.height - height) / 2),
+      width,
+      height,
+    };
+  }
+  if (pos === 'top-left') {
+    return { x: area.x + 18, y: area.y, width, height };
+  }
+  if (pos === 'top-right') {
+    return { x: area.x + area.width - width - 18, y: area.y, width, height };
+  }
+  return {
+    x: Math.round(area.x + (area.width - width) / 2),
+    y: area.y,
+    width,
+    height,
+  };
+}
+
+function resizeMiniWindow(expanded) {
+  islandExpanded = Boolean(expanded);
+  const layout = islandStyle === 'orb' ? computeOrbLayout(islandExpanded) : { side: 'left', orbOffsetY: 0 };
+  if (!miniWindow || miniWindow.isDestroyed()) return { side: layout.side, orbOffsetY: layout.orbOffsetY };
+  miniWindow.setBounds(islandBounds(islandExpanded, islandPosition), false);
+  return { side: layout.side, orbOffsetY: layout.orbOffsetY };
+}
+
+function createMiniWindow() {
+  if (miniWindow && !miniWindow.isDestroyed()) {
+    if (!lastHudSnapshot?.fullscreen) miniWindow.showInactive();
+    return miniWindow;
+  }
+  const file = path.join(__dirname, 'site', 'mini-hud.html');
+  islandExpanded = false;
+  islandHiddenByFullscreen = false;
+  const rect = islandBounds(false);
   miniWindow = new BrowserWindow({
-    width, height, x: area.x + area.width - width - 18, y: area.y + 18,
-    minWidth: width, maxWidth: width, minHeight: Math.min(420, height), maxHeight: height,
-    frame: false, resizable: false, alwaysOnTop: true, skipTaskbar: true,
-    backgroundColor: '#07080b', autoHideMenuBar: true, icon: path.join(__dirname, 'assets', 'ULTRON.ico'),
+    x: rect.x, y: rect.y, width: rect.width, height: rect.height,
+    frame: false, transparent: true, hasShadow: false, resizable: false,
+    alwaysOnTop: true, skipTaskbar: true, show: false,
+    backgroundColor: '#00000000', autoHideMenuBar: true,
+    icon: path.join(__dirname, 'assets', 'ULTRON.ico'),
     webPreferences: { preload: path.join(__dirname, 'mini-preload.js'), contextIsolation: true, sandbox: true, nodeIntegration: false },
   });
+  miniWindow.setAlwaysOnTop(true, 'screen-saver');
   secureLocalWindow(miniWindow, file);
   miniWindow.on('closed', () => {
     miniWindow = null;
+    islandExpanded = false;
+    islandHiddenByFullscreen = false;
     if (mainWindow && !mainWindow.isDestroyed()) {
       mainWindow.webContents.send('hud:visibility', false);
+      if (!quitting && !mainWindow.isVisible()) closingFromIsland = true;
       if (!quitting && !mainWindow.isVisible()) mainWindow.close();
     }
   });
   miniWindow.loadFile(file);
   miniWindow.webContents.once('did-finish-load', () => {
     if (!miniWindow || miniWindow.isDestroyed()) return;
-    miniWindow.webContents.send('hud:snapshot', lastHudSnapshot);
+    if (lastHudSnapshot) miniWindow.webContents.send('hud:snapshot', lastHudSnapshot);
     if (mainWindow && !mainWindow.isDestroyed()) mainWindow.webContents.send('hud:visibility', true);
+    if (lastHudSnapshot?.fullscreen) {
+      islandHiddenByFullscreen = true;
+    } else {
+      miniWindow.showInactive();
+    }
   });
   return miniWindow;
 }
@@ -439,8 +678,19 @@ function createWindow() {
     },
   });
   secureLocalWindow(mainWindow, indexFile);
+  mainWindow.on('minimize', event => {
+    if (!quitting) {
+      event.preventDefault();
+      mainWindow.hide();
+      createMiniWindow();
+    }
+  });
   mainWindow.on('close', event => {
-    if (!quitting && miniWindow && !miniWindow.isDestroyed()) { event.preventDefault(); mainWindow.hide(); }
+    if (!quitting && !closingFromIsland) {
+      event.preventDefault();
+      mainWindow.hide();
+      createMiniWindow();
+    }
   });
   mainWindow.on('closed', () => { mainWindow = null; });
   mainWindow.loadFile(indexFile);

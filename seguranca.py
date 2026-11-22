@@ -125,6 +125,7 @@ _RASTREIO_ACOES = {
     "reiniciar_pc", "cancelar_desligamento", "lembrar_fato", "esquecer_fato",
     "criar_lembrete", "listar_lembretes", "desfazer",
     "celular_status", "celular_consultar", "celular_controlar", "celular_acao_sensivel",
+    "spotify_adicionar_playlist", "spotify_listar_playlists",
 }
 _RASTREIO_ETAPAS = {"-", "intent", "tool_call", "rocket_league", "spotify", "minimizar_janelas", "desfazer"}
 _RASTREIO_ESTADOS = {"selected", "started", "success", "failure", "denied", "cancelled", "returned"}

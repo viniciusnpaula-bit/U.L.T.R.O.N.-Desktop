@@ -43,7 +43,7 @@ export function criarPainelMemoria({
     apagar.textContent = 'apagar';
     apagar.title = 'Apagar este fato';
     apagar.onclick = async () => {
-      if (!win.confirm(`Apagar este fato?\n\n“${fato.texto}”`)) return;
+      if (!win.confirm(`Apagar este fato?\n\n"${fato.texto}"`)) return;
       try {
         const r = await bridge().fatoApagar(fato.id);
         pintarFatos(r.fatos, 'fato apagado.');
@@ -95,7 +95,7 @@ export function criarPainelMemoria({
       const linha = doc.createElement('div');
       linha.className = 'fact';
       const texto = doc.createElement('p');
-      texto.textContent = `${item.hora_local} — ${item.texto}`;
+      texto.textContent = `${item.hora_local}, ${item.texto}`;
       const acoes = doc.createElement('div');
       acoes.className = 'fact-actions';
       const cancelar = doc.createElement('button');
@@ -103,7 +103,7 @@ export function criarPainelMemoria({
       cancelar.textContent = 'cancelar';
       cancelar.title = 'Apagar este lembrete';
       cancelar.onclick = async () => {
-        if (!win.confirm(`Cancelar o lembrete “${item.texto}”?`)) return;
+        if (!win.confirm(`Cancelar o lembrete "${item.texto}"?`)) return;
         try {
           const r = await bridge().lembreteCancelar(item.numero, '');
           paginaLembretes(r.lembretes, r.mensagem);
@@ -144,7 +144,7 @@ export function criarPainelMemoria({
       linha.className = 'fact';
       const texto = doc.createElement('p');
       const repeticao = item.repetir_minutos > 0 ? ` (repete a cada ${item.repetir_minutos} min)` : '';
-      texto.textContent = `${item.hora_local} — ${item.texto}${repeticao}`;
+      texto.textContent = `${item.hora_local}, ${item.texto}${repeticao}`;
       const acoes = doc.createElement('div');
       acoes.className = 'fact-actions';
       const cancelar = doc.createElement('button');
@@ -152,7 +152,7 @@ export function criarPainelMemoria({
       cancelar.textContent = 'cancelar';
       cancelar.title = 'Apagar este evento';
       cancelar.onclick = async () => {
-        if (!win.confirm(`Cancelar o evento “${item.texto}”?`)) return;
+        if (!win.confirm(`Cancelar o evento "${item.texto}"?`)) return;
         try {
           const r = await bridge().agendaCancelar(item.numero, '');
           paginaAgenda(r.eventos, r.mensagem);
