@@ -305,12 +305,12 @@ class ChamarTests(unittest.TestCase):
             with self._config(), \
                     patch.object(cerebro, "_provedores_com_chave", return_value=["gemini"]), \
                     patch.object(cerebro, "_cliente", return_value=cliente), \
-                    patch.object(cerebro, "_descobrir_modelo", return_value="gemini-3.5-flash") as descobrir, \
+                    patch.object(cerebro, "_descobrir_modelo", return_value="gemini-novo-modelo") as descobrir, \
                     patch.object(cerebro.ferramentas, "schemas", return_value=[]):
                 msg = cerebro._chamar([])
             self.assertEqual(msg.content, "ok")
             self.assertEqual(descobrir.call_count, 1)
-            self.assertEqual(cerebro._escolhido["gemini"], "gemini-3.5-flash")
+            self.assertEqual(cerebro._escolhido["gemini"], "gemini-novo-modelo")
 
     def test_402_openrouter_busca_modelo_gratis(self):
         cliente = ClienteFalso([ErroHTTP(402, texto="Error code: 402 - Payment Required"), "ok"])

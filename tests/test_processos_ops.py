@@ -106,7 +106,10 @@ def test_limpar_ram_ociosa():
 
 
 def test_gerenciar_plano_energia_auto_compilacao():
-    with patch("processos_ops._detectar_processos_pesados", return_value=["msbuild.exe"]), \
+    with patch("processos_ops.carregar_estado_bloco2", return_value={}), \
+         patch("processos_ops.salvar_estado_bloco2"), \
+         patch("processos_ops._obter_plano_energia_ativo", return_value=processos_ops.GUID_EQUILIBRADO), \
+         patch("processos_ops._detectar_processos_pesados", return_value=["msbuild.exe"]), \
          patch("processos_ops._aplicar_plano_energia", return_value=True) as mock_apply:
         
         res = processos_ops.gerenciar_plano_energia(modo="auto")
@@ -194,7 +197,8 @@ def test_guardiao_startup_aprovar_item(tmp_path):
 
 def test_ajustar_display_auto():
     with patch("processos_ops._definir_brilho", return_value=True) as mock_brilho, \
-         patch("processos_ops._definir_temperatura_gama", return_value=True) as mock_gama:
+         patch("processos_ops._definir_temperatura_gama", return_value=True) as mock_gama, \
+         patch("processos_ops._definir_taxa_atualizacao", return_value=True):
         
         res = processos_ops.ajustar_display(modo="auto")
         assert res["sucesso"] is True

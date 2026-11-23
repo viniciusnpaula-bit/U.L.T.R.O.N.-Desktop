@@ -52,6 +52,8 @@ def _create_mock_structure(base_dir: Path) -> tuple[Path, Path]:
 
 
 def test_doctor_01_runtime_principal_integro(capsys):
+    if os.environ.get("GITHUB_ACTIONS") == "true" or os.environ.get("CI") == "true":
+        pytest.skip("Runtime de produção em runtime/python não está disponível no ambiente de CI.")
     """1. Runtime principal íntegro: validação real do ambiente oficial."""
     ret = launcher._doctor(ROOT)
     captured = capsys.readouterr().out

@@ -11,6 +11,7 @@ import pytest
 
 import cofre
 import memoria
+import seguranca
 
 ESQUEMA = """
 CREATE TABLE IF NOT EXISTS mensagens(id INTEGER PRIMARY KEY, ts REAL, papel TEXT, texto TEXT);
@@ -35,3 +36,10 @@ def banco_isolado(tmp_path, monkeypatch):
     monkeypatch.setattr(cofre, "ARQUIVO_CHAVE", tmp_path / ".cofre.chave")
     yield
     con.close()
+
+
+@pytest.fixture(autouse=True)
+def isolar_eh_admin(monkeypatch, request):
+    """Garante comportamento determinístico em runners CI que executam como Administrador."""
+    if request.node.name != "test_eh_admin_returns_boolean":
+        monkeypatch.setattr(seguranca, "eh_admin", lambda: False)

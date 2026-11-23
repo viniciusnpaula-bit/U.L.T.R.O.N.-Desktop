@@ -33,6 +33,8 @@ LAUNCHER_PY = ROOT_DIR / "launcher.py"
 def garantir_runtime_producao_314() -> None:
     """Garante que o runtime de produção em runtime/python exista antes dos testes."""
     if not PYTHON_EXE.exists():
+        if os.environ.get("GITHUB_ACTIONS") == "true" or os.environ.get("CI") == "true":
+            pytest.skip("Runtime de produção em runtime/python não está disponível no ambiente de CI.")
         pytest.fail(f"Runtime de produção Python 3.14 não encontrado em {RUNTIME_DIR}.")
 
 

@@ -46,6 +46,8 @@ def _create_mock_embedded_runtime(dest_dir: Path, version: str = "3.14.10") -> N
 
 def test_01_runtime_principal_valido():
     """1. Runtime principal válido (Python 3.14.10) selecionado normalmente."""
+    if os.environ.get("GITHUB_ACTIONS") == "true" or os.environ.get("CI") == "true":
+        pytest.skip("Runtime de produção em runtime/python não está disponível no ambiente de CI.")
     py_exe, pyw_exe, rt_type, rt_dir, rt_meta = launcher._resolve_python(ROOT)
     assert rt_type == "embedded"
     assert rt_dir == ROOT / "runtime" / "python"
@@ -166,6 +168,8 @@ def test_09_diagnostico_mostrando_causa_da_interrupcao(tmp_path: Path, capsys):
 
 def test_10_diagnostico_mostrando_versao_selecionada(capsys):
     """10. Diagnóstico (_doctor) exibe fielmente a versão selecionada em sucesso."""
+    if os.environ.get("GITHUB_ACTIONS") == "true" or os.environ.get("CI") == "true":
+        pytest.skip("Runtime de produção em runtime/python não está disponível no ambiente de CI.")
     ret = launcher._doctor(ROOT)
     captured = capsys.readouterr().out
     assert ret == 0
