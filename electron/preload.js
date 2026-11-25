@@ -33,6 +33,8 @@ contextBridge.exposeInMainWorld('ultron', Object.freeze({
   skillsListar: () => ipcRenderer.invoke('skills:listar'),
   skillsAprovar: nome => ipcRenderer.invoke('skills:aprovar', nome),
   skillsDescartar: nome => ipcRenderer.invoke('skills:descartar', nome),
+  tarefasListar: () => ipcRenderer.invoke('tarefas:listar'),
+  tarefaCancelar: id => ipcRenderer.invoke('tarefas:cancelar', id),
   lembretesListar: () => ipcRenderer.invoke('mem:lembretes'),
   vozInfo: () => ipcRenderer.invoke('voz:info'),
   vozSalvar: valores => ipcRenderer.invoke('voz:salvar', valores),

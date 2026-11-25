@@ -240,13 +240,155 @@ def _tocar(arquivo):
     pygame.mixer.music.load(arquivo)
     pygame.mixer.music.play()
     while pygame.mixer.music.get_busy() and not _parar.is_set():
-        time.sleep(0.05)
+        time.sleep(0.015)
     pygame.mixer.music.stop()
     pygame.mixer.music.unload()
     try:
         os.remove(arquivo)
     except OSError:
         pass
+
+
+class ReprodutorPcmStream:
+    """Reprodutor de áudio PCM16 mono em streaming de baixa latência (ex.: Gemini Live 24 kHz).
+
+    Limpar/interromper descarta imediatamente os chunks pendentes (<15 ms) e libera
+    o sinal `falando`, garantindo barge-in instantâneo.
+    """
+
+    def __init__(self, sample_rate: int = 24000, stream_factory=None):
+        self.sample_rate = int(sample_rate)
+        self._stream_factory = stream_factory
+        self._fila: queue.Queue[bytes | None] = queue.Queue(maxsize=256)
+        self._lock = threading.RLock()
+        self._parar_ev = threading.Event()
+        self._limpar_ev = threading.Event()
+        self._stream = None
+        self._thread: threading.Thread | None = None
+        self._ativo = False
+        self._ultimo_audio_ts = 0.0
+        self.chunks_reproduzidos = 0
+
+    @property
+    def ativo(self) -> bool:
+        return self._ativo and not self._parar_ev.is_set()
+
+    def _abrir_stream(self):
+        if self._stream_factory is not None:
+            st = self._stream_factory(
+                samplerate=self.sample_rate,
+                channels=1,
+                dtype="int16",
+            )
+            if hasattr(st, "start"):
+                st.start()
+            return st
+        st = sd.RawOutputStream(
+            samplerate=self.sample_rate,
+            channels=1,
+            dtype="int16",
+        )
+        st.start()
+        return st
+
+    def _fechar_stream(self) -> None:
+        with self._lock:
+            st = self._stream
+            self._stream = None
+        if st is not None:
+            for metodo in ("abort", "stop", "close"):
+                fn = getattr(st, metodo, None)
+                if callable(fn):
+                    try:
+                        fn()
+                    except Exception:
+                        pass
+
+    def _loop(self) -> None:
+        try:
+            while not self._parar_ev.is_set():
+                try:
+                    chunk = self._fila.get(timeout=0.05)
+                except queue.Empty:
+                    if falando.is_set() and (time.monotonic() - self._ultimo_audio_ts) > 0.25:
+                        falando.clear()
+                    continue
+                if chunk is None:
+                    break
+                if self._limpar_ev.is_set():
+                    self._limpar_ev.clear()
+                    continue
+                if not chunk:
+                    continue
+                with self._lock:
+                    if self._stream is None:
+                        self._stream = self._abrir_stream()
+                    st = self._stream
+                falando.set()
+                self._ultimo_audio_ts = time.monotonic()
+                try:
+                    st.write(chunk)
+                    self.chunks_reproduzidos += 1
+                except Exception:
+                    self._fechar_stream()
+        finally:
+            falando.clear()
+            self._fechar_stream()
+
+    def iniciar(self) -> None:
+        with self._lock:
+            if self._ativo:
+                return
+            self._parar_ev.clear()
+            self._limpar_ev.clear()
+            self._ativo = True
+            registrar_gancho_parada(self.limpar)
+            self._thread = threading.Thread(
+                target=self._loop,
+                name="ultron-pcm-stream-out",
+                daemon=True,
+            )
+            self._thread.start()
+
+    def escrever(self, pcm_bytes: bytes) -> None:
+        if not pcm_bytes or not self._ativo or self._parar_ev.is_set():
+            return
+        self._limpar_ev.clear()
+        try:
+            self._fila.put_nowait(bytes(pcm_bytes))
+        except queue.Full:
+            try:
+                self._fila.get_nowait()
+                self._fila.put_nowait(bytes(pcm_bytes))
+            except queue.Empty:
+                pass
+
+    def limpar(self) -> None:
+        """Descarta imediatamente todo o áudio pendente (chamado no barge-in)."""
+        self._limpar_ev.set()
+        while True:
+            try:
+                self._fila.get_nowait()
+            except queue.Empty:
+                break
+        self._fechar_stream()
+        falando.clear()
+
+    def fechar(self) -> None:
+        with self._lock:
+            if not self._ativo:
+                return
+            self._ativo = False
+            self._parar_ev.set()
+        remover_gancho_parada(self.limpar)
+        self.limpar()
+        try:
+            self._fila.put_nowait(None)
+        except queue.Full:
+            pass
+        if self._thread is not None and self._thread is not threading.current_thread():
+            self._thread.join(timeout=1.5)
+        self._thread = None
 
 
 def _falar_offline(texto):
@@ -470,6 +612,10 @@ ERROS = {
 try:   # preferências salvas vencem o .env, mas nunca quebram a inicialização
     _pref = preferencias()
     config.VOZ, config.VOZ_PITCH, config.VOZ_RATE = _pref["voz"], _pref["pitch"], _pref["rate"]
+    if _pref.get("modo") in ("auto", "live", "classico"):
+        config.VOZ_MODO = _pref["modo"]
+    if isinstance(_pref.get("barge_in_livre"), bool):
+        config.VOZ_BARGE_IN_LIVRE = _pref["barge_in_livre"]
 except Exception:
     pass
 
@@ -495,16 +641,29 @@ VOZES_PT = [
 ARQUIVO_PREFERENCIAS = getattr(config, "DIR_DADOS", Path(__file__).resolve().parent / "dados") / "voz.json"
 
 
+MODOS_VOZ = ("auto", "live", "classico")
+
+
 def preferencias():
-    """Preferências de voz salvas (voz, tom, velocidade). Padrão = .env."""
-    base = {"voz": getattr(config, "VOZ", "pt-BR-AntonioNeural"),
-            "pitch": getattr(config, "VOZ_PITCH", "-12Hz"),
-            "rate": getattr(config, "VOZ_RATE", "+0%")}
+    """Preferências de voz salvas (voz, tom, velocidade, modo, barge_in_livre). Padrão = .env."""
+    modo_cfg = str(getattr(config, "VOZ_MODO", "auto") or "auto").strip().lower()
+    base = {
+        "voz": getattr(config, "VOZ", "pt-BR-AntonioNeural"),
+        "pitch": getattr(config, "VOZ_PITCH", "-12Hz"),
+        "rate": getattr(config, "VOZ_RATE", "+0%"),
+        "modo": modo_cfg if modo_cfg in MODOS_VOZ else "auto",
+        "barge_in_livre": bool(getattr(config, "VOZ_BARGE_IN_LIVRE", True)),
+    }
     try:
         salvo = json.loads(ARQUIVO_PREFERENCIAS.read_text(encoding="utf-8"))
         for chave, limite in (("voz", 64), ("pitch", 12), ("rate", 12)):
             if isinstance(salvo.get(chave), str) and salvo[chave].strip():
                 base[chave] = salvo[chave].strip()[:limite]
+        modo_salvo = salvo.get("modo")
+        if isinstance(modo_salvo, str) and modo_salvo.strip().lower() in MODOS_VOZ:
+            base["modo"] = modo_salvo.strip().lower()
+        if isinstance(salvo.get("barge_in_livre"), bool):
+            base["barge_in_livre"] = salvo["barge_in_livre"]
     except (OSError, ValueError, AttributeError):
         pass
     return base
@@ -517,9 +676,16 @@ def salvar_preferencias(valores):
         valor = valores.get(chave)
         if isinstance(valor, str) and valor.strip():
             atual[chave] = valor.strip()[:limite]
+    modo = valores.get("modo")
+    if isinstance(modo, str) and modo.strip().lower() in MODOS_VOZ:
+        atual["modo"] = modo.strip().lower()
+    if isinstance(valores.get("barge_in_livre"), bool):
+        atual["barge_in_livre"] = valores["barge_in_livre"]
     ARQUIVO_PREFERENCIAS.parent.mkdir(parents=True, exist_ok=True)
     ARQUIVO_PREFERENCIAS.write_text(json.dumps(atual, ensure_ascii=False, indent=2), encoding="utf-8")
     config.VOZ, config.VOZ_PITCH, config.VOZ_RATE = atual["voz"], atual["pitch"], atual["rate"]
+    config.VOZ_MODO = atual["modo"]
+    config.VOZ_BARGE_IN_LIVRE = atual["barge_in_livre"]
     return atual
 
 
@@ -528,7 +694,10 @@ def restaurar_preferencias():
         ARQUIVO_PREFERENCIAS.unlink()
     except FileNotFoundError:
         pass
-    return preferencias()
+    padrao = preferencias()
+    config.VOZ_MODO = padrao["modo"]
+    config.VOZ_BARGE_IN_LIVRE = padrao["barge_in_livre"]
+    return padrao
 
 
 def vozes_disponiveis():
@@ -537,7 +706,13 @@ def vozes_disponiveis():
 
 
 def voz_ativa():
-    return {"id": getattr(config, "VOZ", "pt-BR-AntonioNeural"), "reserva": "pyttsx3 (local, sem internet)"}
+    return {
+        "id": getattr(config, "VOZ", "pt-BR-AntonioNeural"),
+        "reserva": "pyttsx3 (local, sem internet)",
+        "modo": getattr(config, "VOZ_MODO", "auto"),
+        "barge_in_livre": bool(getattr(config, "VOZ_BARGE_IN_LIVRE", True)),
+        "live_disponivel": bool(getattr(config, "CHAVES", {}).get("gemini")),
+    }
 
 
 class Ouvido:
@@ -569,6 +744,8 @@ class Ouvido:
         self._ultimo_comando_ok = 0.0         # timestamp do último comando reconhecido
         self._nao_entendi_consecutivos = 0    # contador de "não entendi" seguidos
         self.afe = None
+        self.ultimo_barge_in = None
+        self.on_barge_in_extra = None
         if _afe is not None and getattr(config, "AFE_ATIVO", True):
             try:
                 self.afe = _afe.AudioFrontEnd(
@@ -590,8 +767,27 @@ class Ouvido:
         if afe is not None and evento is not None:
             afe.pausado_event = evento
 
-    def _ao_barge_in(self, _tipo: str, _pcm) -> None:
+    def _ao_barge_in(self, tipo: str, pcm) -> None:
+        self.ultimo_barge_in = {"tipo": tipo, "ts": time.time(), "tem_pcm": bool(pcm)}
         parar_fala()
+        extra = getattr(self, "on_barge_in_extra", None)
+        if callable(extra):
+            try:
+                extra(tipo, pcm)
+            except Exception:
+                pass
+
+    def registrar_consumidor_audio(self, cb) -> bool:
+        afe = getattr(self, "afe", None)
+        if afe is not None and hasattr(afe, "registrar_consumidor_audio"):
+            afe.registrar_consumidor_audio(cb)
+            return True
+        return False
+
+    def remover_consumidor_audio(self, cb) -> None:
+        afe = getattr(self, "afe", None)
+        if afe is not None and hasattr(afe, "remover_consumidor_audio"):
+            afe.remover_consumidor_audio(cb)
 
     def preparar_afe(self) -> None:
         """Pré-carrega/baixa modelos do AFE na RAM sem abrir o microfone."""

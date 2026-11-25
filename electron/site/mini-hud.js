@@ -32,6 +32,9 @@ let quitArmTimer = null;
 let animSeq = 0;
 let lastResponseSeen = '';
 let lastPalcoKey = '';
+let lastTeleportSeq = 0;
+let lastTeleportOutSeq = 0;
+let teleportAnimTimer = null;
 let wavePhase = 0;
 let waveEnergy = 0.1;
 
@@ -315,6 +318,27 @@ function pintar(snapshot) {
 
   if (activeStyle === 'orb') {
     aplicarLayoutOrbe({ side: snapshot.orbSide, orbOffsetY: snapshot.orbOffsetY });
+    if (snapshot.orbTeleportPhase === 'idle') {
+      coreOrbBtn.classList.remove('teleport-out');
+    }
+    if (Number.isFinite(snapshot.orbTeleportOutSeq) && snapshot.orbTeleportOutSeq !== lastTeleportOutSeq) {
+      if (lastTeleportOutSeq !== 0 || snapshot.orbTeleportPhase === 'out') {
+        clearTimeout(teleportAnimTimer);
+        coreOrbBtn.classList.remove('teleport-in');
+        coreOrbBtn.classList.add('teleport-out');
+      }
+      lastTeleportOutSeq = snapshot.orbTeleportOutSeq;
+    }
+    if (Number.isFinite(snapshot.orbTeleportSeq) && snapshot.orbTeleportSeq !== lastTeleportSeq) {
+      if (lastTeleportSeq !== 0 || snapshot.orbTeleportPhase === 'in') {
+        clearTimeout(teleportAnimTimer);
+        coreOrbBtn.classList.remove('teleport-out', 'teleport-in');
+        void coreOrbBtn.offsetWidth;
+        coreOrbBtn.classList.add('teleport-in');
+        teleportAnimTimer = setTimeout(() => coreOrbBtn.classList.remove('teleport-in'), 420);
+      }
+      lastTeleportSeq = snapshot.orbTeleportSeq;
+    }
   }
 
   const titulo = TITULO_POR_TEMA[theme] || 'U.L.T.R.O.N.';
@@ -435,6 +459,7 @@ window.addEventListener('beforeunload', () => {
   clearTimeout(shrinkWindowTimer);
   clearTimeout(autoActivityTimer);
   clearTimeout(quitArmTimer);
+  clearTimeout(teleportAnimTimer);
   if (typeof pararSnapshot === 'function') pararSnapshot();
   (islandOrb.destruir || islandOrb.parar).call(islandOrb);
   (freeOrb.destruir || freeOrb.parar).call(freeOrb);

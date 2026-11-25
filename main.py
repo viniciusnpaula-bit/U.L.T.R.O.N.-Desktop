@@ -277,6 +277,7 @@ def modo_voz(bandeja=False, entrada_teclado=True, stop_event=None,
              microphone_device_index=None, microphone_device_id=None,
              conversa: Callable[[str, str, str], None] | None = None,
              converter_confirmacao: Callable[[str, dict], bool] | None = None,
+             confirmar_desktop: Callable[[str, dict], bool] | None = None,
              notificar_voz: bool = True):
     def publicar_estado(estado, erro=None):
         if estado_voz is not None:
@@ -377,6 +378,7 @@ def modo_voz(bandeja=False, entrada_teclado=True, stop_event=None,
         pausado_reportado = False
         erro_audio = None
         ultimo_texto_usuario = None   # último reconhecimento do usuário (para correções pessoais)
+        live_cooldown_ate = 0.0
         while stop_event is None or not stop_event.is_set():
             if not sessao.estado().get("desbloqueada"):
                 publicar_estado("bloqueado")
@@ -427,6 +429,36 @@ def modo_voz(bandeja=False, entrada_teclado=True, stop_event=None,
                         if (stop_event is None or not stop_event.is_set()) and not pausado.is_set():
                             voz.falar(personalidade.frase_saudacao(), eco=_eco_atual())
                     print(f"Diga 'Ei, {fala.nome_despertar()}' seguido do comando.")
+                # Modo Gemini Live em tempo real (com fallback automático para o pipeline clássico)
+                _afe_inst = getattr(ouvido, "afe", None)
+                _afe_cap = getattr(_afe_inst, "capturando", None)
+                if (not falar_agora.is_set() and not pausado.is_set()
+                        and time.monotonic() >= live_cooldown_ate
+                        and _afe_inst is not None
+                        and callable(getattr(_afe_cap, "is_set", None))
+                        and _afe_cap.is_set()):
+                    try:
+                        import voz_live
+                        if voz_live.modo_voz_efetivo() == "live":
+                            confirmador_live = confirmar_desktop or confirmar_voz
+                            sessao_live = voz_live.SessaoGeminiLive(
+                                confirmar=confirmador_live,
+                                ouvido=ouvido,
+                                on_estado=publicar_estado,
+                                on_conversa=conversa,
+                                stop_event=stop_event,
+                                pausado_event=pausado,
+                            )
+                            motivo_saida = sessao_live.executar()
+                            if motivo_saida == "fallback":
+                                # Evita reconexão em loop apertado e cai para STT -> LLM -> TTS.
+                                live_cooldown_ate = time.monotonic() + 30.0
+                                publicar_estado("ouvindo")
+                            else:
+                                continue
+                    except Exception as erro_live:
+                        seguranca.log.warning(f"Modo Live indisponível ({type(erro_live).__name__}); seguindo no clássico.")
+                        live_cooldown_ate = time.monotonic() + 30.0
                 if falar_agora.is_set() and not pausado.is_set():
                     # "segurar para falar": grava só enquanto a tecla está pressionada
                     publicar_estado("ouvindo")

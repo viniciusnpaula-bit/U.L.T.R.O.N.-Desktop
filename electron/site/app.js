@@ -27,9 +27,11 @@ const hudActions = Object.freeze({
 const ISLAND_STYLES = ['island', 'orb'];
 const ISLAND_MODES = ['auto', 'hover', 'click', 'activity'];
 const ISLAND_POSITIONS = ['top-center', 'top-left', 'top-right', 'right', 'left'];
+const ORB_TELEPORT_OPTIONS = [0, 5, 10, 15, 30, 60];
 let islandStyle = 'island';
 let islandMode = 'auto';
 let islandPos = 'top-center';
+let orbTeleportSec = 10;
 try {
   const estiloSalvo = localStorage.getItem('ultron-island-style');
   if (ISLAND_STYLES.includes(estiloSalvo)) islandStyle = estiloSalvo;
@@ -37,6 +39,11 @@ try {
   if (ISLAND_MODES.includes(salvo)) islandMode = salvo;
   const posSalva = localStorage.getItem('ultron-island-pos');
   if (ISLAND_POSITIONS.includes(posSalva)) islandPos = posSalva;
+  const teleSalvo = localStorage.getItem('ultron-orb-teleport-sec');
+  if (teleSalvo !== null) {
+    const numTele = Number(teleSalvo);
+    if (ORB_TELEPORT_OPTIONS.includes(numTele)) orbTeleportSec = numTele;
+  }
 } catch {}
 const THEMES = ['ultron', 'jarvis', 'amber', 'emerald'];
 const PERFIL_POR_TEMA = { ultron: 'ultron', jarvis: 'jarvis', amber: 'visao', emerald: 'edith' };
@@ -50,12 +57,13 @@ const state = {
   palco: null,        // mídia exibida no lugar do núcleo
   palcoIgnorado: null, // id fechado localmente: não reabre por um status atrasado
   undo: [], undoErro: false, undoBusy: false, // diário read-only do dock direito
+  tasks: [], tasksBusy: false, // tarefas longas em segundo plano (subagentes)
 };
 const transport = new RealTransport({ onEvent: handleEvent });
 let historicoPronto = false;
 async function carregarPosDesbloqueio() {
   try {
-    await Promise.allSettled([carregarHistorico(), carregarDiario()]);
+    await Promise.allSettled([carregarHistorico(), carregarDiario(), carregarTarefas()]);
   } finally {
     historicoPronto = state.status.session_desbloqueada === true;
     if (bootScreen.ativa()) bootScreen.atualizar(state.status, { historicoPronto });
@@ -202,6 +210,7 @@ function publishHudSnapshot() {
     islandStyle,
     islandMode,
     islandPos,
+    orbTeleportSec,
     paused: state.paused === true,
     capturing: st.microphone_capturing === true,
     speaking: st.speaking === true,
@@ -404,6 +413,91 @@ async function carregarDiario() {
   } finally {
     state.undoBusy = false;
     pintarDiario();
+  }
+}
+
+function pintarTarefas() {
+  const card = $('tasksCard');
+  const lista = $('tasksList');
+  const contador = $('tasksCount');
+  if (!card || !lista) return;
+  lista.replaceChildren();
+  const visiveis = state.tasks.slice(0, 5);
+  const ativas = state.tasks.filter(t => t && (t.status === 'executando' || t.status === 'na_fila')).length;
+  card.hidden = visiveis.length === 0;
+  if (contador) {
+    contador.textContent = ativas > 0 ? `${ativas} ativa${ativas === 1 ? '' : 's'}` : `${visiveis.length} recente${visiveis.length === 1 ? '' : 's'}`;
+    contador.dataset.state = ativas > 0 ? 'on' : 'off';
+  }
+  for (const tarefa of visiveis) {
+    const row = document.createElement('div');
+    row.className = `task-item is-${String(tarefa.status || 'desconhecido')}`;
+    const head = document.createElement('div');
+    head.className = 'task-head';
+    const titulo = document.createElement('b');
+    titulo.textContent = String(tarefa.perfil_nome || tarefa.perfil || 'Subagente');
+    const st = document.createElement('span');
+    st.className = 'task-status';
+    st.textContent = String(tarefa.status || '');
+    head.append(titulo, st);
+
+    const obj = document.createElement('p');
+    obj.className = 'task-obj';
+    obj.textContent = String(tarefa.objetivo || '');
+
+    const etapa = document.createElement('small');
+    etapa.className = 'task-stage';
+    etapa.textContent = String(tarefa.etapa || tarefa.resumo || '');
+
+    row.append(head, obj, etapa);
+    if (tarefa.status === 'executando' || tarefa.status === 'na_fila') {
+      const btn = document.createElement('button');
+      btn.type = 'button';
+      btn.className = 'ghost tiny task-cancel';
+      btn.textContent = 'cancelar';
+      btn.onclick = () => cancelarTarefa(tarefa.id);
+      row.append(btn);
+    }
+    lista.append(row);
+  }
+}
+
+function atualizarTarefaLocal(tarefa) {
+  if (!tarefa || typeof tarefa.id !== 'string') return;
+  const idx = state.tasks.findIndex(item => item && item.id === tarefa.id);
+  if (idx >= 0) state.tasks[idx] = tarefa;
+  else state.tasks.unshift(tarefa);
+  if (state.tasks.length > 20) state.tasks.length = 20;
+  pintarTarefas();
+}
+
+async function carregarTarefas() {
+  if (state.tasksBusy) return;
+  state.tasksBusy = true;
+  try {
+    const dados = await transport.tarefasListar();
+    state.tasks = Array.isArray(dados?.tarefas) ? dados.tarefas : [];
+  } catch {
+    state.tasks = [];
+  } finally {
+    state.tasksBusy = false;
+    pintarTarefas();
+  }
+}
+
+async function cancelarTarefa(id) {
+  if (typeof id !== 'string' || !id) return;
+  try {
+    const res = await transport.tarefaCancelar(id);
+    if (Array.isArray(res?.tarefas)) {
+      state.tasks = res.tarefas;
+      pintarTarefas();
+    } else {
+      await carregarTarefas();
+    }
+    toast('Tarefa em segundo plano cancelada.');
+  } catch (error) {
+    toast(`Não consegui cancelar a tarefa (${error.message})`);
   }
 }
 
@@ -847,6 +941,7 @@ function handleEvent(event) {
   if (event.event === 'SPEECH_CONFIRM') confirmarFala(event);
   if (event.event === 'PALCO_SHOW') mostrarPalco(event.data || {});
   if (event.event === 'PALCO_HIDE') esconderPalco();
+  if (event.event === 'TASK_UPDATE') atualizarTarefaLocal(event.data);
   if (event.event === 'COMMAND_RESULT') {
     const workflowId = event.data?.workflow_id;
     if (typeof workflowId === 'string') {
@@ -1040,9 +1135,50 @@ async function carregarVoz() {
     const atual = vozCache.preferencias?.voz || vozCache.ativas?.id || '';
     select.value = [...select.options].some(o => o.value === atual) ? atual : '';
     renderVoiceCards(vozCache.vozes || [], atual);
-    $('voiceActive').textContent = `voz ativa: ${vozCache.ativas?.id || atual || '--'} · reserva: ${vozCache.ativas?.reserva || 'pyttsx3'}`;
+    const modoAtual = vozCache.preferencias?.modo || vozCache.ativas?.modo || 'auto';
+    const modeSelect = $('voiceModeSelect');
+    if (modeSelect && modeSelect.isConnected) modeSelect.value = modoAtual;
+    const bargeAtivo = vozCache.preferencias?.barge_in_livre !== false;
+    const bargeBtn = $('bargeInToggle');
+    if (bargeBtn && bargeBtn.isConnected) {
+      bargeBtn.setAttribute('aria-pressed', String(bargeAtivo));
+      bargeBtn.textContent = bargeAtivo
+        ? 'interrupção por voz (barge-in): ativo'
+        : 'interrupção por voz (barge-in): só palavra de despertar';
+    }
+    const liveOk = vozCache.ativas?.live_disponivel === true;
+    const note = $('voiceModeNote');
+    if (note) {
+      note.textContent = liveOk
+        ? `modo: ${modoAtual} · Gemini Live disponível`
+        : `modo: ${modoAtual} · adicione GEMINI_API_KEY no Cofre para ativar Gemini Live`;
+    }
+    $('voiceActive').textContent = `voz ativa: ${vozCache.ativas?.id || atual || '--'} · modo: ${modoAtual}`;
   } catch (error) {
     vozNota(`não consegui ler as vozes (${error.message})`, 'err');
+  }
+}
+
+async function salvarModoVoz() {
+  const modo = $('voiceModeSelect').value || 'auto';
+  try {
+    await window.ultron.vozSalvar({ modo });
+    await carregarVoz();
+    vozNota(`modo de áudio atualizado para: ${modo}.`, 'ok');
+  } catch (error) {
+    vozNota(`não consegui salvar o modo de áudio (${error.message})`, 'err');
+  }
+}
+
+async function alternarBargeIn() {
+  const btn = $('bargeInToggle');
+  const novo = btn.getAttribute('aria-pressed') !== 'true';
+  try {
+    await window.ultron.vozSalvar({ barge_in_livre: novo });
+    await carregarVoz();
+    vozNota(novo ? 'barge-in por fala livre ativado.' : 'barge-in restrito à palavra de despertar.', 'ok');
+  } catch (error) {
+    vozNota(`não consegui alterar o barge-in (${error.message})`, 'err');
   }
 }
 
@@ -1948,6 +2084,8 @@ if (typeof window.ultron.onHudCommand === 'function') {
 function atualizarVisibilidadePosicaoIsland() {
   const row = $('islandPosRow');
   if (row && row.isConnected) row.hidden = islandStyle === 'orb';
+  const teleRow = $('orbTeleportRow');
+  if (teleRow && teleRow.isConnected) teleRow.hidden = islandStyle !== 'orb';
 }
 const islandStyleSelect = $('islandStyleSelect');
 if (islandStyleSelect && islandStyleSelect.isConnected) {
@@ -1988,10 +2126,27 @@ if (islandPosSelect && islandPosSelect.isConnected) {
     if ($('settingsResult')) $('settingsResult').textContent = 'Posição da Dynamic Island atualizada.';
   };
 }
+const orbTeleportSelect = $('orbTeleportSelect');
+if (orbTeleportSelect && orbTeleportSelect.isConnected) {
+  orbTeleportSelect.value = String(orbTeleportSec);
+  orbTeleportSelect.onchange = () => {
+    const escolhido = Number(orbTeleportSelect.value);
+    orbTeleportSec = ORB_TELEPORT_OPTIONS.includes(escolhido) ? escolhido : 10;
+    try { localStorage.setItem('ultron-orb-teleport-sec', String(orbTeleportSec)); } catch {}
+    publishHudSnapshot();
+    if ($('settingsResult')) {
+      $('settingsResult').textContent = orbTeleportSec > 0
+        ? `Teleporte do núcleo definido para ${orbTeleportSec} segundos.`
+        : 'Teleporte do núcleo desligado (posição fixa).';
+    }
+  };
+}
 $('emergencyStopButton').onclick = async () => {
   if (!window.confirm('Acionar a parada de emergência do ULTRON?')) return;
   pararTudo();
 };
+$('voiceModeSelect').onchange = salvarModoVoz;
+$('bargeInToggle').onclick = alternarBargeIn;
 $('quitAppButton').onclick = async () => {
   if (!window.confirm('Encerrar completamente o ULTRON e liberar o microfone?')) return;
   await window.ultron?.quitApp?.();

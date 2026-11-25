@@ -69,6 +69,7 @@ ARQUIVO_COFRE = DIR_DADOS / "cofre.json"
 ARQUIVO_CHAVE_COFRE = DIR_DADOS / ".cofre.chave"
 ARQUIVO_MOBILE_PAIRING = DIR_DADOS / "mobile_pairing.json"
 DIR_SKILLS = DIR_DADOS / "skills"
+DIR_RELATORIOS = DIR_DADOS / "relatorios"
 ARQUIVO_FLUXOS = DIR_DADOS / "fluxos.json"
 ARQUIVO_SESSAO = DIR_DADOS / "sessao.json"
 ARQUIVO_DESFAZER_DIR = DIR_DADOS / "desfazer"
@@ -78,7 +79,7 @@ ARQUIVO_ENV = DIR_CONFIG / ".env"
 def reconfigurar_diretorios() -> dict[str, Path]:
     """Reavalia as variáveis de ambiente e atualiza todos os caminhos de dados e configuração."""
     global MODO_EXECUCAO, DIR_INSTALACAO, DIR_DADOS, DIR_CONFIG, DIR_LOGS
-    global ARQUIVO_BANCO, ARQUIVO_COFRE, ARQUIVO_CHAVE_COFRE, ARQUIVO_MOBILE_PAIRING, DIR_SKILLS
+    global ARQUIVO_BANCO, ARQUIVO_COFRE, ARQUIVO_CHAVE_COFRE, ARQUIVO_MOBILE_PAIRING, DIR_SKILLS, DIR_RELATORIOS
     global ARQUIVO_FLUXOS, ARQUIVO_SESSAO, ARQUIVO_DESFAZER_DIR, ARQUIVO_ENV
 
     MODO_EXECUCAO = _determinar_modo()
@@ -122,6 +123,7 @@ def reconfigurar_diretorios() -> dict[str, Path]:
     ARQUIVO_CHAVE_COFRE = DIR_DADOS / ".cofre.chave"
     ARQUIVO_MOBILE_PAIRING = DIR_DADOS / "mobile_pairing.json"
     DIR_SKILLS = DIR_DADOS / "skills"
+    DIR_RELATORIOS = DIR_DADOS / "relatorios"
     ARQUIVO_FLUXOS = DIR_DADOS / "fluxos.json"
     ARQUIVO_SESSAO = DIR_DADOS / "sessao.json"
     ARQUIVO_DESFAZER_DIR = DIR_DADOS / "desfazer"
@@ -375,6 +377,12 @@ except ValueError:
 SILENCIO_FIM = max(0.1, _num_env("SILENCIO_FIM", 1.3))   # segundos de silêncio que encerram sua fala
 AFE_ATIVO = (_env("AFE_ATIVO", "1") or "1").lower() not in (
     "0", "nao", "não", "false", "off")
+_voz_modo_raw = (_env("VOZ_MODO", "auto") or "auto").lower()
+VOZ_MODO = _voz_modo_raw if _voz_modo_raw in ("auto", "live", "classico") else "auto"
+VOZ_BARGE_IN_LIVRE = (_env("VOZ_BARGE_IN_LIVRE", "1") or "1").lower() not in (
+    "0", "nao", "não", "false", "off")
+GEMINI_LIVE_MODEL = _env("GEMINI_LIVE_MODEL", "models/gemini-2.5-flash-native-audio-preview-12-2025")
+GEMINI_LIVE_VOICE = _env("GEMINI_LIVE_VOICE", "Charon")
 REASONING = _env("REASONING_EFFORT", "low").lower()        # "low" = IA mais rápida; vazio desliga
 # Retry das chamadas de IA: tentativas por provedor, backoff exponencial com
 # jitter e um teto de tempo total por provedor (o Ultron responde por voz).

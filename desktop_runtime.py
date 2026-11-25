@@ -124,6 +124,7 @@ class DesktopRuntime:
         self._speaking_notification: str | None = None
         self._stop_hook = None
         self._voz_barge_in_hook = None
+        self._task_listener = None
 
         self._unlock_lock = threading.Lock()
         self._unlock_falhas, self._unlock_espera_ate = self._ler_estado_unlock()
@@ -173,6 +174,12 @@ class DesktopRuntime:
                     self._registrar_barge_in_voz(importlib.import_module("voz"))
                 except Exception:
                     pass
+            try:
+                import tarefas_longas
+                self._task_listener = self._on_task_update
+                tarefas_longas.registrar_ouvinte(self._task_listener)
+            except Exception:
+                self._task_listener = None
             with self._speech_lock:
                 while True:
                     try:
@@ -291,6 +298,8 @@ class DesktopRuntime:
                 kwargs["conversa"] = self._registrar_conversa
             if "converter_confirmacao" in parameters:
                 kwargs["converter_confirmacao"] = self._confirmar_interpretacao
+            if "confirmar_desktop" in parameters:
+                kwargs["confirmar_desktop"] = self._confirmar
             if "notificar_voz" in parameters:
                 kwargs["notificar_voz"] = False
             try:
@@ -345,7 +354,30 @@ class DesktopRuntime:
 
     def voz_salvar(self, valores: dict) -> dict:
         import voz
-        return voz.salvar_preferencias(valores or {})
+        salvo = voz.salvar_preferencias(valores or {})
+        if salvo.get("modo") == "classico":
+            try:
+                import voz_live
+                voz_live.parar_sessao_live_ativa()
+            except Exception:
+                pass
+        afe = getattr(self._ouvido, "afe", None)
+        if afe is not None and hasattr(afe, "definir_barge_in_livre") and isinstance(salvo.get("barge_in_livre"), bool):
+            afe.definir_barge_in_livre(salvo["barge_in_livre"])
+        return salvo
+
+    def _on_task_update(self, tarefa: dict) -> None:
+        self._events.put({"type": "task_update", "tarefa": dict(tarefa)})
+
+    def tarefas_listar(self) -> dict:
+        import tarefas_longas
+        itens = tarefas_longas.listar()
+        return {"tarefas": itens, "ativas": tarefas_longas.ativas_count()}
+
+    def tarefa_cancelar(self, task_id: str) -> dict:
+        import tarefas_longas
+        cancelada = tarefas_longas.cancelar(task_id)
+        return {"cancelada": cancelada, "tarefas": tarefas_longas.listar(), "ativas": tarefas_longas.ativas_count()}
 
     def voz_restaurar(self) -> dict:
         import voz
@@ -663,6 +695,19 @@ class DesktopRuntime:
             if isinstance(hooks, list) and self._stop_hook in hooks:
                 hooks.remove(self._stop_hook)
             self._stop_hook = None
+            if self._task_listener is not None:
+                try:
+                    import tarefas_longas
+                    tarefas_longas.remover_ouvinte(self._task_listener)
+                    tarefas_longas.cancelar_todas()
+                except Exception:
+                    pass
+                self._task_listener = None
+            try:
+                import voz_live
+                voz_live.parar_sessao_live_ativa()
+            except Exception:
+                pass
             try:
                 self._remover_barge_in_voz(sys.modules.get("voz"))
             except Exception:
@@ -1121,6 +1166,20 @@ class DesktopRuntime:
             palco_atual = palco.estado()
         except Exception:
             palco_atual = None
+        voice_live_active = False
+        try:
+            voz_live_mod = sys.modules.get("voz_live")
+            if voz_live_mod is not None and callable(getattr(voz_live_mod, "sessao_live_ativa", None)):
+                voice_live_active = bool(voz_live_mod.sessao_live_ativa())
+        except Exception:
+            voice_live_active = False
+        active_tasks_count = 0
+        try:
+            tarefas_mod = sys.modules.get("tarefas_longas")
+            if tarefas_mod is not None and callable(getattr(tarefas_mod, "ativas_count", None)):
+                active_tasks_count = int(tarefas_mod.ativas_count())
+        except Exception:
+            active_tasks_count = 0
         return {
             **metrics,
             "core_running": bool(self._started and not self._stop.is_set()),
@@ -1134,6 +1193,10 @@ class DesktopRuntime:
             "microphone_threshold": int(getattr(self._ouvido, "limiar", 0)) if self._ouvido else 0,
             "microphone_device": self._microphone_preference["name"] if self._microphone_preference else "Padrão do sistema",
             "microphone_device_available": self._microphone_device_index != -1,
+            "voice_mode": str(getattr(config, "VOZ_MODO", "auto") or "auto"),
+            "voice_live_active": voice_live_active,
+            "barge_in_livre": bool(getattr(config, "VOZ_BARGE_IN_LIVRE", True)),
+            "active_tasks_count": active_tasks_count,
             "autostart_installed": autostart,
             "fullscreen_active": fullscreen,
             "shutdown_requested": self._shutdown_requested,
@@ -1278,6 +1341,16 @@ class DesktopRuntime:
 
     def _on_emergency_stop(self) -> None:
         self._cancelar_falas(parar_voz=True)
+        try:
+            import voz_live
+            voz_live.parar_sessao_live_ativa()
+        except Exception:
+            pass
+        try:
+            import tarefas_longas
+            tarefas_longas.cancelar_todas()
+        except Exception:
+            pass
 
     def _registrar_barge_in_voz(self, voz_mod) -> None:
         registrar = getattr(voz_mod, "registrar_gancho_parada", None)

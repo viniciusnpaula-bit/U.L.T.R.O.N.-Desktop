@@ -28,6 +28,7 @@ _PREFIX = "/api/v1/"
 _MAX_BODY = 8192
 _MAX_COMMAND = 4000
 _FLUXO_ID = re.compile(r"^[a-z0-9][a-z0-9._-]{0,39}$")
+_TAREFA_ID = re.compile(r"^[a-f0-9]{12}$")
 _MAX_BUSCA = 300
 _GET_ROUTES = {
     _PREFIX + "health",
@@ -44,6 +45,7 @@ _GET_ROUTES = {
     _PREFIX + "personalidade",
     _PREFIX + "personalidade/previa",
     _PREFIX + "skills",
+    _PREFIX + "tarefas",
     _PREFIX + "update",
     _PREFIX + "update/check",
     _PREFIX + "undo",
@@ -255,6 +257,8 @@ def create_server(runtime, token: str, host: str = "127.0.0.1", port: int = PREF
                     self._send(200, runtime.personalidade_previa())
                 elif path == _PREFIX + "skills":
                     self._send(200, runtime.skills_listar())
+                elif path == _PREFIX + "tarefas":
+                    self._send(200, runtime.tarefas_listar())
                 elif path == _PREFIX + "update":
                     self._send(200, runtime.update_info())
                 elif path == _PREFIX + "update/check":
@@ -372,10 +376,24 @@ def create_server(runtime, token: str, host: str = "127.0.0.1", port: int = PREF
                         return
                     self._send(200, runtime.fechar_palco())
                 elif path == _PREFIX + "voz":
-                    if set(body) - {"voz", "pitch", "rate"}:
+                    if set(body) - {"voz", "pitch", "rate", "modo", "barge_in_livre"}:
+                        self._send(400, {"error": "invalid_voz_payload"})
+                        return
+                    if "modo" in body and (not isinstance(body["modo"], str) or body["modo"].strip().lower() not in {"auto", "live", "classico"}):
+                        self._send(400, {"error": "invalid_voz_payload"})
+                        return
+                    if "barge_in_livre" in body and type(body["barge_in_livre"]) is not bool:
                         self._send(400, {"error": "invalid_voz_payload"})
                         return
                     self._send(200, runtime.voz_salvar(body))
+                elif path == _PREFIX + "tarefas/cancelar":
+                    if set(body) != {"id"} or not isinstance(body.get("id"), str) or not _TAREFA_ID.fullmatch(body["id"]):
+                        self._send(400, {"error": "invalid_task_payload"})
+                        return
+                    try:
+                        self._send(200, runtime.tarefa_cancelar(body["id"]))
+                    except LookupError:
+                        self._send(404, {"error": "task_not_found"})
                 elif path == _PREFIX + "voz/restaurar":
                     if body:
                         self._send(400, {"error": "empty_payload_required"})

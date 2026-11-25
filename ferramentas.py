@@ -228,12 +228,16 @@ _WMO = {0: "céu limpo", 1: "quase limpo", 2: "parcialmente nublado", 3: "nublad
         82: "pancadas fortes", 95: "tempestade", 96: "tempestade com granizo", 99: "tempestade com granizo"}
 
 
-@ferramenta("Clima atual e previsão de 3 dias de uma cidade.", params={"cidade": "Ex: São Paulo"})
-def clima(cidade: str = "São Paulo"):
+@ferramenta(
+    "Temperatura atual do dia, clima e previsão de 3 dias de uma cidade (use para temperatura ambiente/do dia).",
+    params={"cidade": "Nome da cidade (vazio = cidade padrão configurada)"},
+)
+def clima(cidade: str = ""):
+    cidade_alvo = str(cidade or "").strip() or getattr(config, "CIDADE", "São Paulo") or "São Paulo"
     g = requests.get("https://geocoding-api.open-meteo.com/v1/search",
-                     params={"name": cidade, "count": 1, "language": "pt"}, timeout=10).json()
+                     params={"name": cidade_alvo, "count": 1, "language": "pt"}, timeout=10).json()
     if not g.get("results"):
-        return f"Cidade não encontrada: {cidade}"
+        return f"Cidade não encontrada: {cidade_alvo}"
     c = g["results"][0]
     w = requests.get("https://api.open-meteo.com/v1/forecast", params={
         "latitude": c["latitude"], "longitude": c["longitude"], "timezone": "auto", "forecast_days": 3,
@@ -1438,11 +1442,18 @@ def spotify_adicionar_playlist(playlist: str, musica: str = ""):
         return f"Não consegui falar com o Spotify: {e}"
 
 
-@ferramenta("Informações do PC: CPU, memória e bateria.")
+@ferramenta("Informações do PC: CPU, memória, temperatura interna (quando disponível) e bateria.")
 def info_sistema():
     import psutil
     bat = psutil.sensors_battery()
     txt = f"CPU {psutil.cpu_percent(interval=0.5)}%, memória {psutil.virtual_memory().percent}%."
+    try:
+        import processos_ops
+        temp = processos_ops._obter_temperatura_cpu()
+        if temp is not None:
+            txt += f" Temperatura da CPU {temp}°C."
+    except Exception:
+        pass
     return txt + (f" Bateria {bat.percent:.0f}%." if bat else "")
 
 
@@ -2495,8 +2506,8 @@ def otimizar_cpu_jogos_reunioes(em_reuniao_ou_jogo: bool | None = None, aplicar:
     return f"Otimização de CPU ({estado}): {res['processos_otimizados']} indexadores ajustados para prioridade {res['prioridade']}."
 
 
-@ferramenta("Monitora a temperatura da CPU/GPU e alivia processos secundários caso haja risco de thermal throttling.",
-            params={"limite_celsius": "Limite térmico de alerta (padrão 82°C)", "simular": "True para não alterar processos"},
+@ferramenta("Consulta a temperatura interna do hardware do PC (CPU/GPU) e, se simular=False, alivia processos secundários em caso de risco de thermal throttling.",
+            params={"limite_celsius": "Limite térmico de alerta (padrão 82°C)", "simular": "True para apenas consultar a temperatura sem alterar processos"},
             risco=BAIXO,
             classificar=lambda **a: Classificacao(BAIXO, "hardware.temperatura", resumo="verificar proteção térmica do hardware"))
 def verificar_protecao_termica(limite_celsius: int = 82, simular: bool = False) -> str:
@@ -2764,3 +2775,99 @@ def celular_controlar(acao: str, valor: str = "") -> str:
 def celular_acao_sensivel(acao: str, destino: str, conteudo: str = "") -> str:
     cmd, args = _resolver_comando_mobile_sensivel(acao, destino, conteudo)
     return _executar_bridge_mobile(cmd, args)
+
+
+# ---------- subagentes e tarefas longas em segundo plano ----------
+def _classificar_delegar_tarefa(objetivo: str = "", perfil: str = "pesquisador", abrir_palco: bool = True) -> Classificacao:
+    import agentes
+    if not str(objetivo or "").strip():
+        return Classificacao(BAIXO, negar="objetivo_vazio")
+    chave = str(perfil or "pesquisador").strip().lower()
+    if chave not in agentes.PERFIS:
+        return Classificacao(BAIXO, negar=f"perfil_desconhecido:{chave[:32]}")
+    return Classificacao(BAIXO, "subagente.delegar", resumo=f"iniciar subagente '{chave}' em segundo plano")
+
+
+@ferramenta(
+    "Delega uma tarefa longa (como pesquisa profunda na web com citações ou análise de arquivos autorizados) "
+    "para um subagente em segundo plano, devolvendo imediatamente o identificador da tarefa sem travar a conversa.",
+    params={
+        "objetivo": "Descrição clara do que pesquisar ou analisar",
+        "perfil": "Perfil do subagente: 'pesquisador' (padrão, pesquisa profunda na web) ou 'analista_arquivos'",
+        "abrir_palco": "Se verdadeiro (padrão), abre o relatório final no palco ao concluir",
+    },
+    risco=BAIXO,
+    classificar=_classificar_delegar_tarefa,
+)
+def delegar_tarefa(objetivo: str, perfil: str = "pesquisador", abrir_palco: bool = True) -> str:
+    import tarefas_longas
+    origem = _ORIGEM_ATUAL.get()
+    if str(origem or "").startswith("subagente"):
+        return "AÇÃO NEGADA: subagentes não podem iniciar outros subagentes."
+    try:
+        info = tarefas_longas.iniciar(
+            objetivo,
+            perfil=perfil,
+            abrir_palco=bool(abrir_palco),
+            origem=origem,
+        )
+    except (ValueError, RuntimeError) as err:
+        return f"Não foi possível iniciar a tarefa em segundo plano: {err}"
+    return (
+        f"Tarefa iniciada em segundo plano (id: {info['id']}, perfil: {info['perfil_nome']}). "
+        f"Você pode continuar conversando normalmente; aviso quando concluir."
+    )
+
+
+@ferramenta(
+    "Lista o andamento das tarefas longas em segundo plano (subagentes ativos e recentes).",
+    risco=BAIXO,
+    classificar=lambda: Classificacao(BAIXO, "subagente.listar", resumo="listar tarefas em segundo plano"),
+)
+def listar_tarefas() -> str:
+    import tarefas_longas
+    itens = tarefas_longas.listar()
+    if not itens:
+        return "Nenhuma tarefa em segundo plano registrada nesta sessão."
+    linhas = []
+    for t in itens[:8]:
+        linhas.append(
+            f"- [{t['id']}] ({t['perfil_nome']}) {t['status']} — {t['etapa']}: {t['objetivo']}"
+        )
+    return "\n".join(linhas)
+
+
+@ferramenta(
+    "Consulta o status ou resultado de uma tarefa em segundo plano pelo identificador (id).",
+    params={"task_id": "Identificador hexadecimal da tarefa (12 caracteres)"},
+    risco=BAIXO,
+    classificar=lambda task_id="": Classificacao(BAIXO, "subagente.consultar", resumo=f"consultar tarefa {task_id}"),
+)
+def consultar_tarefa(task_id: str) -> str:
+    import tarefas_longas
+    info = tarefas_longas.obter(task_id, incluir_relatorio=True)
+    if info is None:
+        return f"Tarefa '{task_id}' não encontrada."
+    if info["status"] == "concluida":
+        trecho = (info.get("relatorio_md") or info.get("resumo") or "")[:3000]
+        return f"Tarefa {info['id']} concluída ({info['fontes_count']} fonte(s)).\n\n{trecho}"
+    if info["status"] == "erro":
+        return f"Tarefa {info['id']} falhou: {info.get('erro') or 'erro interno'}."
+    return f"Tarefa {info['id']} ({info['perfil_nome']}): {info['status']} — {info['etapa']}."
+
+
+@ferramenta(
+    "Cancela uma tarefa em segundo plano pelo identificador (id).",
+    params={"task_id": "Identificador hexadecimal da tarefa (12 caracteres)"},
+    risco=BAIXO,
+    classificar=lambda task_id="": Classificacao(BAIXO, "subagente.cancelar", resumo=f"cancelar tarefa {task_id}"),
+)
+def cancelar_tarefa(task_id: str) -> str:
+    import tarefas_longas
+    try:
+        info = tarefas_longas.cancelar(task_id)
+    except ValueError:
+        return "Identificador de tarefa inválido."
+    except LookupError:
+        return f"Tarefa '{task_id}' não encontrada."
+    return f"Tarefa {info['id']} cancelada ({info['objetivo']})."

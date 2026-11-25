@@ -575,6 +575,15 @@ button { cursor: pointer; border: 0; background: none; }
   position: relative; z-index: 1;
   width: var(--core-size); height: var(--core-size);
   max-width: 100%;
+  transition: transform 300ms var(--ease), filter 300ms var(--ease);
+}
+@keyframes main-orb-levitate {
+  0%, 100% { transform: translateY(4px) scale(1.01); }
+  50%      { transform: translateY(-10px) scale(1.035); }
+}
+.chamber[data-state="respondendo"] .core-frame canvas {
+  animation: main-orb-levitate 2s ease-in-out infinite;
+  filter: drop-shadow(0 12px 26px color-mix(in srgb, var(--core) 36%, transparent));
 }
 
 /* três anéis concêntricos de precisão */
@@ -1885,4 +1894,53 @@ button { cursor: pointer; border: 0; background: none; }
   .drawer { background: var(--ink-2); -webkit-backdrop-filter: none; backdrop-filter: none; }
   .modal, .unlock-frame, .toast { -webkit-backdrop-filter: none; backdrop-filter: none; }
   .modal-backdrop { -webkit-backdrop-filter: none; backdrop-filter: none; background: rgba(2, 3, 6, .92); }
+}
+
+.dock-tasks-card {
+  margin: 0 12px 10px;
+  padding: 10px 12px;
+  border-radius: 12px;
+  border: 1px solid var(--glass-line);
+  background: rgba(255, 255, 255, 0.03);
+}
+.tasks-list {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  margin-top: 8px;
+}
+.task-item {
+  padding: 8px 10px;
+  border-radius: 9px;
+  border: 1px solid rgba(255, 255, 255, 0.07);
+  background: rgba(0, 0, 0, 0.18);
+  display: flex;
+  flex-direction: column;
+  gap: 3px;
+}
+.task-head {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  gap: 8px;
+  font-size: 11px;
+}
+.task-status {
+  text-transform: uppercase;
+  letter-spacing: 0.06em;
+  font-size: 10px;
+  opacity: 0.8;
+}
+.task-obj {
+  margin: 0;
+  font-size: 12px;
+  line-height: 1.3;
+}
+.task-stage {
+  font-size: 11px;
+  opacity: 0.72;
+}
+.task-cancel {
+  align-self: flex-start;
+  margin-top: 4px;
 }

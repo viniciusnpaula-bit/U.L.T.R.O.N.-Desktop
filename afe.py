@@ -101,6 +101,9 @@ class AudioFrontEnd:
         stream_factory: Callable | None = None,
         loopback_factory: Callable | None = None,
         watchdog_timeout_s: float = 2.5,
+        barge_in_livre: bool | None = None,
+        barge_in_blocos_min: int = 6,
+        barge_in_rms_min: float = 0.015,
     ):
         self._modelos_dir = modelos_dir
         self.falando_event = falando_event or threading.Event()
@@ -110,8 +113,13 @@ class AudioFrontEnd:
         self._stream_factory = stream_factory
         self._loopback_factory = loopback_factory
         self._watchdog_timeout_s = float(watchdog_timeout_s)
+        self._barge_in_livre = barge_in_livre
+        self._barge_in_blocos_min = max(2, int(barge_in_blocos_min))
+        self._barge_in_rms_min = max(0.002, float(barge_in_rms_min))
 
         self._lock_motores = threading.RLock()
+        self._lock_consumidores = threading.RLock()
+        self._consumidores_audio: list[Callable[[bytes], None]] = []
         self._vad = None
         self._kws = None
         self._denoiser = None
@@ -136,6 +144,9 @@ class AudioFrontEnd:
         self._wake_no_enunciado = False
         self._blocos_apos_wake = 0
         self._barge_in_wake_ativo = False
+        self._barge_in_fala_ativa = False
+        self._blocos_fala_barge_in = 0
+        self._ultimo_pcm_barge_in: bytes | None = None
         self._silencio_cfg_s = 1.3
         self._max_seg_cfg_s = 15.0
         self._ultimo_barge_in_ts = 0.0
@@ -224,6 +235,40 @@ class AudioFrontEnd:
                 self._enunciados.get_nowait()
             except queue.Empty:
                 break
+
+    def registrar_consumidor_audio(self, cb: Callable[[bytes], None]) -> None:
+        """Registra um consumidor para receber frames PCM 16 kHz limpos (AEC+HPF)."""
+        if not callable(cb):
+            return
+        with self._lock_consumidores:
+            if cb not in self._consumidores_audio:
+                self._consumidores_audio.append(cb)
+
+    def remover_consumidor_audio(self, cb: Callable[[bytes], None]) -> None:
+        with self._lock_consumidores:
+            if cb in self._consumidores_audio:
+                self._consumidores_audio.remove(cb)
+
+    def definir_barge_in_livre(self, ativo: bool | None) -> None:
+        """Ativa/desativa barge-in por fala livre (None = automático quando AEC ativo)."""
+        self._barge_in_livre = ativo if ativo is None else bool(ativo)
+
+    def consumir_pcm_barge_in(self) -> bytes | None:
+        """Devolve e limpa o buffer PCM capturado no último evento de barge-in."""
+        pcm = self._ultimo_pcm_barge_in
+        self._ultimo_pcm_barge_in = None
+        return pcm
+
+    def _barge_in_livre_habilitado(self) -> bool:
+        if self._barge_in_livre is not None:
+            return bool(self._barge_in_livre)
+        if not self.aec_ativo:
+            return False
+        try:
+            import config as _cfg
+            return bool(getattr(_cfg, "VOZ_BARGE_IN_LIVRE", True))
+        except Exception:
+            return True
 
     def _abrir_stream_mic(self):
         def _cb(indata, frames, time_info, status):
@@ -447,20 +492,37 @@ class AudioFrontEnd:
         self.nivel_atual = rms * 32767.0
         self._pre_buffer.append(bloco)
 
+        with self._lock_consumidores:
+            consumidores = list(self._consumidores_audio)
+        if consumidores:
+            pcm_bloco = (np.clip(bloco, -1.0, 1.0) * 32767.0).astype(np.int16).tobytes()
+            for cb in consumidores:
+                try:
+                    cb(pcm_bloco)
+                except Exception:
+                    pass
+
         fala = self._eh_fala_bloco(bloco)
         kws_hit = self._detectar_kws(bloco) if (fala or self._em_fala) else None
 
         if falando:
             if kws_hit in ("para", "wake"):
+                self._blocos_fala_barge_in = 0
                 agora = time.monotonic()
                 duplicado = (kws_hit == self._ultimo_barge_in_tipo) and (agora - self._ultimo_barge_in_ts < 0.4)
                 if not duplicado:
                     self._ultimo_barge_in_ts = agora
                     self._ultimo_barge_in_tipo = kws_hit
+                    pcm_pre = None
+                    if kws_hit == "wake" and self._pre_buffer:
+                        bruto_pre = np.concatenate(list(self._pre_buffer)).astype(np.float32)
+                        pcm_pre = (np.clip(bruto_pre, -1.0, 1.0) * 32767.0).astype(np.int16).tobytes()
+                        self._ultimo_pcm_barge_in = pcm_pre
                     if self.on_barge_in is not None:
-                        self.on_barge_in(kws_hit, None)
+                        self.on_barge_in(kws_hit, pcm_pre)
                     if kws_hit == "wake":
                         self._barge_in_wake_ativo = True
+                        self._barge_in_fala_ativa = False
                         self._em_fala = True
                         self._wake_no_enunciado = True
                         self._blocos_apos_wake = 0
@@ -468,18 +530,45 @@ class AudioFrontEnd:
                         self._blocos_fala = list(self._pre_buffer)
                     else:
                         self._barge_in_wake_ativo = False
+                        self._barge_in_fala_ativa = False
                         self._blocos_fala.clear()
                         self._em_fala = False
-            elif self._barge_in_wake_ativo:
+            elif self._barge_in_wake_ativo or self._barge_in_fala_ativa:
                 self._blocos_fala.append(bloco)
                 if fala:
                     self._blocos_silencio = 0
                     self._blocos_apos_wake += 1
                 else:
                     self._blocos_silencio += 1
+            elif self._barge_in_livre_habilitado():
+                if fala and rms >= self._barge_in_rms_min:
+                    self._blocos_fala_barge_in += 1
+                else:
+                    self._blocos_fala_barge_in = 0
+                if self._blocos_fala_barge_in >= self._barge_in_blocos_min:
+                    self._blocos_fala_barge_in = 0
+                    agora = time.monotonic()
+                    duplicado = (self._ultimo_barge_in_tipo == "fala") and (agora - self._ultimo_barge_in_ts < 0.4)
+                    if not duplicado:
+                        self._ultimo_barge_in_ts = agora
+                        self._ultimo_barge_in_tipo = "fala"
+                        bruto_pre = np.concatenate(list(self._pre_buffer)).astype(np.float32)
+                        pcm_pre = (np.clip(bruto_pre, -1.0, 1.0) * 32767.0).astype(np.int16).tobytes()
+                        self._ultimo_pcm_barge_in = pcm_pre
+                        if self.on_barge_in is not None:
+                            self.on_barge_in("fala", pcm_pre)
+                        self._barge_in_fala_ativa = True
+                        self._barge_in_wake_ativo = False
+                        self._em_fala = True
+                        self._wake_no_enunciado = True
+                        self._blocos_apos_wake = 2
+                        self._blocos_silencio = 0
+                        self._blocos_fala = list(self._pre_buffer)
             return
 
         self._barge_in_wake_ativo = False
+        self._barge_in_fala_ativa = False
+        self._blocos_fala_barge_in = 0
         # Em repouso, "para" não acorda o assistente.
         wake_agora = kws_hit == "wake"
 

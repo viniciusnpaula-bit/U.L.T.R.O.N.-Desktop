@@ -11,6 +11,7 @@ const status = () => ({
   microphone_threshold: 400, microphone_level: 180 + 220 * (0.5 + 0.5 * Math.sin(agora() * 1.7)),
   cpu_percent: 23, ram_percent: 58, disk_percent: 71,
   autostart_installed: true, speaking: false,
+  voice_mode: 'auto', voice_live_active: false, barge_in_livre: true, active_tasks_count: 0,
 });
 const fila = [];
 const previewSkills = {
@@ -91,11 +92,17 @@ window.ultron = {
   personalidadeRestaurar: async () => ({ perfil: 'ultron', jeito: 'equilibrado', tratamento: 'senhor',
     saudacao: true, usuario: {} }),
   personalidadePrevia: async () => ({ instrucao: 'Prévia local.' }),
-  vozInfo: async () => ({ vozes: [], ativa: { nome: 'Padrão' } }),
+  vozInfo: async () => ({
+    vozes: [],
+    preferencias: { voz: 'pt-BR-AntonioNeural', modo: 'auto', barge_in_livre: true },
+    ativas: { id: 'pt-BR-AntonioNeural', reserva: 'pyttsx3', modo: 'auto', barge_in_livre: true, live_disponivel: true },
+  }),
   vozSalvar: async valores => valores,
   vozRestaurar: async () => ({ ok: true }),
   vozTestar: async () => ({ ok: true }),
   microfoneTestar: async () => ({ ok: true }),
+  tarefasListar: async () => ({ tarefas: [], ativas: 0 }),
+  tarefaCancelar: async id => ({ cancelada: { id, status: 'cancelada' }, tarefas: [], ativas: 0 }),
   cofreStatus: async () => ({ itens: [] }),
   cofreGuardar: async () => ({ ok: true }),
   cofreRemover: async () => ({ ok: true }),

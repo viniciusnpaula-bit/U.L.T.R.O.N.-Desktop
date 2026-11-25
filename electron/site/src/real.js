@@ -54,6 +54,8 @@ export class RealTransport {
           this.onEvent({ event: 'PALCO_SHOW', data: event.palco || null });
         } else if (event.type === 'palco_hide') {
           this.onEvent({ event: 'PALCO_HIDE', data: {} });
+        } else if (event.type === 'task_update') {
+          this.onEvent({ event: 'TASK_UPDATE', data: event.tarefa || null });
         }
       }
     } catch {
@@ -74,6 +76,8 @@ export class RealTransport {
   confirm(requestId, approved, pin) { return this.bridge.confirmation(requestId, approved, pin); }
   unlockInfo() { return this.bridge.unlockInfo(); }
   undoList() { return this.bridge.undoList(); }
+  tarefasListar() { return this.bridge.tarefasListar ? this.bridge.tarefasListar() : Promise.resolve({ tarefas: [], ativas: 0 }); }
+  tarefaCancelar(id) { return this.bridge.tarefaCancelar ? this.bridge.tarefaCancelar(id) : Promise.resolve(null); }
   unlockHello() { return this.bridge.unlockHello(); }
   unlockPin(pin) { return this.bridge.unlockPin(pin); }
   lock() { return this.bridge.lock(); }

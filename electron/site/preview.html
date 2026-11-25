@@ -127,6 +127,13 @@
           <button type="button" class="ghost tiny" id="dockPairOpen">QR Code</button>
         </div>
       </div>
+      <div class="dock-tasks-card" id="tasksCard" hidden>
+        <div class="dock-pair-top">
+          <span class="eyebrow">subagentes</span>
+          <span class="dock-pair-badge" id="tasksCount">0 ativas</span>
+        </div>
+        <div class="tasks-list" id="tasksList"></div>
+      </div>
       <div class="undo-list" id="undoList"></div>
       <button type="button" class="ghost undo-action" id="undoAction" disabled>desfazer a última</button>
       <div class="dock-signals">
@@ -245,6 +252,18 @@
           <button class="ghost" id="testVoice">testar voz</button>
           <button class="ghost" id="saveVoice">usar esta voz</button>
         </div>
+        <div class="field-col">
+          <label for="voiceModeSelect">modo de áudio</label>
+          <select id="voiceModeSelect">
+            <option value="auto">Automático (Gemini Live com fallback)</option>
+            <option value="live">Tempo real (Gemini Live)</option>
+            <option value="classico">Clássico (STT + Edge TTS)</option>
+          </select>
+        </div>
+        <div class="field-row">
+          <button type="button" class="ghost" id="bargeInToggle" aria-pressed="true">interrupção por voz (barge-in): ativo</button>
+        </div>
+        <p class="micro nano" id="voiceModeNote" role="status">--</p>
         <p class="micro nano" id="testResult" role="status">--</p>
       </div>
 
@@ -521,6 +540,17 @@
           <option value="top-right">Topo · Direita</option>
           <option value="right">Lateral · Direita</option>
           <option value="left">Lateral · Esquerda</option>
+        </select>
+      </div>
+      <div class="island-mode-row" id="orbTeleportRow">
+        <label for="orbTeleportSelect">teleporte do núcleo</label>
+        <select id="orbTeleportSelect" title="Intervalo para o núcleo solto teleportar pela tela em segundo plano">
+          <option value="0">Desligado (fixo)</option>
+          <option value="5">A cada 5 segundos</option>
+          <option value="10" selected>A cada 10 segundos</option>
+          <option value="15">A cada 15 segundos</option>
+          <option value="30">A cada 30 segundos</option>
+          <option value="60">A cada 60 segundos</option>
         </select>
       </div>
       <div class="canal-actions">

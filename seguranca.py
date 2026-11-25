@@ -113,7 +113,7 @@ def log_seg(origem, acao, risco, decisao, motivo, args=None, resultado=None, usu
     _log_seg.info(" ".join(partes))
 
 
-_RASTREIO_ORIGENS = {"voz", "desktop", "telegram", "mobile", "terminal", "chat", "hud", "desconhecida"}
+_RASTREIO_ORIGENS = {"voz", "voz_live", "desktop", "telegram", "mobile", "terminal", "chat", "hud", "subagente", "desconhecida"}
 _RASTREIO_EVENTOS = {"intent_selected", "tool_selected", "tool_finished", "step_started", "step_finished"}
 _RASTREIO_ACOES = {
     "rocket", "modo_jogo", "minimizar", "hora", "spotify", "conversa",
@@ -126,6 +126,8 @@ _RASTREIO_ACOES = {
     "criar_lembrete", "listar_lembretes", "desfazer",
     "celular_status", "celular_consultar", "celular_controlar", "celular_acao_sensivel",
     "spotify_adicionar_playlist", "spotify_listar_playlists",
+    "delegar_tarefa", "listar_tarefas", "consultar_tarefa", "cancelar_tarefa",
+    "verificar_protecao_termica",
 }
 _RASTREIO_ETAPAS = {"-", "intent", "tool_call", "rocket_league", "spotify", "minimizar_janelas", "desfazer"}
 _RASTREIO_ESTADOS = {"selected", "started", "success", "failure", "denied", "cancelled", "returned"}
@@ -189,7 +191,7 @@ IRREVERSIVEIS = frozenset({
 # ALTO e reversíveis, mas capturam imagem ou tomam o ponteiro: confirmam sempre.
 SEMPRE_CONFIRMAR = frozenset({"ver_tela", "webcam_foto", "controlar_mouse_com_gesto"})
 # Só canais que existem de verdade ganham o atalho; telegram/fluxo/teste ficam fora.
-ORIGENS_LOCAIS = frozenset({"desktop", "voz", "terminal"})
+ORIGENS_LOCAIS = frozenset({"desktop", "voz", "voz_live", "terminal"})
 ORIGENS_ADMIN = frozenset({"desktop", "voz", "terminal", "bloco1", "bloco2", "agendado", "fluxo"})
 
 
@@ -291,6 +293,13 @@ def autorizar(cls, ferramenta="", origem="desconhecida"):
     """Decide ALLOW / CONFIRM / DENY para uma ação já classificada. Devolve (decisão, motivo)."""
     if cls.negar:
         return DENY, cls.negar
+    if str(origem or "").startswith("subagente"):
+        # Subagentes em segundo plano são fail-closed: só risco BAIXO na allowlist.
+        if cls.risco != BAIXO:
+            return DENY, "subagent_risk_not_allowed"
+        if not cls.na_allowlist:
+            return DENY, "subagent_outside_allowlist"
+        return ALLOW, "subagent_low_risk_allowed"
     if modo_admin_ativo(origem):
         return ALLOW, "admin_operational_mode"
     if cls.risco == BAIXO:

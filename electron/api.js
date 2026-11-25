@@ -5,6 +5,7 @@ const MAX_COMMAND_LENGTH = 4000;
 const FLUXO_ID_RE = /^[a-z0-9][a-z0-9._-]{0,39}$/;
 const OPERATION_ID_RE = /^[a-f0-9]{32}$/;
 const SKILL_SLUG_RE = /^[a-z0-9][a-z0-9-]{0,39}$/;
+const TASK_ID_RE = /^[a-f0-9]{12}$/;
 const SKILL_ESTADOS = new Set(['ativo', 'obsoleto', 'arquivado']);
 const SAFE_CONFLICT_RE = /^(skill pendente não encontrada: [a-z0-9-]+|já existe skill com esse nome: [a-z0-9-]+|limite de \d+ skills ativas:.*|nome de skill inválido|fila de skills cheia:.*)$/i;
 
@@ -170,6 +171,13 @@ function createApiClient({ baseUrl, token, fetchImpl = fetch }) {
         throw new Error('Resposta inválida da API local.');
       }
       return result;
+    },
+    tarefasListar: () => request('GET', '/tarefas'),
+    tarefaCancelar: id => {
+      if (typeof id !== 'string' || !TASK_ID_RE.test(id)) {
+        throw new TypeError('Identificador de tarefa inválido.');
+      }
+      return request('POST', '/tarefas/cancelar', { id });
     },
     lembretesListar: () => request('GET', '/lembretes'),
     vozInfo: () => request('GET', '/voz'),

@@ -87,6 +87,7 @@ _GRUPOS = {
                   "listar_jogos", "remover_fluxo"),
     "celular": ("celular_acao_sensivel", "celular_consultar", "celular_controlar", "celular_status"),
     "skills": ("criar_skill", "descartar_skill", "listar_skills", "usar_skill"),
+    "subagentes": ("cancelar_tarefa", "consultar_tarefa", "delegar_tarefa", "listar_tarefas"),
     "desfazer": ("desfazer",),
 }
 GRUPOS_FERRAMENTAS = _GRUPOS
