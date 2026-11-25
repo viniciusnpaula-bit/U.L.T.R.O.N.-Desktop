@@ -1,7 +1,7 @@
 /* Pré-visualização local da interface: mock do núcleo para ver a tela no navegador.
    Não faz parte do app; o Electron injeta a ponte real (preload.js). */
 const verbose = new URLSearchParams(location.search).has('live');
-let estadoVersao = '3.0.0';
+let estadoVersao = '3.1.0';
 let jobUpdate = null;
 const agora = () => Date.now() / 1000;
 const status = () => ({
@@ -38,9 +38,9 @@ window.ultron = {
   microphone: async paused => ({ paused }),
   conversation: async () => ({ turns: [] }),
   clearConversation: async () => ({ ok: true }),
-  version: '3.0.0',
-  updateInfo: async () => ({ current_version: '3.0.0', auto_check: false, job: null }),
-  updateCheck: async () => ({ status: 'ok', current_version: '3.0.0', latest_version: '3.0.0', update_available: false, notes: '' }),
+  version: '3.1.0',
+  updateInfo: async () => ({ current_version: '3.1.0', auto_check: false, job: null }),
+  updateCheck: async () => ({ status: 'ok', current_version: '3.1.0', latest_version: '3.1.0', update_available: false, notes: '' }),
   updateApply: async () => ({ status: 'baixando' }),
   updateLaunch: async () => true,
   updateRollback: async () => true,
@@ -74,7 +74,7 @@ window.ultron = {
     hello: { disponivel: true, motivo: 'Windows Hello pronto' },
     pin_configurado: true,
     irreversiveis: ['apagar_arquivo', 'executar_comando'],
-    versao: '3.0.0',
+    versao: '3.1.0',
     historico: { cifrado: true, algoritmo: 'AES-256-GCM', chave: 'DPAPI', migrado: true },
   }),
   unlockHello: async () => ({ unlocked: true, method: 'hello' }),

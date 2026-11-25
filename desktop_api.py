@@ -20,7 +20,7 @@ def _obter_versao() -> str:
             return versao
     except (OSError, ValueError, AttributeError):
         pass
-    return "3.0.0"
+    return "3.1.0"
 
 
 

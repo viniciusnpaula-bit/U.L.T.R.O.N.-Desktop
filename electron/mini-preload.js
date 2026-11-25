@@ -13,5 +13,5 @@ contextBridge.exposeInMainWorld('ultron', Object.freeze({
   runHudAction: actionId => ipcRenderer.invoke('hud:action', actionId),
   sendHudCommand: text => ipcRenderer.invoke('hud:command', text),
   quitApp: () => ipcRenderer.invoke('hud:quit'),
-  version: '3.0.0',
+  version: '3.1.0',
 }));

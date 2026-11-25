@@ -1523,7 +1523,7 @@ painelBlocos.vincularControles();
      2. baixar, conferir o SHA-256 e aplicar;
      3. se sobrar arquivo em uso, pedir o reinício (ou reiniciar na hora, se o
         usuário confirmar). O progresso aparece na própria barra.               */
-const updateUi = { job: null, timer: null, version: window.ultron?.version || '3.0.0', busy: false };
+const updateUi = { job: null, timer: null, version: window.ultron?.version || '3.1.0', busy: false };
 
 function updateLinha(texto, classe = '') {
   const alvo = $('updateState');

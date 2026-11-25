@@ -1,3 +1,10 @@
+ULTRON Desktop 3.1.0 — Barge-in livre, Gemini Live em tempo real, subagentes em segundo plano e atalho de temperatura
+
+- **Barge-in por fala livre e player PCM em streaming (`afe.py`, `voz.py`, `config.py`):** interrupção imediata da fala durante reprodução via AEC + WASAPI loopback (`VOZ_BARGE_IN_LIVRE`), preservando o pré-buffer do enunciado sem exigir repetir a palavra de despertar, além do `ReprodutorPcmStream` (24 kHz) com corte instantâneo em `parar_fala()`.
+- **Modo de voz em tempo real (`voz_live.py`, `main.py`):** sessão WebSocket bidirecional com Gemini Live (`VOZ_MODO=auto|live|classico`), chave apenas no cabeçalho `x-goog-api-key`, transcrição salva no SQLite cifrado, ponte segura de ferramentas passando por `ferramentas.executar()` e fallback automático para o pipeline clássico.
+- **Subagentes especializados e tarefas longas (`agentes.py`, `tarefas_longas.py`, `seguranca.py`, `ferramentas.py`):** perfis restritos (`pesquisador` para pesquisa profunda com citações e `analista_arquivos`), política *fail-closed* para origens `subagente:*`, gravação redigida em `dados/relatorios/`, publicação no Palco, rotas `/api/v1/tarefas` e card em tempo real no painel Electron.
+- **Atalhos locais de temperatura (`cerebro.py`, `ferramentas.py`):** roteamento instantâneo de *"temperatura"* / *"temperatura do dia"* para `clima` (sem chamar LLM nem busca genérica na web) e de pedidos explícitos de hardware (*"temperatura do PC/CPU/GPU"*) para `verificar_protecao_termica(simular=True)`.
+
 ULTRON Desktop 3.0.0 — HUD/Orb flutuante, Spotify playlists, sessão de 1h, wake-word multi-perfil e instalador nativo
 
 - **Spotify Playlists & Músicas Curtidas (`spotify.py`, `ferramentas.py`, `cerebro.py`):** novas ferramentas `spotify_adicionar_playlist` e `spotify_listar_playlists`, atalhos rápidos de voz/texto (*"adiciona essa música na playlist X"*, *"curte essa música"*), suporte aos endpoints atuais da Web API do Spotify (`/me/library` e `/playlists/{id}/items`), prevenção de duplicatas e atualização automática do cache de token no `cofre.py` e `tools/autorizar_spotify.py`.

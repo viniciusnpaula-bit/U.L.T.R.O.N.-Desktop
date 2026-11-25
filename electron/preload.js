@@ -84,7 +84,7 @@ contextBridge.exposeInMainWorld('ultron', Object.freeze({
     return () => ipcRenderer.removeListener('hud:run-command', listener);
   },
   hudActionResult: (requestId, accepted) => ipcRenderer.send('hud:action-result', requestId, accepted === true),
-  version: '3.0.0',
+  version: '3.1.0',
   onSessionLocked: callback => {
     const listener = () => callback();
     ipcRenderer.on('session:locked', listener);
